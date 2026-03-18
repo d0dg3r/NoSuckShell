@@ -1761,6 +1761,26 @@ body,
   animation: pane-swap-pulse 0.22s ease-out;
 }
 
+.split-pane.is-host-hover-target {
+  border-color: rgba(108, 242, 191, 0.9);
+  box-shadow:
+    0 0 14px rgba(108, 242, 191, 0.2),
+    inset 0 0 0 1px rgba(108, 242, 191, 0.28);
+}
+
+.split-pane.is-host-hover-dimmed {
+  opacity: 0.68;
+  filter: saturate(0.82);
+}
+
+.split-pane.is-host-hover-target.is-focused {
+  border-color: rgba(102, 216, 255, 0.95);
+  box-shadow:
+    0 0 18px rgba(102, 216, 255, 0.24),
+    0 0 12px rgba(108, 242, 191, 0.18),
+    inset 0 0 0 1px rgba(102, 216, 255, 0.4);
+}
+
 @keyframes pane-swap-pulse {
   0% {
     transform: scale(0.992);

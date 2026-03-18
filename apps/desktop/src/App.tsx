@@ -67,16 +67,6 @@ type SessionTab = {
   id: string;
   host: string;
 };
-type SessionLaneKey = "assigned" | "connectedUnassigned" | "idle";
-type SessionLaneViewModel = {
-  session: SessionTab;
-  paneIndex: number | null;
-  isAssigned: boolean;
-  isActive: boolean;
-  isConnected: boolean;
-  isBroadcastTarget: boolean;
-  laneKey: SessionLaneKey;
-};
 
 type HostStatusFilter = "all" | "connected" | "disconnected";
 type HostRowViewModel = {
@@ -129,7 +119,6 @@ const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
-const SESSION_STRIP_EXPANDED_STORAGE_KEY = "nosuckshell.sessions.strip.expanded";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
 const SESSION_DROP_POLICY: SessionDropPolicy = "spawn_new_from_host";
 const hasTauriTransformCallback = (): boolean => {
@@ -338,12 +327,7 @@ export function App() {
     return persisted !== "false";
   });
   const [isSidebarVisible, setIsSidebarVisible] = useState<boolean>(true);
-  const [isSessionStripExpanded, setIsSessionStripExpanded] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return true;
-    }
-    return window.localStorage.getItem(SESSION_STRIP_EXPANDED_STORAGE_KEY) !== "false";
-  });
+  const [hoveredHostAlias, setHoveredHostAlias] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
@@ -377,15 +361,6 @@ export function App() {
     [newHostDraft],
   );
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
-  const paneIndexBySessionId = useMemo(() => {
-    const indexMap = new Map<string, number>();
-    splitSlots.forEach((slot, paneIndex) => {
-      if (slot) {
-        indexMap.set(slot, paneIndex);
-      }
-    });
-    return indexMap;
-  }, [splitSlots]);
   const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
   const hasAssignedPaneSessions = useMemo(() => splitSlots.some((slot) => Boolean(slot)), [splitSlots]);
   const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
@@ -394,61 +369,7 @@ export function App() {
     [layoutProfiles, selectedLayoutProfileId],
   );
   const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
-  const sessionLaneItems = useMemo<SessionLaneViewModel[]>(() => {
-    return [...sessions]
-      .map((session) => {
-        const paneIndex = paneIndexBySessionId.get(session.id) ?? null;
-        const isAssigned = paneIndex !== null;
-        const isActive = activeSession === session.id;
-        const isConnected = connectedHosts.has(session.host);
-        const isBroadcastTarget = broadcastTargets.has(session.id);
-        const laneKey: SessionLaneKey = isAssigned ? "assigned" : isConnected ? "connectedUnassigned" : "idle";
-        return {
-          session,
-          paneIndex,
-          isAssigned,
-          isActive,
-          isConnected,
-          isBroadcastTarget,
-          laneKey,
-        };
-      })
-      .sort((a, b) => {
-        if (a.laneKey !== b.laneKey) {
-          const laneWeight: Record<SessionLaneKey, number> = {
-            assigned: 0,
-            connectedUnassigned: 1,
-            idle: 2,
-          };
-          return laneWeight[a.laneKey] - laneWeight[b.laneKey];
-        }
-        if (a.laneKey === "assigned" && b.laneKey === "assigned") {
-          if (a.isActive !== b.isActive) {
-            return a.isActive ? -1 : 1;
-          }
-          return (a.paneIndex ?? Number.POSITIVE_INFINITY) - (b.paneIndex ?? Number.POSITIVE_INFINITY);
-        }
-        return a.session.host.localeCompare(b.session.host);
-      });
-  }, [activeSession, broadcastTargets, connectedHosts, paneIndexBySessionId, sessions]);
-  const assignedLaneSessions = useMemo(
-    () => sessionLaneItems.filter((item) => item.laneKey === "assigned"),
-    [sessionLaneItems],
-  );
-  const connectedUnassignedLaneSessions = useMemo(
-    () => sessionLaneItems.filter((item) => item.laneKey === "connectedUnassigned"),
-    [sessionLaneItems],
-  );
-  const idleLaneSessions = useMemo(() => sessionLaneItems.filter((item) => item.laneKey === "idle"), [sessionLaneItems]);
   const isSidebarOpen = isSidebarPinned || isSidebarVisible;
-  const sessionLaneSummary = useMemo(
-    () => ({
-      assigned: assignedLaneSessions.length,
-      connectedUnassigned: connectedUnassignedLaneSessions.length,
-      idle: idleLaneSessions.length,
-    }),
-    [assignedLaneSessions.length, connectedUnassignedLaneSessions.length, idleLaneSessions.length],
-  );
 
 
   const activeHostMetadata = useMemo(() => {
@@ -523,6 +444,22 @@ export function App() {
     [filteredHostRows],
   );
   const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+  const hoveredHostPaneIndices = useMemo(() => {
+    if (!hoveredHostAlias) {
+      return new Set<number>();
+    }
+    const hoveredSessions = new Set(
+      sessions.filter((session) => session.host === hoveredHostAlias).map((session) => session.id),
+    );
+    const paneIndices = new Set<number>();
+    splitSlots.forEach((slot, paneIndex) => {
+      if (slot && hoveredSessions.has(slot)) {
+        paneIndices.add(paneIndex);
+      }
+    });
+    return paneIndices;
+  }, [hoveredHostAlias, sessions, splitSlots]);
+  const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
   const swapPulsePaneSet = useMemo(() => new Set(swapPulsePaneIndices), [swapPulsePaneIndices]);
   const dragGhostLabel = useMemo(() => {
     if (panePointerDragSource === null) {
@@ -718,9 +655,6 @@ export function App() {
       setIsSidebarVisible(true);
     }
   }, [isSidebarPinned]);
-  useEffect(() => {
-    window.localStorage.setItem(SESSION_STRIP_EXPANDED_STORAGE_KEY, String(isSessionStripExpanded));
-  }, [isSessionStripExpanded]);
 
   useEffect(() => {
     if (!isSidebarResizing) {
@@ -1133,10 +1067,7 @@ export function App() {
     }
   };
 
-  const connectToHost = async (
-    host: HostConfig,
-    options?: { autoAssignToFirstFreePane?: boolean },
-  ): Promise<string | null> => {
+  const connectToHost = async (host: HostConfig): Promise<string | null> => {
     if (!host.host.trim() || !host.hostName.trim()) {
       setError("Host alias and HostName are required.");
       return null;
@@ -1166,20 +1097,6 @@ export function App() {
       setActiveSession(started.session_id);
       setActiveHost(host.host);
       setCurrentHost(host);
-      const shouldAutoAssign = options?.autoAssignToFirstFreePane ?? true;
-      setSplitSlots((prev) => {
-        if (!shouldAutoAssign) {
-          return prev;
-        }
-        if (prev.includes(started.session_id)) {
-          return prev;
-        }
-        const firstFree = paneOrder.find((paneIndex) => prev[paneIndex] === null);
-        if (typeof firstFree === "number" && firstFree >= 0) {
-          return assignSessionToPane(prev, firstFree, started.session_id);
-        }
-        return assignSessionToPane(prev, activePaneIndex, started.session_id);
-      });
       const lastUsedAt = Math.floor(Date.now() / 1000);
       setMetadataStore((prev) => ({
         ...prev,
@@ -1200,7 +1117,7 @@ export function App() {
   };
 
   const connectToHostInNewPane = async (host: HostConfig): Promise<void> => {
-    const startedSessionId = await connectToHost(host, { autoAssignToFirstFreePane: false });
+    const startedSessionId = await connectToHost(host);
     if (!startedSessionId) {
       return;
     }
@@ -1227,50 +1144,21 @@ export function App() {
     // #endregion
   };
 
-  const ensureSessionForHost = async (
-    hostAlias: string,
-    options?: { autoAssignToFirstFreePane?: boolean },
-  ): Promise<string | null> => {
-    const assignedSessionIds = new Set(splitSlots.filter((slot): slot is string => Boolean(slot)));
-    const reusableSession = sessions.find(
-      (session) => session.host === hostAlias && !assignedSessionIds.has(session.id),
-    );
-    if (reusableSession) {
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-        body: JSON.stringify({
-          sessionId: "be74dc",
-          runId: "dnd-branch-debug",
-          hypothesisId: "H7",
-          location: "App.tsx:ensureSessionForHost",
-          message: "reusing existing unassigned session",
-          data: { hostAlias, sessionId: reusableSession.id },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      setActiveSession(reusableSession.id);
-      return reusableSession.id;
-    }
+  const ensureSessionForHost = async (hostAlias: string): Promise<string | null> => {
     const host = hosts.find((entry) => entry.host === hostAlias);
     if (!host) {
       setError(`Host '${hostAlias}' not found.`);
       return null;
     }
-    return connectToHost(host, options);
+    return connectToHost(host);
   };
-  const spawnSessionFromHostAlias = async (
-    hostAlias: string,
-    options?: { autoAssignToFirstFreePane?: boolean },
-  ): Promise<string | null> => {
+  const spawnSessionFromHostAlias = async (hostAlias: string): Promise<string | null> => {
     const host = hosts.find((entry) => entry.host === hostAlias);
     if (!host) {
       setError(`Host '${hostAlias}' not found.`);
       return null;
     }
-    return connectToHost(host, options);
+    return connectToHost(host);
   };
 
   const setDragPayload = (event: ReactDragEvent, payload: DragPayload) => {
@@ -1457,18 +1345,24 @@ export function App() {
       if (!sourceSession) {
         return;
       }
-      const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host, { autoAssignToFirstFreePane: false });
+      const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host);
       if (!spawnedSessionId) {
         return;
       }
       placeSessionOnPane(spawnedSessionId);
       return;
     }
-    const sessionId = await ensureSessionForHost(payload.hostAlias, { autoAssignToFirstFreePane: false });
-    if (!sessionId) {
-      return;
+    if (sessionDropMode === "move") {
+      const existingSession = sessions.find((session) => session.host === payload.hostAlias) ?? null;
+      if (existingSession) {
+        placeSessionOnPane(existingSession.id);
+        return;
+      }
     }
-    placeSessionOnPane(sessionId);
+    const sessionId = await ensureSessionForHost(payload.hostAlias);
+    if (sessionId) {
+      placeSessionOnPane(sessionId);
+    }
   };
 
   const resolveDropEffect = (event: ReactDragEvent): DataTransfer["dropEffect"] => {
@@ -1529,23 +1423,16 @@ export function App() {
     return "copy";
   };
 
-  const getSessionDropHint = (): string => {
-    return sessionDropMode === "spawn"
-      ? "Drop on a pane to open a new session for this host."
-      : "Drop on a pane to move this session.";
-  };
-
   const getEmptyPaneDropHint = (): string => {
     if (draggingKind === "pane") {
       return "Drop pane here to swap.";
     }
-    if (draggingKind === "session") {
-      return sessionDropMode === "spawn" ? "Drop session to open new one." : "Drop session to move it.";
-    }
     if (draggingKind === "machine") {
-      return "Drop machine here to open a session.";
+      return sessionDropMode === "move"
+        ? "Drop host to move an existing session."
+        : "Drop host to open a new session.";
     }
-    return "Drag a machine or session here.";
+    return "Drag a host here.";
   };
   const getSessionModifierModeText = (): string =>
     sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
@@ -1580,19 +1467,6 @@ export function App() {
   const requestTerminalFocus = useCallback((sessionId: string) => {
     window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
   }, []);
-  const activateSessionInAssignedPane = useCallback(
-    (sessionId: string) => {
-      const assignedPaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
-      setActiveSession(sessionId);
-      if (assignedPaneIndex >= 0) {
-        setActivePaneIndex(assignedPaneIndex);
-        window.requestAnimationFrame(() => {
-          requestTerminalFocus(sessionId);
-        });
-      }
-    },
-    [requestTerminalFocus, splitSlots],
-  );
 
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
@@ -1714,27 +1588,10 @@ export function App() {
   };
 
   const handleContextAction = async (actionId: ContextActionId, paneIndex: number) => {
-    const paneSessionId = splitSlots[paneIndex] ?? null;
     setActivePaneIndex(paneIndex);
     switch (actionId) {
-      case "pane.focus":
-        if (paneSessionId) {
-          setActiveSession(paneSessionId);
-          requestTerminalFocus(paneSessionId);
-        }
-        break;
-      case "pane.assignActiveSession":
-        if (activeSession) {
-          setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, activeSession));
-        }
-        break;
       case "pane.clear":
         setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
-        break;
-      case "pane.closeSession":
-        if (paneSessionId) {
-          await closeSessionById(paneSessionId);
-        }
         break;
       case "pane.close":
         await closePaneAndSession(paneIndex);
@@ -1751,12 +1608,6 @@ export function App() {
       case "layout.split.bottom":
         splitFocusedPane("bottom", paneIndex);
         break;
-      case "layout.reset":
-        resetPaneLayout();
-        break;
-      case "broadcast.off":
-        setBroadcastMode(false);
-        break;
       case "broadcast.clearTargets":
         setBroadcastTargets(new Set());
         break;
@@ -1771,11 +1622,6 @@ export function App() {
         break;
       case "broadcast.togglePaneTarget":
         togglePaneTarget(paneIndex);
-        break;
-      case "session.close":
-        if (activeSession) {
-          await closeSessionById(activeSession);
-        }
         break;
       default:
         break;
@@ -1974,7 +1820,7 @@ export function App() {
         } else if (hosts.some((host) => host.host === pane.hostAlias)) {
           const hostConfig = hosts.find((host) => host.host === pane.hostAlias) ?? null;
           if (hostConfig) {
-            sessionId = await connectToHost(hostConfig, { autoAssignToFirstFreePane: false });
+            sessionId = await connectToHost(hostConfig);
           }
         }
         if (sessionId) {
@@ -2031,6 +1877,8 @@ export function App() {
       const paneIndex = node.paneIndex;
       const paneSessionId = splitSlots[paneIndex] ?? null;
       const paneIdentity = resolvePaneIdentity(paneIndex);
+      const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
+      const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
       return (
         <div
           key={`pane-${paneIndex}`}
@@ -2039,6 +1887,8 @@ export function App() {
             dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
           } ${panePointerDragSource === paneIndex ? "is-being-dragged" : ""} ${
             swapPulsePaneSet.has(paneIndex) ? "is-swap-pulse" : ""
+          } ${isHoverTarget ? "is-host-hover-target" : ""} ${isHoverDimmed ? "is-host-hover-dimmed" : ""} ${
+            hoveredHostAlias ? "is-host-hovering" : ""
           }`}
           draggable={false}
           onClick={() => {
@@ -2300,6 +2150,8 @@ export function App() {
         className={`host-item ${row.connected ? "is-connected" : "is-disconnected"} ${
           activeHost === row.host.host ? "is-active" : ""
         }`}
+        onMouseEnter={() => setHoveredHostAlias(row.host.host)}
+        onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
         onClick={() => selectHost(row.host.host)}
         onDoubleClick={() => {
           void connectToHostInNewPane(row.host);
@@ -2631,222 +2483,14 @@ export function App() {
       <section className="right-dock panel">
         <div className="sessions-workspace">
           <div className="sessions-zone">
-            <div className={`session-top-strip ${isSessionStripExpanded ? "is-expanded" : "is-collapsed"}`}>
-              <div className="session-top-strip-head">
-                <div className="session-top-strip-title-wrap">
-                  <strong className="session-top-strip-title">Sessions</strong>
-                  <div className="session-top-strip-summary">
-                    <span className="context-pill">{`Assigned: ${sessionLaneSummary.assigned}`}</span>
-                    <span className="context-pill">{`Connected: ${sessionLaneSummary.connectedUnassigned}`}</span>
-                    {sessionLaneSummary.idle > 0 && <span className="context-pill">{`Idle: ${sessionLaneSummary.idle}`}</span>}
-                  </div>
-                </div>
-                <div className="session-top-strip-controls">
-                  <div className="session-drop-mode-toggle" role="group" aria-label="Session drop mode">
-                    <button
-                      type="button"
-                      className={`btn session-drop-mode-btn ${sessionDropMode === "spawn" ? "is-active" : ""}`}
-                      aria-pressed={sessionDropMode === "spawn"}
-                      onClick={() => setSessionDropMode("spawn")}
-                      title="Session drop opens a new session"
-                    >
-                      Spawn
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn session-drop-mode-btn ${sessionDropMode === "move" ? "is-active" : ""}`}
-                      aria-pressed={sessionDropMode === "move"}
-                      onClick={() => setSessionDropMode("move")}
-                      title="Session drop moves existing session"
-                    >
-                      Move
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn session-strip-toggle-btn"
-                    aria-expanded={isSessionStripExpanded}
-                    onClick={() => setIsSessionStripExpanded((prev) => !prev)}
-                    title={isSessionStripExpanded ? "Collapse sessions strip" : "Expand sessions strip"}
-                  >
-                    {isSessionStripExpanded ? "Hide list" : "Show list"}
-                  </button>
-                </div>
+            {draggingKind === "machine" && (
+              <div className={`session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`} role="status" aria-live="polite">
+                <span className="session-dnd-mode-key">Host drop mode</span>
+                <span className="session-dnd-mode-text">
+                  {sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host"}
+                </span>
               </div>
-              <div className={`session-top-strip-body ${isSessionStripExpanded ? "is-open" : ""}`}>
-                <div className="session-top-strip-scroll">
-                  <div className="session-lanes">
-                    {[
-                      { key: "assigned", title: "Assigned + Active", items: assignedLaneSessions },
-                      { key: "connectedUnassigned", title: "Connected + Unassigned", items: connectedUnassignedLaneSessions },
-                      { key: "idle", title: "Idle", items: idleLaneSessions },
-                    ]
-                      .filter((lane) => lane.items.length > 0 || lane.key !== "idle")
-                      .map((lane) => (
-                        <section key={lane.key} className="session-lane">
-                          <header className="session-lane-head">
-                            <h3 className="session-lane-title">{lane.title}</h3>
-                            <span className="session-lane-count">{lane.items.length}</span>
-                          </header>
-                          <div className="session-lane-list">
-                            {lane.items.length === 0 ? (
-                              <div className="session-lane-empty">No sessions in this lane.</div>
-                            ) : (
-                              lane.items.map((laneItem) => (
-                                <div
-                                  key={laneItem.session.id}
-                                  className={`session-card ${laneItem.isActive ? "is-active" : ""} ${
-                                    laneItem.isAssigned ? "is-assigned" : "is-unassigned"
-                                  } ${laneItem.isConnected ? "is-connected" : "is-idle"} ${
-                                    laneItem.isBroadcastTarget ? "is-broadcast-target" : ""
-                                  }`}
-                                  draggable
-                                  onDragStart={(event) => {
-                                    // #region agent log
-                                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                      body: JSON.stringify({
-                                        sessionId: "be74dc",
-                                        runId: "right-drag-check",
-                                        hypothesisId: "H12",
-                                        location: "App.tsx:session.onDragStart",
-                                        message: "session dragstart pointer button info",
-                                        data: {
-                                          button: event.nativeEvent.button,
-                                          buttons: event.nativeEvent.buttons,
-                                          ctrlKey: event.ctrlKey,
-                                          shiftKey: event.shiftKey,
-                                          altKey: event.altKey,
-                                        },
-                                        timestamp: Date.now(),
-                                      }),
-                                    }).catch(() => {});
-                                    // #endregion
-                                    setDragPayload(event, { type: "session", sessionId: laneItem.session.id });
-                                    setDraggingKind("session");
-                                    missingDragPayloadLoggedRef.current = false;
-                                  }}
-                                  onContextMenu={(event) => {
-                                    // #region agent log
-                                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                      body: JSON.stringify({
-                                        sessionId: "be74dc",
-                                        runId: "right-drag-check",
-                                        hypothesisId: "H13",
-                                        location: "App.tsx:session.onContextMenu",
-                                        message: "session context menu triggered",
-                                        data: { button: event.button, buttons: event.buttons },
-                                        timestamp: Date.now(),
-                                      }),
-                                    }).catch(() => {});
-                                    // #endregion
-                                  }}
-                                  onDragEnd={(event) => {
-                                    // #region agent log
-                                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                      body: JSON.stringify({
-                                        sessionId: "be74dc",
-                                        runId: "dnd-drop-entry",
-                                        hypothesisId: "H10",
-                                        location: "App.tsx:sessionDragEnd",
-                                        message: "session drag ended",
-                                        data: {
-                                          dropEffect: event.dataTransfer.dropEffect,
-                                          effectAllowed: event.dataTransfer.effectAllowed,
-                                          dragOverPaneIndex,
-                                          sessionDropMode,
-                                        },
-                                        timestamp: Date.now(),
-                                      }),
-                                    }).catch(() => {});
-                                    // #endregion
-                                    setDraggingKind(null);
-                                    setDragOverPaneIndex(null);
-                                    missingDragPayloadLoggedRef.current = false;
-                                  }}
-                                >
-                                  <button
-                                    className="session-card-main-btn"
-                                    onClick={() => activateSessionInAssignedPane(laneItem.session.id)}
-                                    title={`${laneItem.session.host} - ${getSessionDropHint()}`}
-                                  >
-                                    <span className="session-card-main">{laneItem.session.host}</span>
-                                    <span className="session-card-meta">
-                                      <span className={`session-card-pane-pill ${laneItem.paneIndex === null ? "is-unassigned" : ""}`}>
-                                        {laneItem.paneIndex === null ? "unassigned" : `P${laneItem.paneIndex + 1}`}
-                                      </span>
-                                      <span
-                                        className={`session-card-state-dot ${laneItem.isConnected ? "is-connected" : "is-idle"} ${
-                                          laneItem.isBroadcastTarget ? "is-broadcast-target" : ""
-                                        }`}
-                                        aria-hidden="true"
-                                      />
-                                    </span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="session-card-close"
-                                    aria-label={`Close session ${laneItem.session.host}`}
-                                    title={`Close session ${laneItem.session.host}`}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      void closeSessionById(laneItem.session.id);
-                                    }}
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </section>
-                      ))}
-                  </div>
-                  {draggingKind === "session" && (
-                    <div className={`session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`} role="status" aria-live="polite">
-                      <span className="session-dnd-mode-key">Mode</span>
-                      <span className="session-dnd-mode-text">
-                        {sessionDropMode === "move" ? "Move existing session" : "Open new session from host"}
-                      </span>
-                    </div>
-                  )}
-
-                  {isBroadcastModeEnabled && (
-                    <div className="broadcast-controls">
-                      <div className="broadcast-control-head">
-                        <button
-                          className={`btn ${isBroadcastModeEnabled ? "btn-primary" : ""}`}
-                          onClick={() => setBroadcastMode(!isBroadcastModeEnabled)}
-                        >
-                          Broadcast: {isBroadcastModeEnabled ? "ON" : "OFF"}
-                        </button>
-                        <button className="btn" onClick={() => setBroadcastTargets(new Set())} disabled={broadcastTargets.size === 0}>
-                          Clear
-                        </button>
-                      </div>
-                      <div className="broadcast-target-list">
-                        {sessions.map((session) => (
-                          <button
-                            key={`target-${session.id}`}
-                            className={`target-chip ${broadcastTargets.has(session.id) ? "is-active" : ""}`}
-                            onClick={() => toggleBroadcastTarget(session.id)}
-                            disabled={!isBroadcastModeEnabled}
-                          >
-                            {session.host}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            )}
 
             <div className="session-pane-canvas">
               <div
@@ -2911,6 +2555,26 @@ export function App() {
                   >
                     {pendingCloseAllIntent === "reset" ? "Confirm close+reset" : "Close + reset"}
                   </button>
+                  <div className="session-drop-mode-toggle" role="group" aria-label="Host drop mode">
+                    <button
+                      type="button"
+                      className={`btn session-drop-mode-btn ${sessionDropMode === "spawn" ? "is-active" : ""}`}
+                      aria-pressed={sessionDropMode === "spawn"}
+                      onClick={() => setSessionDropMode("spawn")}
+                      title="Host drop opens a new session"
+                    >
+                      Spawn
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn session-drop-mode-btn ${sessionDropMode === "move" ? "is-active" : ""}`}
+                      aria-pressed={sessionDropMode === "move"}
+                      onClick={() => setSessionDropMode("move")}
+                      title="Host drop moves an existing session"
+                    >
+                      Move
+                    </button>
+                  </div>
                   <select
                     className="input split-profile-select footer-layout-select"
                     value={selectedLayoutProfileId}
@@ -3182,7 +2846,6 @@ export function App() {
         <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
           {buildPaneContextActions({
             paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
-            activeSession,
             canClosePane: paneOrder.length > 1,
             broadcastModeEnabled: isBroadcastModeEnabled,
             broadcastCount: broadcastTargets.size,

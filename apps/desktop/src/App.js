@@ -34,7 +34,6 @@ const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
-const SESSION_STRIP_EXPANDED_STORAGE_KEY = "nosuckshell.sessions.strip.expanded";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
 const SESSION_DROP_POLICY = "spawn_new_from_host";
 const hasTauriTransformCallback = () => {
@@ -235,12 +234,7 @@ export function App() {
         return persisted !== "false";
     });
     const [isSidebarVisible, setIsSidebarVisible] = useState(true);
-    const [isSessionStripExpanded, setIsSessionStripExpanded] = useState(() => {
-        if (typeof window === "undefined") {
-            return true;
-        }
-        return window.localStorage.getItem(SESSION_STRIP_EXPANDED_STORAGE_KEY) !== "false";
-    });
+    const [hoveredHostAlias, setHoveredHostAlias] = useState(null);
     const [contextMenu, setContextMenu] = useState({
         visible: false,
         x: 0,
@@ -267,66 +261,12 @@ export function App() {
     const canSave = useMemo(() => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0, [currentHost]);
     const canCreateHost = useMemo(() => newHostDraft.host.trim().length > 0 && newHostDraft.hostName.trim().length > 0, [newHostDraft]);
     const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
-    const paneIndexBySessionId = useMemo(() => {
-        const indexMap = new Map();
-        splitSlots.forEach((slot, paneIndex) => {
-            if (slot) {
-                indexMap.set(slot, paneIndex);
-            }
-        });
-        return indexMap;
-    }, [splitSlots]);
     const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
     const hasAssignedPaneSessions = useMemo(() => splitSlots.some((slot) => Boolean(slot)), [splitSlots]);
     const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
     const selectedLayoutProfile = useMemo(() => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null, [layoutProfiles, selectedLayoutProfileId]);
     const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
-    const sessionLaneItems = useMemo(() => {
-        return [...sessions]
-            .map((session) => {
-            const paneIndex = paneIndexBySessionId.get(session.id) ?? null;
-            const isAssigned = paneIndex !== null;
-            const isActive = activeSession === session.id;
-            const isConnected = connectedHosts.has(session.host);
-            const isBroadcastTarget = broadcastTargets.has(session.id);
-            const laneKey = isAssigned ? "assigned" : isConnected ? "connectedUnassigned" : "idle";
-            return {
-                session,
-                paneIndex,
-                isAssigned,
-                isActive,
-                isConnected,
-                isBroadcastTarget,
-                laneKey,
-            };
-        })
-            .sort((a, b) => {
-            if (a.laneKey !== b.laneKey) {
-                const laneWeight = {
-                    assigned: 0,
-                    connectedUnassigned: 1,
-                    idle: 2,
-                };
-                return laneWeight[a.laneKey] - laneWeight[b.laneKey];
-            }
-            if (a.laneKey === "assigned" && b.laneKey === "assigned") {
-                if (a.isActive !== b.isActive) {
-                    return a.isActive ? -1 : 1;
-                }
-                return (a.paneIndex ?? Number.POSITIVE_INFINITY) - (b.paneIndex ?? Number.POSITIVE_INFINITY);
-            }
-            return a.session.host.localeCompare(b.session.host);
-        });
-    }, [activeSession, broadcastTargets, connectedHosts, paneIndexBySessionId, sessions]);
-    const assignedLaneSessions = useMemo(() => sessionLaneItems.filter((item) => item.laneKey === "assigned"), [sessionLaneItems]);
-    const connectedUnassignedLaneSessions = useMemo(() => sessionLaneItems.filter((item) => item.laneKey === "connectedUnassigned"), [sessionLaneItems]);
-    const idleLaneSessions = useMemo(() => sessionLaneItems.filter((item) => item.laneKey === "idle"), [sessionLaneItems]);
     const isSidebarOpen = isSidebarPinned || isSidebarVisible;
-    const sessionLaneSummary = useMemo(() => ({
-        assigned: assignedLaneSessions.length,
-        connectedUnassigned: connectedUnassignedLaneSessions.length,
-        idle: idleLaneSessions.length,
-    }), [assignedLaneSessions.length, connectedUnassignedLaneSessions.length, idleLaneSessions.length]);
     const activeHostMetadata = useMemo(() => {
         if (!activeHost) {
             return createDefaultHostMetadata();
@@ -396,6 +336,20 @@ export function App() {
     }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedTagFilter, statusFilter]);
     const connectedHostRows = useMemo(() => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)), [filteredHostRows]);
     const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+    const hoveredHostPaneIndices = useMemo(() => {
+        if (!hoveredHostAlias) {
+            return new Set();
+        }
+        const hoveredSessions = new Set(sessions.filter((session) => session.host === hoveredHostAlias).map((session) => session.id));
+        const paneIndices = new Set();
+        splitSlots.forEach((slot, paneIndex) => {
+            if (slot && hoveredSessions.has(slot)) {
+                paneIndices.add(paneIndex);
+            }
+        });
+        return paneIndices;
+    }, [hoveredHostAlias, sessions, splitSlots]);
+    const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
     const swapPulsePaneSet = useMemo(() => new Set(swapPulsePaneIndices), [swapPulsePaneIndices]);
     const dragGhostLabel = useMemo(() => {
         if (panePointerDragSource === null) {
@@ -576,9 +530,6 @@ export function App() {
             setIsSidebarVisible(true);
         }
     }, [isSidebarPinned]);
-    useEffect(() => {
-        window.localStorage.setItem(SESSION_STRIP_EXPANDED_STORAGE_KEY, String(isSessionStripExpanded));
-    }, [isSessionStripExpanded]);
     useEffect(() => {
         if (!isSidebarResizing) {
             return;
@@ -960,7 +911,7 @@ export function App() {
             setError(String(e));
         }
     };
-    const connectToHost = async (host, options) => {
+    const connectToHost = async (host) => {
         if (!host.host.trim() || !host.hostName.trim()) {
             setError("Host alias and HostName are required.");
             return null;
@@ -989,20 +940,6 @@ export function App() {
             setActiveSession(started.session_id);
             setActiveHost(host.host);
             setCurrentHost(host);
-            const shouldAutoAssign = options?.autoAssignToFirstFreePane ?? true;
-            setSplitSlots((prev) => {
-                if (!shouldAutoAssign) {
-                    return prev;
-                }
-                if (prev.includes(started.session_id)) {
-                    return prev;
-                }
-                const firstFree = paneOrder.find((paneIndex) => prev[paneIndex] === null);
-                if (typeof firstFree === "number" && firstFree >= 0) {
-                    return assignSessionToPane(prev, firstFree, started.session_id);
-                }
-                return assignSessionToPane(prev, activePaneIndex, started.session_id);
-            });
             const lastUsedAt = Math.floor(Date.now() / 1000);
             setMetadataStore((prev) => ({
                 ...prev,
@@ -1023,7 +960,7 @@ export function App() {
         }
     };
     const connectToHostInNewPane = async (host) => {
-        const startedSessionId = await connectToHost(host, { autoAssignToFirstFreePane: false });
+        const startedSessionId = await connectToHost(host);
         if (!startedSessionId) {
             return;
         }
@@ -1049,42 +986,21 @@ export function App() {
         }).catch(() => { });
         // #endregion
     };
-    const ensureSessionForHost = async (hostAlias, options) => {
-        const assignedSessionIds = new Set(splitSlots.filter((slot) => Boolean(slot)));
-        const reusableSession = sessions.find((session) => session.host === hostAlias && !assignedSessionIds.has(session.id));
-        if (reusableSession) {
-            // #region agent log
-            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                body: JSON.stringify({
-                    sessionId: "be74dc",
-                    runId: "dnd-branch-debug",
-                    hypothesisId: "H7",
-                    location: "App.tsx:ensureSessionForHost",
-                    message: "reusing existing unassigned session",
-                    data: { hostAlias, sessionId: reusableSession.id },
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => { });
-            // #endregion
-            setActiveSession(reusableSession.id);
-            return reusableSession.id;
-        }
+    const ensureSessionForHost = async (hostAlias) => {
         const host = hosts.find((entry) => entry.host === hostAlias);
         if (!host) {
             setError(`Host '${hostAlias}' not found.`);
             return null;
         }
-        return connectToHost(host, options);
+        return connectToHost(host);
     };
-    const spawnSessionFromHostAlias = async (hostAlias, options) => {
+    const spawnSessionFromHostAlias = async (hostAlias) => {
         const host = hosts.find((entry) => entry.host === hostAlias);
         if (!host) {
             setError(`Host '${hostAlias}' not found.`);
             return null;
         }
-        return connectToHost(host, options);
+        return connectToHost(host);
     };
     const setDragPayload = (event, payload) => {
         const serialized = JSON.stringify(payload);
@@ -1263,18 +1179,24 @@ export function App() {
             if (!sourceSession) {
                 return;
             }
-            const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host, { autoAssignToFirstFreePane: false });
+            const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host);
             if (!spawnedSessionId) {
                 return;
             }
             placeSessionOnPane(spawnedSessionId);
             return;
         }
-        const sessionId = await ensureSessionForHost(payload.hostAlias, { autoAssignToFirstFreePane: false });
-        if (!sessionId) {
-            return;
+        if (sessionDropMode === "move") {
+            const existingSession = sessions.find((session) => session.host === payload.hostAlias) ?? null;
+            if (existingSession) {
+                placeSessionOnPane(existingSession.id);
+                return;
+            }
         }
-        placeSessionOnPane(sessionId);
+        const sessionId = await ensureSessionForHost(payload.hostAlias);
+        if (sessionId) {
+            placeSessionOnPane(sessionId);
+        }
     };
     const resolveDropEffect = (event) => {
         const payload = parseDragPayload(event);
@@ -1332,22 +1254,16 @@ export function App() {
         }
         return "copy";
     };
-    const getSessionDropHint = () => {
-        return sessionDropMode === "spawn"
-            ? "Drop on a pane to open a new session for this host."
-            : "Drop on a pane to move this session.";
-    };
     const getEmptyPaneDropHint = () => {
         if (draggingKind === "pane") {
             return "Drop pane here to swap.";
         }
-        if (draggingKind === "session") {
-            return sessionDropMode === "spawn" ? "Drop session to open new one." : "Drop session to move it.";
-        }
         if (draggingKind === "machine") {
-            return "Drop machine here to open a session.";
+            return sessionDropMode === "move"
+                ? "Drop host to move an existing session."
+                : "Drop host to open a new session.";
         }
-        return "Drag a machine or session here.";
+        return "Drag a host here.";
     };
     const getSessionModifierModeText = () => sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
     const swapPaneIndices = (fromPaneIndex, toPaneIndex, _source) => {
@@ -1376,16 +1292,6 @@ export function App() {
     const requestTerminalFocus = useCallback((sessionId) => {
         window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
     }, []);
-    const activateSessionInAssignedPane = useCallback((sessionId) => {
-        const assignedPaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
-        setActiveSession(sessionId);
-        if (assignedPaneIndex >= 0) {
-            setActivePaneIndex(assignedPaneIndex);
-            window.requestAnimationFrame(() => {
-                requestTerminalFocus(sessionId);
-            });
-        }
-    }, [requestTerminalFocus, splitSlots]);
     const closeSessionById = async (sessionId) => {
         await closeSession(sessionId);
         const next = sessions.filter((session) => session.id !== sessionId);
@@ -1503,27 +1409,10 @@ export function App() {
         }
     };
     const handleContextAction = async (actionId, paneIndex) => {
-        const paneSessionId = splitSlots[paneIndex] ?? null;
         setActivePaneIndex(paneIndex);
         switch (actionId) {
-            case "pane.focus":
-                if (paneSessionId) {
-                    setActiveSession(paneSessionId);
-                    requestTerminalFocus(paneSessionId);
-                }
-                break;
-            case "pane.assignActiveSession":
-                if (activeSession) {
-                    setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, activeSession));
-                }
-                break;
             case "pane.clear":
                 setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
-                break;
-            case "pane.closeSession":
-                if (paneSessionId) {
-                    await closeSessionById(paneSessionId);
-                }
                 break;
             case "pane.close":
                 await closePaneAndSession(paneIndex);
@@ -1540,12 +1429,6 @@ export function App() {
             case "layout.split.bottom":
                 splitFocusedPane("bottom", paneIndex);
                 break;
-            case "layout.reset":
-                resetPaneLayout();
-                break;
-            case "broadcast.off":
-                setBroadcastMode(false);
-                break;
             case "broadcast.clearTargets":
                 setBroadcastTargets(new Set());
                 break;
@@ -1560,11 +1443,6 @@ export function App() {
                 break;
             case "broadcast.togglePaneTarget":
                 togglePaneTarget(paneIndex);
-                break;
-            case "session.close":
-                if (activeSession) {
-                    await closeSessionById(activeSession);
-                }
                 break;
             default:
                 break;
@@ -1748,7 +1626,7 @@ export function App() {
                 else if (hosts.some((host) => host.host === pane.hostAlias)) {
                     const hostConfig = hosts.find((host) => host.host === pane.hostAlias) ?? null;
                     if (hostConfig) {
-                        sessionId = await connectToHost(hostConfig, { autoAssignToFirstFreePane: false });
+                        sessionId = await connectToHost(hostConfig);
                     }
                 }
                 if (sessionId) {
@@ -1800,7 +1678,9 @@ export function App() {
             const paneIndex = node.paneIndex;
             const paneSessionId = splitSlots[paneIndex] ?? null;
             const paneIdentity = resolvePaneIdentity(paneIndex);
-            return (_jsxs("div", { "data-pane-index": paneIndex, className: `split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${dragOverPaneIndex === paneIndex ? "is-drag-over" : ""} ${panePointerDragSource === paneIndex ? "is-being-dragged" : ""} ${swapPulsePaneSet.has(paneIndex) ? "is-swap-pulse" : ""}`, draggable: false, onClick: () => {
+            const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
+            const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
+            return (_jsxs("div", { "data-pane-index": paneIndex, className: `split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${dragOverPaneIndex === paneIndex ? "is-drag-over" : ""} ${panePointerDragSource === paneIndex ? "is-being-dragged" : ""} ${swapPulsePaneSet.has(paneIndex) ? "is-swap-pulse" : ""} ${isHoverTarget ? "is-host-hover-target" : ""} ${isHoverDimmed ? "is-host-hover-dimmed" : ""} ${hoveredHostAlias ? "is-host-hovering" : ""}`, draggable: false, onClick: () => {
                     setActivePaneIndex(paneIndex);
                     if (paneSessionId) {
                         setActiveSession(paneSessionId);
@@ -1919,7 +1799,7 @@ export function App() {
     const renderHostRow = (row, key) => (_jsxs("div", { className: "host-row", children: [_jsx("button", { className: `host-favorite-btn host-favorite-btn-inline ${row.metadata.favorite ? "is-active" : ""}`, "aria-label": `Toggle favorite for ${row.host.host}`, onClick: (event) => {
                     event.stopPropagation();
                     void toggleFavoriteForHost(row.host.host);
-                }, children: "\u2605" }), _jsxs("button", { className: `host-item ${row.connected ? "is-connected" : "is-disconnected"} ${activeHost === row.host.host ? "is-active" : ""}`, onClick: () => selectHost(row.host.host), onDoubleClick: () => {
+                }, children: "\u2605" }), _jsxs("button", { className: `host-item ${row.connected ? "is-connected" : "is-disconnected"} ${activeHost === row.host.host ? "is-active" : ""}`, onMouseEnter: () => setHoveredHostAlias(row.host.host), onMouseLeave: () => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev)), onClick: () => selectHost(row.host.host), onDoubleClick: () => {
                     void connectToHostInNewPane(row.host);
                 }, draggable: true, onDragStart: (event) => {
                     // #region agent log
@@ -1997,89 +1877,14 @@ export function App() {
         "--sidebar-width": `${sidebarWidth}px`,
         "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     };
-    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-hidden" : ""}`, "aria-label": isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", title: isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", onMouseEnter: revealSidebar, onClick: () => setIsSidebarVisible((prev) => !prev), children: isSidebarVisible ? "‹" : "›" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsx("header", { className: "brand", children: _jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }) }), _jsx("section", { className: "host-actions-card", children: _jsxs("div", { className: "left-rail-actions", children: [_jsx("button", { className: `btn sidebar-pin-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin host sidebar" : "Pin host sidebar", title: isSidebarPinned ? "Unpin sidebar (auto-hide)" : "Pin sidebar", onClick: toggleSidebarPinned, children: isSidebarPinned ? "Pin on" : "Pin off" }), _jsx("button", { className: "app-gear-btn", "aria-label": "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: "\u2699" })] }) }), _jsxs("section", { className: "host-filter-card", children: [_jsxs("div", { className: "filter-head-row", children: [_jsxs("div", { className: "quick-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: "+" }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] }), _jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [_jsxs("div", { className: `session-top-strip ${isSessionStripExpanded ? "is-expanded" : "is-collapsed"}`, children: [_jsxs("div", { className: "session-top-strip-head", children: [_jsxs("div", { className: "session-top-strip-title-wrap", children: [_jsx("strong", { className: "session-top-strip-title", children: "Sessions" }), _jsxs("div", { className: "session-top-strip-summary", children: [_jsx("span", { className: "context-pill", children: `Assigned: ${sessionLaneSummary.assigned}` }), _jsx("span", { className: "context-pill", children: `Connected: ${sessionLaneSummary.connectedUnassigned}` }), sessionLaneSummary.idle > 0 && _jsx("span", { className: "context-pill", children: `Idle: ${sessionLaneSummary.idle}` })] })] }), _jsxs("div", { className: "session-top-strip-controls", children: [_jsxs("div", { className: "session-drop-mode-toggle", role: "group", "aria-label": "Session drop mode", children: [_jsx("button", { type: "button", className: `btn session-drop-mode-btn ${sessionDropMode === "spawn" ? "is-active" : ""}`, "aria-pressed": sessionDropMode === "spawn", onClick: () => setSessionDropMode("spawn"), title: "Session drop opens a new session", children: "Spawn" }), _jsx("button", { type: "button", className: `btn session-drop-mode-btn ${sessionDropMode === "move" ? "is-active" : ""}`, "aria-pressed": sessionDropMode === "move", onClick: () => setSessionDropMode("move"), title: "Session drop moves existing session", children: "Move" })] }), _jsx("button", { type: "button", className: "btn session-strip-toggle-btn", "aria-expanded": isSessionStripExpanded, onClick: () => setIsSessionStripExpanded((prev) => !prev), title: isSessionStripExpanded ? "Collapse sessions strip" : "Expand sessions strip", children: isSessionStripExpanded ? "Hide list" : "Show list" })] })] }), _jsx("div", { className: `session-top-strip-body ${isSessionStripExpanded ? "is-open" : ""}`, children: _jsxs("div", { className: "session-top-strip-scroll", children: [_jsx("div", { className: "session-lanes", children: [
-                                                        { key: "assigned", title: "Assigned + Active", items: assignedLaneSessions },
-                                                        { key: "connectedUnassigned", title: "Connected + Unassigned", items: connectedUnassignedLaneSessions },
-                                                        { key: "idle", title: "Idle", items: idleLaneSessions },
-                                                    ]
-                                                        .filter((lane) => lane.items.length > 0 || lane.key !== "idle")
-                                                        .map((lane) => (_jsxs("section", { className: "session-lane", children: [_jsxs("header", { className: "session-lane-head", children: [_jsx("h3", { className: "session-lane-title", children: lane.title }), _jsx("span", { className: "session-lane-count", children: lane.items.length })] }), _jsx("div", { className: "session-lane-list", children: lane.items.length === 0 ? (_jsx("div", { className: "session-lane-empty", children: "No sessions in this lane." })) : (lane.items.map((laneItem) => (_jsxs("div", { className: `session-card ${laneItem.isActive ? "is-active" : ""} ${laneItem.isAssigned ? "is-assigned" : "is-unassigned"} ${laneItem.isConnected ? "is-connected" : "is-idle"} ${laneItem.isBroadcastTarget ? "is-broadcast-target" : ""}`, draggable: true, onDragStart: (event) => {
-                                                                        // #region agent log
-                                                                        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                                                            method: "POST",
-                                                                            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                                                            body: JSON.stringify({
-                                                                                sessionId: "be74dc",
-                                                                                runId: "right-drag-check",
-                                                                                hypothesisId: "H12",
-                                                                                location: "App.tsx:session.onDragStart",
-                                                                                message: "session dragstart pointer button info",
-                                                                                data: {
-                                                                                    button: event.nativeEvent.button,
-                                                                                    buttons: event.nativeEvent.buttons,
-                                                                                    ctrlKey: event.ctrlKey,
-                                                                                    shiftKey: event.shiftKey,
-                                                                                    altKey: event.altKey,
-                                                                                },
-                                                                                timestamp: Date.now(),
-                                                                            }),
-                                                                        }).catch(() => { });
-                                                                        // #endregion
-                                                                        setDragPayload(event, { type: "session", sessionId: laneItem.session.id });
-                                                                        setDraggingKind("session");
-                                                                        missingDragPayloadLoggedRef.current = false;
-                                                                    }, onContextMenu: (event) => {
-                                                                        // #region agent log
-                                                                        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                                                            method: "POST",
-                                                                            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                                                            body: JSON.stringify({
-                                                                                sessionId: "be74dc",
-                                                                                runId: "right-drag-check",
-                                                                                hypothesisId: "H13",
-                                                                                location: "App.tsx:session.onContextMenu",
-                                                                                message: "session context menu triggered",
-                                                                                data: { button: event.button, buttons: event.buttons },
-                                                                                timestamp: Date.now(),
-                                                                            }),
-                                                                        }).catch(() => { });
-                                                                        // #endregion
-                                                                    }, onDragEnd: (event) => {
-                                                                        // #region agent log
-                                                                        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                                                                            method: "POST",
-                                                                            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                                                                            body: JSON.stringify({
-                                                                                sessionId: "be74dc",
-                                                                                runId: "dnd-drop-entry",
-                                                                                hypothesisId: "H10",
-                                                                                location: "App.tsx:sessionDragEnd",
-                                                                                message: "session drag ended",
-                                                                                data: {
-                                                                                    dropEffect: event.dataTransfer.dropEffect,
-                                                                                    effectAllowed: event.dataTransfer.effectAllowed,
-                                                                                    dragOverPaneIndex,
-                                                                                    sessionDropMode,
-                                                                                },
-                                                                                timestamp: Date.now(),
-                                                                            }),
-                                                                        }).catch(() => { });
-                                                                        // #endregion
-                                                                        setDraggingKind(null);
-                                                                        setDragOverPaneIndex(null);
-                                                                        missingDragPayloadLoggedRef.current = false;
-                                                                    }, children: [_jsxs("button", { className: "session-card-main-btn", onClick: () => activateSessionInAssignedPane(laneItem.session.id), title: `${laneItem.session.host} - ${getSessionDropHint()}`, children: [_jsx("span", { className: "session-card-main", children: laneItem.session.host }), _jsxs("span", { className: "session-card-meta", children: [_jsx("span", { className: `session-card-pane-pill ${laneItem.paneIndex === null ? "is-unassigned" : ""}`, children: laneItem.paneIndex === null ? "unassigned" : `P${laneItem.paneIndex + 1}` }), _jsx("span", { className: `session-card-state-dot ${laneItem.isConnected ? "is-connected" : "is-idle"} ${laneItem.isBroadcastTarget ? "is-broadcast-target" : ""}`, "aria-hidden": "true" })] })] }), _jsx("button", { type: "button", className: "session-card-close", "aria-label": `Close session ${laneItem.session.host}`, title: `Close session ${laneItem.session.host}`, onClick: (event) => {
-                                                                                event.preventDefault();
-                                                                                event.stopPropagation();
-                                                                                void closeSessionById(laneItem.session.id);
-                                                                            }, children: "\u00D7" })] }, laneItem.session.id)))) })] }, lane.key))) }), draggingKind === "session" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing session" : "Open new session from host" })] })), isBroadcastModeEnabled && (_jsxs("div", { className: "broadcast-controls", children: [_jsxs("div", { className: "broadcast-control-head", children: [_jsxs("button", { className: `btn ${isBroadcastModeEnabled ? "btn-primary" : ""}`, onClick: () => setBroadcastMode(!isBroadcastModeEnabled), children: ["Broadcast: ", isBroadcastModeEnabled ? "ON" : "OFF"] }), _jsx("button", { className: "btn", onClick: () => setBroadcastTargets(new Set()), disabled: broadcastTargets.size === 0, children: "Clear" })] }), _jsx("div", { className: "broadcast-target-list", children: sessions.map((session) => (_jsx("button", { className: `target-chip ${broadcastTargets.has(session.id) ? "is-active" : ""}`, onClick: () => toggleBroadcastTarget(session.id), disabled: !isBroadcastModeEnabled, children: session.host }, `target-${session.id}`))) })] }))] }) })] }), _jsxs("div", { className: "session-pane-canvas", children: [_jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }), panePointerDragSource !== null && paneDragPointer ? (_jsxs("div", { className: `pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`, style: {
+    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-hidden" : ""}`, "aria-label": isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", title: isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", onMouseEnter: revealSidebar, onClick: () => setIsSidebarVisible((prev) => !prev), children: isSidebarVisible ? "‹" : "›" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsx("header", { className: "brand", children: _jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }) }), _jsx("section", { className: "host-actions-card", children: _jsxs("div", { className: "left-rail-actions", children: [_jsx("button", { className: `btn sidebar-pin-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin host sidebar" : "Pin host sidebar", title: isSidebarPinned ? "Unpin sidebar (auto-hide)" : "Pin sidebar", onClick: toggleSidebarPinned, children: isSidebarPinned ? "Pin on" : "Pin off" }), _jsx("button", { className: "app-gear-btn", "aria-label": "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: "\u2699" })] }) }), _jsxs("section", { className: "host-filter-card", children: [_jsxs("div", { className: "filter-head-row", children: [_jsxs("div", { className: "quick-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: "+" }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] }), _jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [draggingKind === "machine" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Host drop mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host" })] })), _jsxs("div", { className: "session-pane-canvas", children: [_jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }), panePointerDragSource !== null && paneDragPointer ? (_jsxs("div", { className: `pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`, style: {
                                             "--ghost-x": `${paneDragPointer.x + 14}px`,
                                             "--ghost-y": `${paneDragPointer.y + 14}px`,
                                         }, children: [_jsx("span", { className: "pane-drag-ghost-title", children: dragGhostLabel }), _jsx("span", { className: "pane-drag-ghost-subtitle", children: "Moving pane" })] })) : null] }), _jsx("div", { className: "sessions-footer", role: "status", children: _jsxs("div", { className: "sessions-footer-meta", children: [_jsxs("div", { className: "footer-layout-controls", children: [_jsx("button", { className: "btn footer-layout-btn footer-action-btn", onClick: resetPaneLayout, disabled: paneOrder.length === 1 && !hasAssignedPaneSessions, "aria-label": "Reset pane layout", title: "Reset pane layout", children: "Reset" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(false), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", title: pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", children: pendingCloseAllIntent === "close" ? "Confirm close all" : "Close all" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "reset" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(true), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "reset"
                                                         ? "Confirm close all sessions and reset layout"
                                                         : "Close all sessions and reset layout", title: pendingCloseAllIntent === "reset"
                                                         ? "Confirm close all sessions and reset layout"
-                                                        : "Close all sessions and reset layout", children: pendingCloseAllIntent === "reset" ? "Confirm close+reset" : "Close + reset" }), _jsxs("select", { className: "input split-profile-select footer-layout-select", value: selectedLayoutProfileId, onChange: (event) => {
+                                                        : "Close all sessions and reset layout", children: pendingCloseAllIntent === "reset" ? "Confirm close+reset" : "Close + reset" }), _jsxs("div", { className: "session-drop-mode-toggle", role: "group", "aria-label": "Host drop mode", children: [_jsx("button", { type: "button", className: `btn session-drop-mode-btn ${sessionDropMode === "spawn" ? "is-active" : ""}`, "aria-pressed": sessionDropMode === "spawn", onClick: () => setSessionDropMode("spawn"), title: "Host drop opens a new session", children: "Spawn" }), _jsx("button", { type: "button", className: `btn session-drop-mode-btn ${sessionDropMode === "move" ? "is-active" : ""}`, "aria-pressed": sessionDropMode === "move", onClick: () => setSessionDropMode("move"), title: "Host drop moves an existing session", children: "Move" })] }), _jsxs("select", { className: "input split-profile-select footer-layout-select", value: selectedLayoutProfileId, onChange: (event) => {
                                                         setSelectedLayoutProfileId(event.target.value);
                                                         setPendingLayoutProfileDeleteId("");
                                                     }, "aria-label": "Select layout profile", children: [_jsx("option", { value: "", children: "Select profile" }), layoutProfiles.map((profile) => (_jsx("option", { value: profile.id, children: profile.name }, profile.id)))] }), _jsx("button", { className: "btn footer-layout-btn footer-icon-btn", onClick: () => void loadSelectedLayoutProfile(), disabled: !selectedLayoutProfileId, "aria-label": "Load selected layout profile", title: "Load selected layout profile", children: "\u2713" }), _jsx("button", { type: "button", className: `btn footer-layout-btn footer-icon-btn footer-layout-toggle ${isFooterLayoutPanelOpen ? "is-open" : ""}`, onClick: toggleFooterLayoutPanel, "aria-expanded": isFooterLayoutPanelOpen, "aria-controls": "footer-layout-advanced-controls", "aria-label": isFooterLayoutPanelOpen ? "Collapse layout actions" : "Expand layout actions", title: isFooterLayoutPanelOpen ? "Collapse layout actions" : "Expand layout actions", children: isFooterLayoutPanelOpen ? "⌃" : "⌄" })] }), _jsx("div", { id: "footer-layout-advanced-controls", className: `footer-layout-slide ${isFooterLayoutPanelOpen ? "is-open" : ""}`, "aria-hidden": !isFooterLayoutPanelOpen, children: _jsxs("div", { className: "layout-profile-controls footer-layout-advanced", children: [_jsx("input", { className: "input split-profile-name", value: layoutProfileName, onChange: (event) => setLayoutProfileName(event.target.value), placeholder: "Layout profile name" }), _jsx("button", { type: "button", className: `btn split-profile-toggle-btn ${saveLayoutWithHosts ? "is-active" : ""}`, onClick: () => setSaveLayoutWithHosts((prev) => !prev), "aria-pressed": saveLayoutWithHosts, title: `With hosts ${saveLayoutWithHosts ? "on" : "off"}`, children: saveLayoutWithHosts ? "with hosts: on" : "with hosts: off" }), _jsx("button", { className: "btn footer-layout-btn footer-action-btn", onClick: () => void saveCurrentLayoutProfile(), "aria-label": "Save current layout profile", title: "Save current layout profile", children: "Save" }), _jsx("button", { className: `btn btn-danger footer-layout-btn footer-action-btn ${pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
@@ -2097,7 +1902,6 @@ export function App() {
                                                     void applyDefaultUser(event.target.value).catch((e) => setError(String(e)));
                                                 }, placeholder: "ubuntu" }), _jsx("span", { className: "field-help", children: "Used when a host does not define a user." })] }) })), activeAppSettingsTab === "backup" && (_jsxs("div", { className: "backup-panel", children: [_jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export path" }), _jsx("input", { className: "input", value: backupExportPath, onChange: (event) => setBackupExportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export password" }), _jsx("input", { className: "input", type: "password", value: backupExportPassword, onChange: (event) => setBackupExportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "new-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleExportBackup(), disabled: !backupExportPassword, children: "Export backup" }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import path" }), _jsx("input", { className: "input", value: backupImportPath, onChange: (event) => setBackupImportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import password" }), _jsx("input", { className: "input", type: "password", value: backupImportPassword, onChange: (event) => setBackupImportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "current-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleImportBackup(), disabled: !backupImportPassword, children: "Import backup" }), _jsx("p", { className: "muted-copy", children: "Backups are always encrypted. Passwords are never stored." }), backupMessage && _jsx("p", { className: "muted-copy", children: backupMessage })] })), activeAppSettingsTab === "extras" && _jsx("p", { className: "muted-copy", children: "Extras settings placeholder." }), activeAppSettingsTab === "help" && _jsx("p", { className: "muted-copy", children: "Help settings placeholder." }), activeAppSettingsTab === "about" && (_jsxs("section", { className: "about-hero", children: [_jsx("img", { src: logoTerminal, alt: "NoSuckShell hero", className: "about-hero-image" }), _jsx("p", { className: "muted-copy", children: "NoSuckShell helps you manage SSH hosts and sessions in one clean desktop workspace." })] }))] })] }) })), isAddHostModalOpen && (_jsx("div", { className: "app-settings-overlay", onClick: closeAddHostModal, children: _jsxs("section", { className: "app-settings-modal panel add-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Add host" }), _jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsx(HostForm, { host: newHostDraft, onChange: setNewHostDraft }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" }), _jsx("button", { className: "btn btn-primary", onClick: createHost, disabled: !canCreateHost, children: "Add host" })] }), error && _jsx("p", { className: "error-text", children: error })] })] }) })), activeTrustPrompt && (_jsx("div", { className: "app-settings-overlay", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: _jsxs("section", { className: "app-settings-modal panel trust-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Trust host key" }), _jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Close" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsxs("p", { className: "muted-copy", children: ["Session ", _jsx("strong", { children: activeTrustPrompt.sessionId }), " requests trust confirmation for host", " ", _jsx("strong", { children: activeTrustPrompt.hostAlias }), "."] }), _jsxs("label", { className: "field checkbox-field trust-default-checkbox", children: [_jsx("input", { className: "checkbox-input", type: "checkbox", checked: saveTrustHostAsDefault, onChange: (event) => setSaveTrustHostAsDefault(event.target.checked) }), _jsx("span", { className: "field-label", children: "Save as default for this host" })] }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Dismiss" }), _jsx("button", { className: "btn btn-primary", onClick: () => void acceptTrustPrompt(), children: "Trust host" })] })] })] }) })), contextMenu.visible && contextMenu.paneIndex !== null && (_jsx("div", { className: "context-menu", style: { left: contextMenu.x, top: contextMenu.y }, role: "menu", children: buildPaneContextActions({
                     paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
-                    activeSession,
                     canClosePane: paneOrder.length > 1,
                     broadcastModeEnabled: isBroadcastModeEnabled,
                     broadcastCount: broadcastTargets.size,

@@ -1,24 +1,12 @@
-export const buildPaneContextActions = ({ paneSessionId, activeSession, canClosePane = true, broadcastModeEnabled, broadcastCount, }) => {
+export const buildPaneContextActions = ({ paneSessionId, canClosePane = true, broadcastModeEnabled, broadcastCount, }) => {
     const hasPaneSession = Boolean(paneSessionId);
-    const hasActiveSession = activeSession.length > 0;
     return [
-        { id: "pane.focus", label: "Focus pane" },
-        {
-            id: "pane.assignActiveSession",
-            label: "Send active to pane",
-            disabled: !hasActiveSession,
-        },
         { id: "pane.clear", label: "Clear pane", disabled: !hasPaneSession },
-        {
-            id: "pane.closeSession",
-            label: "Close pane session",
-            disabled: !hasPaneSession,
-            separatorAbove: true,
-        },
         {
             id: "pane.close",
             label: "Close pane (and session)",
             disabled: !canClosePane,
+            separatorAbove: true,
         },
         {
             id: "layout.split.left",
@@ -36,10 +24,6 @@ export const buildPaneContextActions = ({ paneSessionId, activeSession, canClose
         {
             id: "layout.split.bottom",
             label: "Split bottom",
-        },
-        {
-            id: "layout.reset",
-            label: "Reset panes",
         },
         {
             id: "broadcast.mode.enable",
@@ -67,11 +51,5 @@ export const buildPaneContextActions = ({ paneSessionId, activeSession, canClose
             label: "Clear targets",
             disabled: !broadcastModeEnabled || broadcastCount === 0,
         },
-        {
-            id: "broadcast.off",
-            label: "Broadcast OFF",
-            disabled: !broadcastModeEnabled && broadcastCount === 0,
-        },
-        { id: "session.close", label: "Close active session", disabled: !hasActiveSession, separatorAbove: true },
     ];
 };

@@ -1,21 +1,15 @@
 export type ContextActionId =
-  | "pane.focus"
-  | "pane.assignActiveSession"
   | "pane.clear"
   | "pane.close"
-  | "pane.closeSession"
   | "layout.split.left"
   | "layout.split.right"
   | "layout.split.top"
   | "layout.split.bottom"
-  | "layout.reset"
   | "broadcast.mode.enable"
   | "broadcast.mode.disable"
-  | "broadcast.off"
   | "broadcast.selectAllVisible"
   | "broadcast.clearTargets"
-  | "broadcast.togglePaneTarget"
-  | "session.close";
+  | "broadcast.togglePaneTarget";
 
 export type ContextAction = {
   id: ContextActionId;
@@ -26,7 +20,6 @@ export type ContextAction = {
 
 type BuildArgs = {
   paneSessionId: string | null;
-  activeSession: string;
   canClosePane?: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
@@ -34,32 +27,19 @@ type BuildArgs = {
 
 export const buildPaneContextActions = ({
   paneSessionId,
-  activeSession,
   canClosePane = true,
   broadcastModeEnabled,
   broadcastCount,
 }: BuildArgs): ContextAction[] => {
   const hasPaneSession = Boolean(paneSessionId);
-  const hasActiveSession = activeSession.length > 0;
 
   return [
-    { id: "pane.focus", label: "Focus pane" },
-    {
-      id: "pane.assignActiveSession",
-      label: "Send active to pane",
-      disabled: !hasActiveSession,
-    },
     { id: "pane.clear", label: "Clear pane", disabled: !hasPaneSession },
-    {
-      id: "pane.closeSession",
-      label: "Close pane session",
-      disabled: !hasPaneSession,
-      separatorAbove: true,
-    },
     {
       id: "pane.close",
       label: "Close pane (and session)",
       disabled: !canClosePane,
+      separatorAbove: true,
     },
     {
       id: "layout.split.left",
@@ -77,10 +57,6 @@ export const buildPaneContextActions = ({
     {
       id: "layout.split.bottom",
       label: "Split bottom",
-    },
-    {
-      id: "layout.reset",
-      label: "Reset panes",
     },
     {
       id: "broadcast.mode.enable",
@@ -108,11 +84,5 @@ export const buildPaneContextActions = ({
       label: "Clear targets",
       disabled: !broadcastModeEnabled || broadcastCount === 0,
     },
-    {
-      id: "broadcast.off",
-      label: "Broadcast OFF",
-      disabled: !broadcastModeEnabled && broadcastCount === 0,
-    },
-    { id: "session.close", label: "Close active session", disabled: !hasActiveSession, separatorAbove: true },
   ];
 };
