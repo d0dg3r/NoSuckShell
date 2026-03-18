@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -63,10 +66,10 @@ jobs:
       RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -129,12 +132,16 @@ jobs:
           fs.writeFileSync(cargoTomlPath, updatedCargoToml);
           NODE
 
+      - name: Generate platform icons
+        working-directory: apps/desktop
+        run: npx @tauri-apps/cli icon ../../img/logo_terminal.png --output src-tauri/icons
+
       - name: Build Tauri app bundles
         working-directory: apps/desktop
         run: npm run tauri:build
 
       - name: Upload platform bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bundle-${{ matrix.artifact_name }}
           if-no-files-found: error
@@ -156,7 +163,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: bundle-*
           merge-multiple: true
