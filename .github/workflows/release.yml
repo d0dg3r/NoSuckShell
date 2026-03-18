@@ -75,6 +75,11 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -132,9 +137,25 @@ jobs:
           fs.writeFileSync(cargoTomlPath, updatedCargoToml);
           NODE
 
+      - name: Build square icon source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip pillow
+          python <<'PY'
+          from PIL import Image
+
+          source = Image.open("img/logo_terminal.png").convert("RGBA")
+          side = max(source.width, source.height)
+          canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+          offset = ((side - source.width) // 2, (side - source.height) // 2)
+          canvas.paste(source, offset, source)
+          canvas.save("apps/desktop/src-tauri/icons/icon-source-square.png")
+          PY
+
       - name: Generate platform icons
         working-directory: apps/desktop
-        run: npx @tauri-apps/cli icon ../../img/logo_terminal.png --output src-tauri/icons
+        run: npx @tauri-apps/cli icon src-tauri/icons/icon-source-square.png --output src-tauri/icons
 
       - name: Build Tauri app bundles
         working-directory: apps/desktop
