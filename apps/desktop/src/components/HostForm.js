@@ -1,0 +1,11 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+export function HostForm({ host, onChange }) {
+    const update = (key) => (event) => {
+        const value = event.target.value;
+        onChange({
+            ...host,
+            [key]: key === "port" ? Number(value || "22") : value,
+        });
+    };
+    return (_jsxs("div", { className: "host-form-grid", children: [_jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Host alias" }), _jsx("input", { className: "input", value: host.host, onChange: update("host"), placeholder: "prod-eu-1" }), _jsx("span", { className: "field-help", children: "Friendly name used in your SSH host list." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "HostName" }), _jsx("input", { className: "input", value: host.hostName, onChange: update("hostName"), placeholder: "10.0.1.25" }), _jsx("span", { className: "field-help", children: "IP or DNS hostname of the target machine." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "User" }), _jsx("input", { className: "input", value: host.user, onChange: update("user"), placeholder: "ubuntu" })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Port" }), _jsx("input", { className: "input", type: "number", value: host.port, onChange: update("port") })] }), _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "IdentityFile" }), _jsx("input", { className: "input", value: host.identityFile, onChange: update("identityFile"), placeholder: "~/.ssh/id_ed25519" }), _jsx("span", { className: "field-help", children: "Optional key path. Falls back to agent/default key when empty." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "ProxyJump" }), _jsx("input", { className: "input", value: host.proxyJump, onChange: update("proxyJump"), placeholder: "bastion" })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "ProxyCommand" }), _jsx("input", { className: "input", value: host.proxyCommand, onChange: update("proxyCommand"), placeholder: "ssh -W %h:%p jump" })] })] }));
+}

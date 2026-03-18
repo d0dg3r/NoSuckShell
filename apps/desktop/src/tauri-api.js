@@ -1,0 +1,16 @@
+import { invoke } from "@tauri-apps/api/core";
+export const listHosts = () => invoke("list_hosts");
+export const saveHost = (host) => invoke("save_host", { host });
+export const deleteHost = (hostName) => invoke("delete_host", { hostName });
+export const startSession = (host) => invoke("start_session", { host });
+export const sendInput = (sessionId, data) => invoke("send_input", { sessionId, data });
+export const resizeSession = (sessionId, cols, rows) => invoke("resize_session", { sessionId, cols, rows });
+export const closeSession = (sessionId) => invoke("close_session", { sessionId });
+export const listHostMetadata = () => invoke("list_host_metadata");
+export const saveHostMetadata = (metadata) => invoke("save_host_metadata", { metadata });
+export const touchHostLastUsed = (hostAlias) => invoke("touch_host_last_used", { hostAlias });
+export const exportBackup = (path, password) => invoke("export_backup", { path, password });
+export const importBackup = (path, password) => invoke("import_backup", { path, password });
+export const listLayoutProfiles = () => invoke("list_layout_profiles");
+export const saveLayoutProfile = (profile) => invoke("save_layout_profile", { profile });
+export const deleteLayoutProfile = (profileId) => invoke("delete_layout_profile", { profileId });
