@@ -115,11 +115,15 @@ jobs:
           fs.writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`);
 
           const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+          let hasPackageVersion = false;
           const updatedCargoToml = cargoToml.replace(
             /(\[package\][\s\S]*?^version\s*=\s*")[^"]+(")/m,
-            `$1${version}$2`
+            (_match, prefix, suffix) => {
+              hasPackageVersion = true;
+              return `${prefix}${version}${suffix}`;
+            }
           );
-          if (updatedCargoToml === cargoToml) {
+          if (!hasPackageVersion) {
             throw new Error("Could not update version in Cargo.toml");
           }
           fs.writeFileSync(cargoTomlPath, updatedCargoToml);
