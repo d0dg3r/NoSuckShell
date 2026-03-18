@@ -69,6 +69,8 @@ git tag v0.1.0-beta.1
 git push origin v0.1.0-beta.1
 ```
 
+For this rollout, use `v0.1.0-beta.1` to publish a prerelease and verify all platform bundles in one workflow run.
+
 ## Common pitfalls checklist
 
 - Ensure workflow has `permissions: contents: write` (required for release upload).
