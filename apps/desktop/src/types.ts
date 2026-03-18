@@ -12,6 +12,7 @@ export type HostMetadata = {
   favorite: boolean;
   tags: string[];
   lastUsedAt: number | null;
+  trustHostDefault: boolean;
 };
 
 export type HostMetadataStore = {

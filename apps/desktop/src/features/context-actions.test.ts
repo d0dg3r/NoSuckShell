@@ -6,10 +6,8 @@ describe("buildPaneContextActions", () => {
     const actions = buildPaneContextActions({
       paneSessionId: null,
       activeSession: "",
-      viewMode: "split2x2",
       broadcastModeEnabled: true,
       broadcastCount: 0,
-      pendingTrustForActive: false,
     });
 
     const assign = actions.find((item) => item.id === "pane.assignActiveSession");
@@ -20,16 +18,29 @@ describe("buildPaneContextActions", () => {
     expect(toggleTarget?.disabled).toBe(true);
   });
 
-  it("disables single-layout action while already single", () => {
+  it("does not expose deprecated mode-switch actions", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",
       activeSession: "pane-1",
-      viewMode: "single",
       broadcastModeEnabled: true,
       broadcastCount: 2,
-      pendingTrustForActive: true,
     });
-    expect(actions.find((item) => item.id === "layout.single.enable")?.disabled).toBe(true);
-    expect(actions.find((item) => item.id === "layout.split2x2.enable")?.disabled).toBe(false);
+    const labels = actions.map((item) => item.label);
+    expect(labels).not.toContain("Single view");
+    expect(labels).not.toContain("Panels view");
+  });
+
+  it("exposes all four split directions in context menu", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "pane-1",
+      activeSession: "pane-1",
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+
+    expect(actions.find((item) => item.id === "layout.split.left")?.label).toBe("Split left");
+    expect(actions.find((item) => item.id === "layout.split.right")?.label).toBe("Split right");
+    expect(actions.find((item) => item.id === "layout.split.top")?.label).toBe("Split top");
+    expect(actions.find((item) => item.id === "layout.split.bottom")?.label).toBe("Split bottom");
   });
 });

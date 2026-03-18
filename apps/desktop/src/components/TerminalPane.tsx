@@ -12,36 +12,29 @@ type Props = {
 
 const sessionBuffers = new Map<string, string>();
 const MAX_BUFFER_CHARS = 250_000;
+const hasTauriTransformCallback = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { transformCallback?: unknown } })
+    .__TAURI_INTERNALS__;
+  return typeof tauriInternals?.transformCallback === "function";
+};
 
 export function TerminalPane({ sessionId, onUserInput }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const fitCallCountRef = useRef<number>(0);
-  const observerCallCountRef = useRef<number>(0);
   const onUserInputRef = useRef(onUserInput);
+  const fitFrameRef = useRef<number | null>(null);
+  const fitDebounceRef = useRef<number | null>(null);
+  const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
 
   useEffect(() => {
     onUserInputRef.current = onUserInput;
   }, [onUserInput]);
 
   useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-      body: JSON.stringify({
-        sessionId: "608500",
-        runId: "pre-fix-resize",
-        hypothesisId: "H16",
-        location: "TerminalPane.tsx:24",
-        message: "terminal_effect_mount",
-        data: { sessionId },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     let disposed = false;
     const terminal = new Terminal({
       convertEol: true,
@@ -62,25 +55,6 @@ export function TerminalPane({ sessionId, onUserInput }: Props) {
     if (rootRef.current) {
       terminal.open(rootRef.current);
       fitAddon.fit();
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-        body: JSON.stringify({
-          sessionId: "608500",
-          runId: "pre-fix",
-          hypothesisId: "H1",
-          location: "TerminalPane.tsx:43",
-          message: "terminal_opened",
-          data: {
-            paneWidth: rootRef.current.clientWidth,
-            paneScrollWidth: rootRef.current.scrollWidth,
-            paneHeight: rootRef.current.clientHeight,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     }
 
     const buffered = sessionBuffers.get(sessionId) ?? "";
@@ -94,131 +68,96 @@ export function TerminalPane({ sessionId, onUserInput }: Props) {
     });
 
     let unlisten: UnlistenFn | null = null;
-    void listen<SessionOutputEvent>("session-output", (event) => {
-      if (event.payload.session_id !== sessionId) {
-        return;
-      }
+    if (hasTauriTransformCallback()) {
+      void listen<SessionOutputEvent>("session-output", (event) => {
+        if (event.payload.session_id !== sessionId) {
+          return;
+        }
 
-      const existing = sessionBuffers.get(sessionId) ?? "";
-      const next = (existing + event.payload.chunk).slice(-MAX_BUFFER_CHARS);
-      sessionBuffers.set(sessionId, next);
-      terminal.write(event.payload.chunk);
-      if (event.payload.host_key_prompt) {
-        terminal.writeln("\r\n[Known host prompt detected. Press 'Trust host'.]");
-      }
-    }).then((fn) => {
-      if (disposed) {
-        void fn();
-      } else {
-        unlisten = fn;
-      }
-    });
+        const existing = sessionBuffers.get(sessionId) ?? "";
+        const next = (existing + event.payload.chunk).slice(-MAX_BUFFER_CHARS);
+        sessionBuffers.set(sessionId, next);
+        terminal.write(event.payload.chunk);
+        if (event.payload.host_key_prompt) {
+          terminal.writeln("\r\n[Known host prompt detected. Press 'Trust host'.]");
+        }
+      }).then((fn) => {
+        if (disposed) {
+          void fn();
+        } else {
+          unlisten = fn;
+        }
+      }).catch(() => {
+        // Tauri event bridge can be temporarily unavailable during dev reload.
+      });
+    }
 
     const fitAndResize = () => {
       const root = rootRef.current;
-      const pane = root?.closest(".split-pane") as HTMLElement | null;
-      fitCallCountRef.current += 1;
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-        body: JSON.stringify({
-          sessionId: "608500",
-          runId: "pre-fix",
-          hypothesisId: "H2",
-          location: "TerminalPane.tsx:90",
-          message: "fit_before",
-          data: {
-            fitCount: fitCallCountRef.current,
-            sessionId,
-            rootWidth: root?.clientWidth ?? null,
-            rootScrollWidth: root?.scrollWidth ?? null,
-            paneWidth: pane?.clientWidth ?? null,
-            paneScrollWidth: pane?.scrollWidth ?? null,
-            colsBefore: terminal.cols,
-            rowsBefore: terminal.rows,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      if (!root) {
+        return;
+      }
       fitAddon.fit();
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-        body: JSON.stringify({
-          sessionId: "608500",
-          runId: "pre-fix",
-          hypothesisId: "H3",
-          location: "TerminalPane.tsx:113",
-          message: "fit_after",
-          data: {
-            fitCount: fitCallCountRef.current,
-            sessionId,
-            rootWidth: root?.clientWidth ?? null,
-            rootScrollWidth: root?.scrollWidth ?? null,
-            paneWidth: pane?.clientWidth ?? null,
-            paneScrollWidth: pane?.scrollWidth ?? null,
-            colsAfter: terminal.cols,
-            rowsAfter: terminal.rows,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      void resizeSession(sessionId, terminal.cols, terminal.rows);
+      const didSizeChange =
+        !lastResizeRef.current ||
+        lastResizeRef.current.cols !== terminal.cols ||
+        lastResizeRef.current.rows !== terminal.rows;
+      if (didSizeChange) {
+        lastResizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+        void resizeSession(sessionId, terminal.cols, terminal.rows);
+      }
+    };
+
+    const scheduleFitAndResize = () => {
+      if (fitDebounceRef.current !== null) {
+        window.clearTimeout(fitDebounceRef.current);
+      }
+      fitDebounceRef.current = window.setTimeout(() => {
+        if (fitFrameRef.current !== null) {
+          window.cancelAnimationFrame(fitFrameRef.current);
+        }
+        fitFrameRef.current = window.requestAnimationFrame(() => {
+          fitFrameRef.current = null;
+          fitAndResize();
+        });
+      }, 40);
     };
 
     let resizeObserver: ResizeObserver | null = null;
     if (rootRef.current) {
       resizeObserver = new ResizeObserver(() => {
-        observerCallCountRef.current += 1;
-        // #region agent log
-        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-          body: JSON.stringify({
-            sessionId: "608500",
-            runId: "pre-fix",
-            hypothesisId: "H4",
-            location: "TerminalPane.tsx:139",
-            message: "resize_observer_fired",
-            data: {
-              observerCount: observerCallCountRef.current,
-              sessionId,
-              paneWidth: rootRef.current?.clientWidth ?? null,
-              paneScrollWidth: rootRef.current?.scrollWidth ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        fitAndResize();
+        scheduleFitAndResize();
       });
       resizeObserver.observe(rootRef.current);
     }
-    fitAndResize();
+    const onExternalFitRequest = () => {
+      scheduleFitAndResize();
+    };
+    const onExternalFocusRequest: EventListener = (event) => {
+      const focusEvent = event as CustomEvent<{ sessionId?: string }>;
+      if (focusEvent.detail?.sessionId !== sessionId) {
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        terminal.focus();
+      });
+    };
+    window.addEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
+    window.addEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
+    scheduleFitAndResize();
 
     return () => {
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "608500" },
-        body: JSON.stringify({
-          sessionId: "608500",
-          runId: "pre-fix-resize",
-          hypothesisId: "H16",
-          location: "TerminalPane.tsx:151",
-          message: "terminal_effect_cleanup",
-          data: { sessionId },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       disposed = true;
       if (resizeObserver) {
         resizeObserver.disconnect();
+      }
+      window.removeEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
+      window.removeEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
+      if (fitDebounceRef.current !== null) {
+        window.clearTimeout(fitDebounceRef.current);
+      }
+      if (fitFrameRef.current !== null) {
+        window.cancelAnimationFrame(fitFrameRef.current);
       }
       if (unlisten) {
         void unlisten();
