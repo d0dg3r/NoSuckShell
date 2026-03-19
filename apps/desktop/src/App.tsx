@@ -88,6 +88,8 @@ type HostRowViewModel = {
 
 type AppSettingsTab = "general" | "views" | "backup" | "extras" | "help" | "about";
 type DensityProfile = "aggressive" | "balanced" | "safe";
+type ListTonePreset = "subtle" | "strong";
+type FrameModePreset = "cleaner" | "balanced" | "clearer";
 type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
 type DragPayload =
   | { type: "session"; sessionId: string }
@@ -132,6 +134,8 @@ const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
 const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
+const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
+const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
 const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
 const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
@@ -480,6 +484,20 @@ export function App() {
     }
     const persisted = window.localStorage.getItem(DENSITY_PROFILE_STORAGE_KEY);
     return persisted === "aggressive" || persisted === "safe" || persisted === "balanced" ? persisted : "balanced";
+  });
+  const [listTonePreset, setListTonePreset] = useState<ListTonePreset>(() => {
+    if (typeof window === "undefined") {
+      return "subtle";
+    }
+    const persisted = window.localStorage.getItem(LIST_TONE_PRESET_STORAGE_KEY);
+    return persisted === "strong" ? "strong" : "subtle";
+  });
+  const [frameModePreset, setFrameModePreset] = useState<FrameModePreset>(() => {
+    if (typeof window === "undefined") {
+      return "balanced";
+    }
+    const persisted = window.localStorage.getItem(FRAME_MODE_PRESET_STORAGE_KEY);
+    return persisted === "cleaner" || persisted === "clearer" || persisted === "balanced" ? persisted : "balanced";
   });
   const [terminalFontOffset, setTerminalFontOffset] = useState<number>(() => {
     if (typeof window === "undefined") {
@@ -898,6 +916,12 @@ export function App() {
     window.localStorage.setItem(DENSITY_PROFILE_STORAGE_KEY, densityProfile);
   }, [densityProfile]);
   useEffect(() => {
+    window.localStorage.setItem(LIST_TONE_PRESET_STORAGE_KEY, listTonePreset);
+  }, [listTonePreset]);
+  useEffect(() => {
+    window.localStorage.setItem(FRAME_MODE_PRESET_STORAGE_KEY, frameModePreset);
+  }, [frameModePreset]);
+  useEffect(() => {
     window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
   }, [terminalFontOffset]);
   useEffect(() => {
@@ -1075,17 +1099,6 @@ export function App() {
       hideSidebarTimeoutRef.current = null;
     }
   }, []);
-
-  const selectHost = (hostAlias: string) => {
-    const found = hosts.find((item) => item.host === hostAlias);
-    if (!found) {
-      return;
-    }
-    setActiveHost(found.host);
-    setCurrentHost(found);
-    setOpenHostMenuHostAlias("");
-    setTagDraft((metadataStore.hosts[found.host]?.tags ?? []).join(", "));
-  };
 
   const toggleHostMenu = (host: HostConfig) => {
     setOpenHostMenuHostAlias((prev) => {
@@ -2082,6 +2095,10 @@ export function App() {
       const paneIdentity = resolvePaneIdentity(paneIndex);
       const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
       const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
+      const hasPaneSession = Boolean(paneSessionId);
+      const canClosePane = paneOrder.length > 1;
+      const canResetLayout = paneOrder.length > 1;
+      const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
       return (
         <div
           key={`pane-${paneIndex}`}
@@ -2152,35 +2169,32 @@ export function App() {
             });
           }}
         >
-          <div className="split-pane-label">
-            <div className="pane-label-actions">
+          <div className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""}`}>
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
               <button
-                className="btn action-icon-btn pane-label-action-btn"
-                title="Clear this pane"
-                aria-label={`Clear pane ${paneIndex + 1}`}
+                type="button"
+                className={`split-pane-index-pill ${activePaneIndex === paneIndex ? "is-active" : ""}`}
+                title={`Focus pane ${paneIndex + 1}`}
+                aria-label={`Focus pane ${paneIndex + 1}`}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("pane.clear", paneIndex);
+                  setActivePaneIndex(paneIndex);
+                  if (paneSessionId) {
+                    setActiveSession(paneSessionId);
+                    requestTerminalFocus(paneSessionId);
+                  }
                 }}
               >
-                <span aria-hidden="true">⌫</span>
+                {`Pane ${paneIndex + 1}`}
               </button>
+              <span className="split-pane-label-title" title={paneIdentity}>
+                {paneIdentity}
+              </span>
+            </div>
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
               <button
-                className="btn action-icon-btn action-icon-btn-danger pane-label-action-btn"
-                title="Close pane and session"
-                aria-label={`Close pane ${paneIndex + 1} and its session`}
-                disabled={paneOrder.length <= 1}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.close", paneIndex);
-                }}
-              >
-                <span aria-hidden="true">×</span>
-              </button>
-              <button
-                className="btn action-icon-btn pane-label-action-btn"
+                className="btn action-icon-btn pane-toolbar-btn"
                 title="Split pane left"
                 aria-label={`Split pane ${paneIndex + 1} left`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2192,7 +2206,7 @@ export function App() {
                 <span aria-hidden="true">←</span>
               </button>
               <button
-                className="btn action-icon-btn pane-label-action-btn"
+                className="btn action-icon-btn pane-toolbar-btn"
                 title="Split pane right"
                 aria-label={`Split pane ${paneIndex + 1} right`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2204,7 +2218,7 @@ export function App() {
                 <span aria-hidden="true">→</span>
               </button>
               <button
-                className="btn action-icon-btn pane-label-action-btn"
+                className="btn action-icon-btn pane-toolbar-btn"
                 title="Split pane top"
                 aria-label={`Split pane ${paneIndex + 1} top`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2216,7 +2230,7 @@ export function App() {
                 <span aria-hidden="true">┬</span>
               </button>
               <button
-                className="btn action-icon-btn pane-label-action-btn"
+                className="btn action-icon-btn pane-toolbar-btn"
                 title="Split pane bottom"
                 aria-label={`Split pane ${paneIndex + 1} bottom`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2228,7 +2242,39 @@ export function App() {
                 <span aria-hidden="true">┴</span>
               </button>
               <button
-                className={`btn action-icon-btn pane-label-action-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
+                type="button"
+                className={`pane-swap-handle pane-toolbar-btn ${panePointerDragSource === paneIndex ? "is-active" : ""}`}
+                title="Drag pane to another pane"
+                aria-label={`Drag pane ${paneIndex + 1} to swap`}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setPanePointerDragSource(paneIndex);
+                  setPaneDragPointer({ x: event.clientX, y: event.clientY });
+                }}
+              >
+                ↕
+              </button>
+            </div>
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-quick">
+              <button
+                className="btn action-icon-btn pane-toolbar-btn"
+                title="Clear this pane"
+                aria-label={`Clear pane ${paneIndex + 1}`}
+                disabled={!hasPaneSession}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleContextAction("pane.clear", paneIndex);
+                }}
+              >
+                <span aria-hidden="true">⌫</span>
+              </button>
+              <button
+                className={`btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
                 title={`Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`}
                 aria-label={`Broadcast ${isBroadcastModeEnabled ? "on" : "off"}`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2239,27 +2285,45 @@ export function App() {
               >
                 <span aria-hidden="true">@</span>
               </button>
-            </div>
-            <button
-              type="button"
-              className={`pane-swap-handle ${panePointerDragSource === paneIndex ? "is-active" : ""}`}
-              title="Drag pane to another pane"
-              aria-label={`Drag pane ${paneIndex + 1} to swap`}
-              onPointerDown={(event) => {
-                if (event.button !== 0) {
-                  return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                setPanePointerDragSource(paneIndex);
-                setPaneDragPointer({ x: event.clientX, y: event.clientY });
-              }}
-            >
-              ↕
-            </button>
-            <div className="split-pane-label-meta">
-              <span className="split-pane-index-pill">{`Pane ${paneIndex + 1}`}</span>
-              <span className="split-pane-label-title">{paneIdentity}</span>
+              <button
+                className={`btn action-icon-btn pane-toolbar-btn ${isPaneBroadcastTarget ? "is-broadcast-active" : ""}`}
+                title="Toggle pane target"
+                aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
+                disabled={!isBroadcastModeEnabled || !hasPaneSession}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleContextAction("broadcast.togglePaneTarget", paneIndex);
+                }}
+              >
+                <span aria-hidden="true">◉</span>
+              </button>
+              <button
+                className="btn action-icon-btn action-icon-btn-danger pane-toolbar-btn"
+                title="Close pane and session"
+                aria-label={`Close pane ${paneIndex + 1} and its session`}
+                disabled={!canClosePane}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleContextAction("pane.close", paneIndex);
+                }}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+              <button
+                className="btn action-icon-btn pane-toolbar-btn"
+                title="Reset pane layout"
+                aria-label="Reset pane layout"
+                disabled={!canResetLayout}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  resetPaneLayout();
+                }}
+              >
+                <span aria-hidden="true">↺</span>
+              </button>
             </div>
           </div>
           {paneSessionId ? (
@@ -2320,12 +2384,9 @@ export function App() {
         ★
       </button>
       <button
-        className={`host-item ${row.connected ? "is-connected" : "is-disconnected"} ${
-          activeHost === row.host.host ? "is-active" : ""
-        }`}
+        className={`host-item ${row.connected ? "is-connected" : "is-disconnected"}`}
         onMouseEnter={() => setHoveredHostAlias(row.host.host)}
         onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
-        onClick={() => selectHost(row.host.host)}
         onDoubleClick={() => {
           void connectToHostInNewPane(row.host);
         }}
@@ -2441,6 +2502,8 @@ export function App() {
         isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"
       } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`}
       data-density={densityProfile}
+      data-list-tone={listTonePreset}
+      data-frame-mode={frameModePreset}
       style={appShellStyle}
     >
       <button
@@ -2904,6 +2967,35 @@ export function App() {
                     />
                     <span className="field-help">
                       Final terminal size: {terminalFontSize}px (profile base + offset, saved separately).
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">List tone intensity</span>
+                    <select
+                      className="input density-profile-select"
+                      value={listTonePreset}
+                      onChange={(event) => setListTonePreset(event.target.value as ListTonePreset)}
+                    >
+                      <option value="subtle">Subtle</option>
+                      <option value="strong">Strong</option>
+                    </select>
+                    <span className="field-help">
+                      Controls color intensity for hosts, sessions, chips and context pills.
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Frame mode</span>
+                    <select
+                      className="input density-profile-select"
+                      value={frameModePreset}
+                      onChange={(event) => setFrameModePreset(event.target.value as FrameModePreset)}
+                    >
+                      <option value="cleaner">Cleaner (lighter hover frames)</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="clearer">Clearer (stronger focus/drag frames)</option>
+                    </select>
+                    <span className="field-help">
+                      Controls how strongly frames appear in hover, focus and drag states.
                     </span>
                   </label>
                 </div>

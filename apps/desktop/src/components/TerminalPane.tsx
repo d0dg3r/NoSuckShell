@@ -43,7 +43,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       fontFamily: "monospace",
       fontSize,
       theme: {
-        background: "#0f141f",
+        background: "#0b0d10",
         foreground: "#dce6f8",
         cursor: "#4cd8ff",
       },
