@@ -182,13 +182,8 @@ body,
   background: rgba(12, 20, 24, 0.96);
 }
 
-.left-rail-edge-handle.is-hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
 .sidebar-pin-btn {
-  min-width: 88px;
+  border-width: 2px;
 }
 
 .sidebar-pin-btn.is-active {
@@ -197,18 +192,6 @@ body,
   box-shadow: 0 0 0 1px rgba(126, 248, 192, 0.24);
 }
 
-.left-rail-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.left-rail-actions .btn {
-  flex: 1;
-}
-
-.host-actions-card,
 .host-filter-card {
   border-radius: 14px;
   border: 2px solid var(--border-main);
@@ -218,7 +201,9 @@ body,
 
 .brand {
   display: grid;
-  gap: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .brand-logo-card {
@@ -233,6 +218,27 @@ body,
   max-width: none;
   height: auto;
   display: block;
+}
+
+.brand-header-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-header-icon-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.sidebar-pin-btn.sidebar-header-icon-btn {
+  font-size: 18px;
 }
 
 .brand-subtitle {
