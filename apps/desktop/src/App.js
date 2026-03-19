@@ -112,22 +112,6 @@ const updateSplitRatioInTree = (node, splitId, ratio) => {
         second: updateSplitRatioInTree(node.second, splitId, ratio),
     };
 };
-const swapPaneIndicesInTree = (node, firstPane, secondPane) => {
-    if (node.type === "leaf") {
-        if (node.paneIndex === firstPane) {
-            return { ...node, paneIndex: secondPane };
-        }
-        if (node.paneIndex === secondPane) {
-            return { ...node, paneIndex: firstPane };
-        }
-        return node;
-    }
-    return {
-        ...node,
-        first: swapPaneIndicesInTree(node.first, firstPane, secondPane),
-        second: swapPaneIndicesInTree(node.second, firstPane, secondPane),
-    };
-};
 const removePaneFromTree = (node, targetPane) => {
     if (node.type === "leaf") {
         return node.paneIndex === targetPane ? null : node;
@@ -346,9 +330,8 @@ export function App() {
     const [draggingKind, setDraggingKind] = useState(null);
     const [sessionDropMode, setSessionDropMode] = useState("spawn");
     const [dragOverPaneIndex, setDragOverPaneIndex] = useState(null);
-    const [panePointerDragSource, setPanePointerDragSource] = useState(null);
-    const [paneDragPointer, setPaneDragPointer] = useState(null);
-    const [swapPulsePaneIndices, setSwapPulsePaneIndices] = useState([]);
+    const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState(null);
+    const [activeDropZone, setActiveDropZone] = useState(null);
     const [splitResizeState, setSplitResizeState] = useState(null);
     const [sidebarWidth, setSidebarWidth] = useState(() => {
         if (typeof window === "undefined") {
@@ -419,13 +402,15 @@ export function App() {
     const pendingProfileLoadSessionIdsRef = useRef(null);
     const sessionsRef = useRef([]);
     const metadataStoreRef = useRef(createDefaultMetadataStore());
+    const orphanSeenSessionIdsRef = useRef(new Set());
+    const orphanClosingSessionIdsRef = useRef(new Set());
     const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState(null);
     const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState(null);
     const canSave = useMemo(() => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0, [currentHost]);
     const canCreateHost = useMemo(() => newHostDraft.host.trim().length > 0 && newHostDraft.hostName.trim().length > 0, [newHostDraft]);
     const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
     const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
-    const hasAssignedPaneSessions = useMemo(() => splitSlots.some((slot) => Boolean(slot)), [splitSlots]);
+    const visiblePaneSessionIds = useMemo(() => splitSlots.filter((slot) => Boolean(slot)), [splitSlots]);
     const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
     const selectedLayoutProfile = useMemo(() => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null, [layoutProfiles, selectedLayoutProfileId]);
     const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
@@ -574,23 +559,6 @@ export function App() {
         return paneIndices;
     }, [hoveredHostAlias, sessions, splitSlots]);
     const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
-    const swapPulsePaneSet = useMemo(() => new Set(swapPulsePaneIndices), [swapPulsePaneIndices]);
-    const dragGhostLabel = useMemo(() => {
-        if (panePointerDragSource === null) {
-            return "";
-        }
-        const sourceSessionId = splitSlots[panePointerDragSource] ?? null;
-        if (!sourceSessionId) {
-            return "empty";
-        }
-        const sourceHost = sessions.find((session) => session.id === sourceSessionId)?.host ?? null;
-        if (!sourceHost) {
-            return "empty";
-        }
-        const sourceHostConfig = hosts.find((host) => host.host === sourceHost) ?? null;
-        const sourceUser = sourceHostConfig?.user.trim() || metadataStore.defaultUser.trim();
-        return sourceUser ? `${sourceUser}@${sourceHost}` : sourceHost;
-    }, [hosts, metadataStore.defaultUser, panePointerDragSource, sessions, splitSlots]);
     useEffect(() => {
         sessionsRef.current = sessions;
     }, [sessions]);
@@ -709,6 +677,45 @@ export function App() {
         setBroadcastTargets((prev) => sanitizeBroadcastTargets(prev, sessionIds));
         setTrustPromptQueue((prev) => prev.filter((entry) => sessionIds.includes(entry.sessionId)));
     }, [sessionIds]);
+    useEffect(() => {
+        const assignedSessionIds = new Set(splitSlots.filter((slot) => Boolean(slot)));
+        const orphanSessionIds = sessions
+            .map((session) => session.id)
+            .filter((sessionId) => !assignedSessionIds.has(sessionId));
+        const orphanSet = new Set(orphanSessionIds);
+        orphanSeenSessionIdsRef.current.forEach((sessionId) => {
+            if (!orphanSet.has(sessionId)) {
+                orphanSeenSessionIdsRef.current.delete(sessionId);
+            }
+        });
+        orphanSessionIds.forEach((sessionId) => {
+            if (orphanClosingSessionIdsRef.current.has(sessionId)) {
+                return;
+            }
+            if (!orphanSeenSessionIdsRef.current.has(sessionId)) {
+                orphanSeenSessionIdsRef.current.add(sessionId);
+                return;
+            }
+            orphanClosingSessionIdsRef.current.add(sessionId);
+            void closeSession(sessionId)
+                .catch((error) => {
+                setError(`Failed to close unassigned session: ${String(error)}`);
+            })
+                .finally(() => {
+                setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+                setActiveSession((prev) => (prev === sessionId ? "" : prev));
+                setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+                setBroadcastTargets((prev) => {
+                    const nextSet = new Set(prev);
+                    nextSet.delete(sessionId);
+                    return nextSet;
+                });
+                setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+                orphanSeenSessionIdsRef.current.delete(sessionId);
+                orphanClosingSessionIdsRef.current.delete(sessionId);
+            });
+        });
+    }, [sessions, splitSlots]);
     useEffect(() => {
         if (typeof window === "undefined") {
             return;
@@ -860,47 +867,6 @@ export function App() {
             window.removeEventListener("pointerup", onPointerUp);
         };
     }, [splitResizeState]);
-    useEffect(() => {
-        const clearPointerDragSource = (event) => {
-            if (panePointerDragSource === null) {
-                return;
-            }
-            const target = event.target;
-            const dropPaneElement = target?.closest("[data-pane-index]");
-            const dropPaneIndexRaw = dropPaneElement?.dataset?.paneIndex;
-            const dropPaneIndex = typeof dropPaneIndexRaw === "string" && dropPaneIndexRaw.length > 0 ? Number(dropPaneIndexRaw) : null;
-            if (dropPaneIndex !== null &&
-                Number.isInteger(dropPaneIndex) &&
-                dropPaneIndex >= 0 &&
-                dropPaneIndex !== panePointerDragSource) {
-                swapPaneIndices(panePointerDragSource, dropPaneIndex, "pointer-fallback");
-            }
-            setPanePointerDragSource(null);
-            setPaneDragPointer(null);
-            setDragOverPaneIndex(null);
-        };
-        const updatePointerDragPosition = (event) => {
-            if (panePointerDragSource === null) {
-                return;
-            }
-            setPaneDragPointer({ x: event.clientX, y: event.clientY });
-        };
-        window.addEventListener("pointermove", updatePointerDragPosition);
-        window.addEventListener("pointerup", clearPointerDragSource);
-        return () => {
-            window.removeEventListener("pointermove", updatePointerDragPosition);
-            window.removeEventListener("pointerup", clearPointerDragSource);
-        };
-    }, [panePointerDragSource]);
-    useEffect(() => {
-        if (swapPulsePaneIndices.length === 0) {
-            return;
-        }
-        const timer = window.setTimeout(() => {
-            setSwapPulsePaneIndices([]);
-        }, 220);
-        return () => window.clearTimeout(timer);
-    }, [swapPulsePaneIndices]);
     useEffect(() => {
         if (!isQuickAddMenuOpen) {
             return;
@@ -1313,8 +1279,7 @@ export function App() {
     };
     const setDragPayload = (event, payload) => {
         const serialized = JSON.stringify(payload);
-        event.dataTransfer.effectAllowed =
-            payload.type === "pane" ? "move" : payload.type === "session" ? "copyMove" : "copy";
+        event.dataTransfer.effectAllowed = payload.type === "session" ? "copyMove" : "copy";
         event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
         event.dataTransfer.setData("text/plain", serialized);
     };
@@ -1329,18 +1294,26 @@ export function App() {
                 ? { type: "session", sessionId: parsed.sessionId }
                 : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
                     ? { type: "machine", hostAlias: parsed.hostAlias }
-                    : parsed.type === "pane" && typeof parsed.paneIndex === "number" && Number.isInteger(parsed.paneIndex)
-                        ? { type: "pane", paneIndex: parsed.paneIndex }
-                        : null;
+                    : null;
             return result;
         }
         catch {
             return null;
         }
     };
-    const resolveSplitDirectionFromDrop = (clientX, clientY, bounds) => {
+    const resolvePaneDropZone = (clientX, clientY, bounds) => {
         if (!bounds) {
-            return "right";
+            return "center";
+        }
+        const relativeX = (clientX - bounds.left) / Math.max(1, bounds.width);
+        const relativeY = (clientY - bounds.top) / Math.max(1, bounds.height);
+        const centerBandStart = 0.33;
+        const centerBandEnd = 0.67;
+        if (relativeX >= centerBandStart &&
+            relativeX <= centerBandEnd &&
+            relativeY >= centerBandStart &&
+            relativeY <= centerBandEnd) {
+            return "center";
         }
         const centerX = bounds.left + bounds.width / 2;
         const centerY = bounds.top + bounds.height / 2;
@@ -1354,6 +1327,8 @@ export function App() {
     const handlePaneDrop = async (event, paneIndex) => {
         event.preventDefault();
         setDragOverPaneIndex(null);
+        setActiveDropZonePaneIndex(null);
+        setActiveDropZone(null);
         const dropClientX = event.clientX;
         const dropClientY = event.clientY;
         const rawBounds = event.currentTarget?.getBoundingClientRect() ?? null;
@@ -1369,37 +1344,23 @@ export function App() {
         if (!payload) {
             return;
         }
-        if (payload.type === "pane") {
-            if (payload.paneIndex === paneIndex) {
-                return;
-            }
-            swapPaneIndices(payload.paneIndex, paneIndex, "native-drop");
-            return;
-        }
-        const placeSessionOnPane = (sessionId) => {
-            const targetHasSession = Boolean(splitSlots[paneIndex]);
-            if (!targetHasSession) {
-                setActivePaneIndex(paneIndex);
-                setActiveSession(sessionId);
-                setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, sessionId));
-                return;
-            }
-            const splitDirection = resolveSplitDirectionFromDrop(dropClientX, dropClientY, dropBounds);
-            const adjacentPaneIndex = splitFocusedPane(splitDirection, paneIndex);
-            setActivePaneIndex(adjacentPaneIndex);
+        const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
+        const assignSessionToZone = (sessionId, zone, moveExistingSession = false) => {
+            const targetPane = zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex);
+            setActivePaneIndex(targetPane);
             setActiveSession(sessionId);
-            setSplitSlots((prev) => assignSessionToPane(prev, adjacentPaneIndex, sessionId));
+            setSplitSlots((prev) => {
+                const base = moveExistingSession ? removeSessionFromSlots(prev, sessionId) : prev;
+                return assignSessionToPane(base, targetPane, sessionId);
+            });
+        };
+        const placeSessionOnPane = (sessionId) => {
+            assignSessionToZone(sessionId, resolvedDropZone, false);
         };
         if (payload.type === "session") {
             const shouldMoveExisting = sessionDropMode === "move";
             if (shouldMoveExisting) {
-                setActivePaneIndex(paneIndex);
-                setActiveSession(payload.sessionId);
-                setSplitSlots((prev) => {
-                    const cleared = removeSessionFromSlots(prev, payload.sessionId);
-                    const moved = assignSessionToPane(cleared, paneIndex, payload.sessionId);
-                    return moved;
-                });
+                assignSessionToZone(payload.sessionId, resolvedDropZone, true);
                 return;
             }
             const sourceSession = sessions.find((session) => session.id === payload.sessionId) ?? null;
@@ -1431,9 +1392,6 @@ export function App() {
             if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
                 missingDragPayloadLoggedRef.current = true;
             }
-            if (draggingKind === "pane") {
-                return "move";
-            }
             if (draggingKind === "session") {
                 return sessionDropMode === "move" ? "move" : "copy";
             }
@@ -1443,18 +1401,12 @@ export function App() {
             return "none";
         }
         missingDragPayloadLoggedRef.current = false;
-        if (payload.type === "pane") {
-            return "move";
-        }
         if (payload.type === "session") {
             return sessionDropMode === "move" ? "move" : "copy";
         }
         return "copy";
     };
     const getEmptyPaneDropHint = () => {
-        if (draggingKind === "pane") {
-            return "Drop pane here to swap.";
-        }
         if (draggingKind === "machine") {
             return sessionDropMode === "move"
                 ? "Drop host to move an existing session."
@@ -1463,14 +1415,6 @@ export function App() {
         return "Drag a host here.";
     };
     const getSessionModifierModeText = () => sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
-    const swapPaneIndices = (fromPaneIndex, toPaneIndex, _source) => {
-        if (fromPaneIndex === toPaneIndex) {
-            return;
-        }
-        setSplitTree((prev) => swapPaneIndicesInTree(prev, fromPaneIndex, toPaneIndex));
-        setActivePaneIndex(toPaneIndex);
-        setSwapPulsePaneIndices([fromPaneIndex, toPaneIndex]);
-    };
     const toggleBroadcastTarget = (sessionId) => {
         if (!isBroadcastModeEnabled) {
             return;
@@ -1491,11 +1435,8 @@ export function App() {
     }, []);
     const closeSessionById = async (sessionId) => {
         await closeSession(sessionId);
-        const next = sessions.filter((session) => session.id !== sessionId);
-        setSessions(next);
-        if (activeSession === sessionId) {
-            setActiveSession(next[0]?.id ?? "");
-        }
+        setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+        setActiveSession((prev) => (prev === sessionId ? "" : prev));
         setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
         setBroadcastTargets((prev) => {
             const nextSet = new Set(prev);
@@ -1503,6 +1444,14 @@ export function App() {
             return nextSet;
         });
         setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+    };
+    const closeSessionInPane = async (paneIndex) => {
+        const paneSessionId = splitSlots[paneIndex] ?? null;
+        if (!paneSessionId) {
+            setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
+            return;
+        }
+        await closeSessionById(paneSessionId);
     };
     const closeAllSessions = async (withLayoutReset) => {
         if (sessionIds.length === 0) {
@@ -1596,8 +1545,20 @@ export function App() {
         if (!isBroadcastModeEnabled) {
             return;
         }
-        const targets = splitSlots.filter((slot) => Boolean(slot));
-        setBroadcastTargets(new Set(targets));
+        if (visiblePaneSessionIds.length === 0) {
+            return;
+        }
+        setBroadcastTargets((prev) => {
+            const next = new Set(prev);
+            const allVisibleAlreadyTargeted = visiblePaneSessionIds.every((sessionId) => next.has(sessionId));
+            if (allVisibleAlreadyTargeted) {
+                visiblePaneSessionIds.forEach((sessionId) => next.delete(sessionId));
+            }
+            else {
+                visiblePaneSessionIds.forEach((sessionId) => next.add(sessionId));
+            }
+            return next;
+        });
     };
     const setBroadcastMode = (enabled) => {
         setIsBroadcastModeEnabled(enabled);
@@ -1609,7 +1570,7 @@ export function App() {
         setActivePaneIndex(paneIndex);
         switch (actionId) {
             case "pane.clear":
-                setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
+                await closeSessionInPane(paneIndex);
                 break;
             case "pane.close":
                 await closePaneAndSession(paneIndex);
@@ -1868,44 +1829,41 @@ export function App() {
             const paneIdentity = resolvePaneIdentity(paneIndex);
             const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
             const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
-            return (_jsxs("div", { "data-pane-index": paneIndex, className: `split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${dragOverPaneIndex === paneIndex ? "is-drag-over" : ""} ${panePointerDragSource === paneIndex ? "is-being-dragged" : ""} ${swapPulsePaneSet.has(paneIndex) ? "is-swap-pulse" : ""} ${isHoverTarget ? "is-host-hover-target" : ""} ${isHoverDimmed ? "is-host-hover-dimmed" : ""} ${hoveredHostAlias ? "is-host-hovering" : ""}`, draggable: false, onClick: () => {
+            const isDropOverlayVisible = (draggingKind === "machine" || draggingKind === "session") &&
+                dragOverPaneIndex === paneIndex &&
+                activeDropZonePaneIndex === paneIndex;
+            const hasPaneSession = Boolean(paneSessionId);
+            const canClosePane = paneOrder.length > 1;
+            const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
+            const allVisibleAlreadyTargeted = isBroadcastModeEnabled &&
+                visiblePaneSessionIds.length > 0 &&
+                visiblePaneSessionIds.every((sessionId) => broadcastTargets.has(sessionId));
+            return (_jsxs("div", { "data-pane-index": paneIndex, className: `split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${dragOverPaneIndex === paneIndex ? "is-drag-over" : ""} ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${isHoverDimmed ? "is-host-hover-dimmed" : ""} ${hoveredHostAlias ? "is-host-hovering" : ""}`, draggable: false, onClick: () => {
                     setActivePaneIndex(paneIndex);
                     if (paneSessionId) {
                         setActiveSession(paneSessionId);
                         requestTerminalFocus(paneSessionId);
                     }
-                }, onPointerDown: (event) => {
-                    const target = event.target;
-                    const inPaneLabel = Boolean(target?.closest(".split-pane-label"));
-                    if (!inPaneLabel || event.button !== 0) {
-                        return;
-                    }
-                    setPanePointerDragSource(paneIndex);
-                    setPaneDragPointer({ x: event.clientX, y: event.clientY });
-                }, onPointerEnter: () => {
-                    if (panePointerDragSource !== null && panePointerDragSource !== paneIndex) {
-                        setDragOverPaneIndex(paneIndex);
-                    }
-                }, onPointerUp: () => {
-                    if (panePointerDragSource === null) {
-                        return;
-                    }
-                    if (panePointerDragSource !== paneIndex) {
-                        swapPaneIndices(panePointerDragSource, paneIndex, "pointer-fallback");
-                    }
-                    setPanePointerDragSource(null);
-                    setDragOverPaneIndex(null);
                 }, onDragOver: (event) => {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = resolveDropEffect(event);
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setDragOverPaneIndex(paneIndex);
+                    setActiveDropZonePaneIndex(paneIndex);
+                    setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
                 }, onDragEnter: (event) => {
                     event.preventDefault();
                     setDragOverPaneIndex(paneIndex);
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setActiveDropZonePaneIndex(paneIndex);
+                    setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
                 }, onDragLeave: (event) => {
                     if (event.currentTarget.contains(event.relatedTarget)) {
                         return;
                     }
                     setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
+                    setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
+                    setActiveDropZone(null);
                 }, onDrop: (event) => {
                     void handlePaneDrop(event, paneIndex);
                 }, onContextMenu: (event) => {
@@ -1916,36 +1874,34 @@ export function App() {
                         y: event.clientY,
                         paneIndex,
                     });
-                }, children: [_jsxs("div", { className: "split-pane-label", children: [_jsxs("div", { className: "pane-label-actions", children: [_jsx("button", { className: "btn action-icon-btn pane-label-action-btn", title: "Clear this pane", "aria-label": `Clear pane ${paneIndex + 1}`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
-                                            event.stopPropagation();
-                                            void handleContextAction("pane.clear", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u232B" }) }), _jsx("button", { className: "btn action-icon-btn action-icon-btn-danger pane-label-action-btn", title: "Close pane and session", "aria-label": `Close pane ${paneIndex + 1} and its session`, disabled: paneOrder.length <= 1, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
-                                            event.stopPropagation();
-                                            void handleContextAction("pane.close", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u00D7" }) }), _jsx("button", { className: "btn action-icon-btn pane-label-action-btn", title: "Split pane left", "aria-label": `Split pane ${paneIndex + 1} left`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                }, children: [isDropOverlayVisible && (_jsxs("div", { className: "pane-drop-zones", "aria-hidden": "true", children: [_jsx("div", { className: `pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`, children: "Top" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`, children: "Left" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`, children: "Center" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`, children: "Right" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`, children: "Bottom" })] })), _jsxs("div", { className: `split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""}`, children: [_jsx("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-nav", children: _jsx("span", { className: "split-pane-label-title", title: paneIdentity, children: paneIdentity }) }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-layout", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane left", "aria-label": `Split pane ${paneIndex + 1} left`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("layout.split.left", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u2190" }) }), _jsx("button", { className: "btn action-icon-btn pane-label-action-btn", title: "Split pane right", "aria-label": `Split pane ${paneIndex + 1} right`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsx("span", { className: "split-icon split-icon-vertical split-icon-vertical-normal", "aria-hidden": "true" }) }), _jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane right", "aria-label": `Split pane ${paneIndex + 1} right`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("layout.split.right", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u2192" }) }), _jsx("button", { className: "btn action-icon-btn pane-label-action-btn", title: "Split pane top", "aria-label": `Split pane ${paneIndex + 1} top`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsx("span", { className: "split-icon split-icon-vertical split-icon-vertical-inverse", "aria-hidden": "true" }) }), _jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane top", "aria-label": `Split pane ${paneIndex + 1} top`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("layout.split.top", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u252C" }) }), _jsx("button", { className: "btn action-icon-btn pane-label-action-btn", title: "Split pane bottom", "aria-label": `Split pane ${paneIndex + 1} bottom`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsx("span", { className: "split-icon split-icon-horizontal split-icon-horizontal-normal", "aria-hidden": "true" }) }), _jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane bottom", "aria-label": `Split pane ${paneIndex + 1} bottom`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("layout.split.bottom", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u2534" }) }), _jsx("button", { className: `btn action-icon-btn pane-label-action-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`, title: `Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`, "aria-label": `Broadcast ${isBroadcastModeEnabled ? "on" : "off"}`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsx("span", { className: "split-icon split-icon-horizontal split-icon-horizontal-inverse", "aria-hidden": "true" }) })] }), _jsx("span", { className: "pane-toolbar-separator", "aria-hidden": "true" }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-broadcast", children: [_jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`, title: `Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`, "aria-label": `Broadcast ${isBroadcastModeEnabled ? "on" : "off"}`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             setBroadcastMode(!isBroadcastModeEnabled);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "@" }) })] }), _jsx("button", { type: "button", className: `pane-swap-handle ${panePointerDragSource === paneIndex ? "is-active" : ""}`, title: "Drag pane to another pane", "aria-label": `Drag pane ${paneIndex + 1} to swap`, onPointerDown: (event) => {
-                                    if (event.button !== 0) {
-                                        return;
-                                    }
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    setPanePointerDragSource(paneIndex);
-                                    setPaneDragPointer({ x: event.clientX, y: event.clientY });
-                                }, children: "\u2195" }), _jsxs("div", { className: "split-pane-label-meta", children: [_jsx("span", { className: "split-pane-index-pill", children: `Pane ${paneIndex + 1}` }), _jsx("span", { className: "split-pane-label-title", children: paneIdentity })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput, fontSize: terminalFontSize })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("p", { children: "Empty pane." }), _jsx("span", { children: getEmptyPaneDropHint() }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
+                                        }, children: _jsx("span", { "aria-hidden": "true", children: "@" }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""}`, title: "Toggle pane target", "aria-label": `Toggle pane ${paneIndex + 1} broadcast target`, disabled: !isBroadcastModeEnabled || !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                            event.stopPropagation();
+                                            void handleContextAction("broadcast.togglePaneTarget", paneIndex);
+                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u25C9" }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${allVisibleAlreadyTargeted ? "is-broadcast-active" : ""}`, title: "Target all visible panes", "aria-label": "Target all visible panes", disabled: !isBroadcastModeEnabled, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                            event.stopPropagation();
+                                            void handleContextAction("broadcast.selectAllVisible", paneIndex);
+                                        }, children: "\u2301" })] }), _jsx("span", { className: "pane-toolbar-separator", "aria-hidden": "true" }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-close", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn", title: "Close session in pane", "aria-label": `Close session in pane ${paneIndex + 1}`, disabled: !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                            event.stopPropagation();
+                                            void handleContextAction("pane.clear", paneIndex);
+                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u232B" }) }), _jsx("button", { className: "btn action-icon-btn action-icon-btn-danger pane-toolbar-btn", title: "Close pane and session", "aria-label": `Close pane ${paneIndex + 1} and its session`, disabled: !canClosePane, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                            event.stopPropagation();
+                                            void handleContextAction("pane.close", paneIndex);
+                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u00D7" }) })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput, fontSize: terminalFontSize })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("p", { children: "Empty pane." }), _jsx("span", { children: getEmptyPaneDropHint() }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
         }
         const firstRatio = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, node.ratio));
         const secondRatio = 1 - firstRatio;
@@ -1983,10 +1939,7 @@ export function App() {
         "--sidebar-width": `${sidebarWidth}px`,
         "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     };
-    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, "data-density": densityProfile, "data-list-tone": listTonePreset, "data-frame-mode": frameModePreset, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, onClick: toggleSidebarPinned, children: isSidebarPinned ? "◧" : "◨" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsxs("header", { className: "brand", children: [_jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }), _jsxs("div", { className: "brand-utility-stack", children: [_jsxs("div", { className: "brand-utility-row", children: [_jsx("button", { className: `btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onClick: toggleSidebarPinned, children: _jsx("svg", { className: `header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`, viewBox: "0 0 24 24", "aria-hidden": "true", children: isSidebarPinned ? (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" })] })) : (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" }), _jsx("path", { d: "M4.3 4.3l15.4 15.4" })] })) }) }), _jsx("button", { className: "app-gear-btn sidebar-header-icon-btn mono-header-btn", "aria-label": "Open app settings", title: "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: _jsxs("svg", { className: "header-icon-svg settings-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "3.2" }), _jsx("path", { d: "M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" })] }) })] }), _jsxs("div", { className: "quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: _jsx("svg", { className: "add-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: _jsx("path", { d: "M12 6v12M6 12h12" }) }) }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] })] })] }), _jsxs("section", { className: "host-filter-card", children: [_jsx("div", { className: "sidebar-view-tabs", role: "tablist", "aria-label": "Sidebar views", children: sidebarViews.map((view) => (_jsx("button", { className: `tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`, role: "tab", "aria-selected": selectedSidebarViewId === view.id, onClick: () => setSelectedSidebarViewId(view.id), title: view.label, children: view.label }, view.id))) }), _jsxs("div", { className: "filter-head-row", children: [_jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [draggingKind === "machine" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Host drop mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host" })] })), _jsxs("div", { className: "session-pane-canvas", children: [_jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }), panePointerDragSource !== null && paneDragPointer ? (_jsxs("div", { className: `pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`, style: {
-                                            "--ghost-x": `${paneDragPointer.x + 14}px`,
-                                            "--ghost-y": `${paneDragPointer.y + 14}px`,
-                                        }, children: [_jsx("span", { className: "pane-drag-ghost-title", children: dragGhostLabel }), _jsx("span", { className: "pane-drag-ghost-subtitle", children: "Moving pane" })] })) : null] }), _jsx("div", { className: "sessions-footer", role: "status", children: _jsxs("div", { className: "sessions-footer-meta", children: [_jsxs("div", { className: "footer-layout-controls", children: [_jsx("button", { className: "btn footer-layout-btn footer-action-btn", onClick: resetPaneLayout, disabled: paneOrder.length === 1 && !hasAssignedPaneSessions, "aria-label": "Reset pane layout", title: "Reset pane layout", children: "Reset" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(false), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", title: pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", children: pendingCloseAllIntent === "close" ? "Confirm close all" : "Close all" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "reset" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(true), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "reset"
+    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, "data-density": densityProfile, "data-list-tone": listTonePreset, "data-frame-mode": frameModePreset, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, onClick: toggleSidebarPinned, children: isSidebarPinned ? "◧" : "◨" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsxs("header", { className: "brand", children: [_jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }), _jsxs("div", { className: "brand-utility-stack", children: [_jsxs("div", { className: "brand-utility-row", children: [_jsx("button", { className: `btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onClick: toggleSidebarPinned, children: _jsx("svg", { className: `header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`, viewBox: "0 0 24 24", "aria-hidden": "true", children: isSidebarPinned ? (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" })] })) : (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" }), _jsx("path", { d: "M4.3 4.3l15.4 15.4" })] })) }) }), _jsx("button", { className: "app-gear-btn sidebar-header-icon-btn mono-header-btn", "aria-label": "Open app settings", title: "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: _jsxs("svg", { className: "header-icon-svg settings-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "3.2" }), _jsx("path", { d: "M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" })] }) })] }), _jsxs("div", { className: "quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: _jsx("svg", { className: "add-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: _jsx("path", { d: "M12 6v12M6 12h12" }) }) }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] })] })] }), _jsxs("section", { className: "host-filter-card", children: [_jsx("div", { className: "sidebar-view-tabs", role: "tablist", "aria-label": "Sidebar views", children: sidebarViews.map((view) => (_jsx("button", { className: `tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`, role: "tab", "aria-selected": selectedSidebarViewId === view.id, onClick: () => setSelectedSidebarViewId(view.id), title: view.label, children: view.label }, view.id))) }), _jsxs("div", { className: "filter-head-row", children: [_jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [draggingKind === "machine" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Host drop mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host" })] })), _jsx("div", { className: "session-pane-canvas", children: _jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }) }), _jsx("div", { className: "sessions-footer", role: "status", children: _jsxs("div", { className: "sessions-footer-meta", children: [_jsxs("div", { className: "footer-layout-controls", children: [_jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(false), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", title: pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", children: pendingCloseAllIntent === "close" ? "Confirm close all" : "Close all" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "reset" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(true), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "reset"
                                                         ? "Confirm close all sessions and reset layout"
                                                         : "Close all sessions and reset layout", title: pendingCloseAllIntent === "reset"
                                                         ? "Confirm close all sessions and reset layout"

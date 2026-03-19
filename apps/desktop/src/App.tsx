@@ -93,8 +93,8 @@ type FrameModePreset = "cleaner" | "balanced" | "clearer";
 type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
 type DragPayload =
   | { type: "session"; sessionId: string }
-  | { type: "machine"; hostAlias: string }
-  | { type: "pane"; paneIndex: number };
+  | { type: "machine"; hostAlias: string };
+type PaneDropZone = "left" | "right" | "top" | "bottom" | "center";
 type ContextMenuState = {
   visible: boolean;
   x: number;
@@ -216,22 +216,6 @@ const updateSplitRatioInTree = (node: SplitTreeNode, splitId: string, ratio: num
     ...node,
     first: updateSplitRatioInTree(node.first, splitId, ratio),
     second: updateSplitRatioInTree(node.second, splitId, ratio),
-  };
-};
-const swapPaneIndicesInTree = (node: SplitTreeNode, firstPane: number, secondPane: number): SplitTreeNode => {
-  if (node.type === "leaf") {
-    if (node.paneIndex === firstPane) {
-      return { ...node, paneIndex: secondPane };
-    }
-    if (node.paneIndex === secondPane) {
-      return { ...node, paneIndex: firstPane };
-    }
-    return node;
-  }
-  return {
-    ...node,
-    first: swapPaneIndicesInTree(node.first, firstPane, secondPane),
-    second: swapPaneIndicesInTree(node.second, firstPane, secondPane),
   };
 };
 const removePaneFromTree = (node: SplitTreeNode, targetPane: number): SplitTreeNode | null => {
@@ -458,9 +442,8 @@ export function App() {
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [sessionDropMode, setSessionDropMode] = useState<"spawn" | "move">("spawn");
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
-  const [panePointerDragSource, setPanePointerDragSource] = useState<number | null>(null);
-  const [paneDragPointer, setPaneDragPointer] = useState<{ x: number; y: number } | null>(null);
-  const [swapPulsePaneIndices, setSwapPulsePaneIndices] = useState<number[]>([]);
+  const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState<number | null>(null);
+  const [activeDropZone, setActiveDropZone] = useState<PaneDropZone | null>(null);
   const [splitResizeState, setSplitResizeState] = useState<SplitResizeState | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     if (typeof window === "undefined") {
@@ -531,6 +514,8 @@ export function App() {
   const pendingProfileLoadSessionIdsRef = useRef<Set<string> | null>(null);
   const sessionsRef = useRef<SessionTab[]>([]);
   const metadataStoreRef = useRef<HostMetadataStore>(createDefaultMetadataStore());
+  const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
+  const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
 
@@ -544,7 +529,10 @@ export function App() {
   );
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
   const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
-  const hasAssignedPaneSessions = useMemo(() => splitSlots.some((slot) => Boolean(slot)), [splitSlots]);
+  const visiblePaneSessionIds = useMemo(
+    () => splitSlots.filter((slot): slot is string => Boolean(slot)),
+    [splitSlots],
+  );
   const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
   const selectedLayoutProfile = useMemo(
     () => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null,
@@ -709,23 +697,6 @@ export function App() {
     return paneIndices;
   }, [hoveredHostAlias, sessions, splitSlots]);
   const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
-  const swapPulsePaneSet = useMemo(() => new Set(swapPulsePaneIndices), [swapPulsePaneIndices]);
-  const dragGhostLabel = useMemo(() => {
-    if (panePointerDragSource === null) {
-      return "";
-    }
-    const sourceSessionId = splitSlots[panePointerDragSource] ?? null;
-    if (!sourceSessionId) {
-      return "empty";
-    }
-    const sourceHost = sessions.find((session) => session.id === sourceSessionId)?.host ?? null;
-    if (!sourceHost) {
-      return "empty";
-    }
-    const sourceHostConfig = hosts.find((host) => host.host === sourceHost) ?? null;
-    const sourceUser = sourceHostConfig?.user.trim() || metadataStore.defaultUser.trim();
-    return sourceUser ? `${sourceUser}@${sourceHost}` : sourceHost;
-  }, [hosts, metadataStore.defaultUser, panePointerDragSource, sessions, splitSlots]);
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
@@ -853,6 +824,49 @@ export function App() {
     setBroadcastTargets((prev) => sanitizeBroadcastTargets(prev, sessionIds));
     setTrustPromptQueue((prev) => prev.filter((entry) => sessionIds.includes(entry.sessionId)));
   }, [sessionIds]);
+
+  useEffect(() => {
+    const assignedSessionIds = new Set(splitSlots.filter((slot): slot is string => Boolean(slot)));
+    const orphanSessionIds = sessions
+      .map((session) => session.id)
+      .filter((sessionId) => !assignedSessionIds.has(sessionId));
+    const orphanSet = new Set(orphanSessionIds);
+
+    orphanSeenSessionIdsRef.current.forEach((sessionId) => {
+      if (!orphanSet.has(sessionId)) {
+        orphanSeenSessionIdsRef.current.delete(sessionId);
+      }
+    });
+
+    orphanSessionIds.forEach((sessionId) => {
+      if (orphanClosingSessionIdsRef.current.has(sessionId)) {
+        return;
+      }
+      if (!orphanSeenSessionIdsRef.current.has(sessionId)) {
+        orphanSeenSessionIdsRef.current.add(sessionId);
+        return;
+      }
+
+      orphanClosingSessionIdsRef.current.add(sessionId);
+      void closeSession(sessionId)
+        .catch((error) => {
+          setError(`Failed to close unassigned session: ${String(error)}`);
+        })
+        .finally(() => {
+          setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+          setActiveSession((prev) => (prev === sessionId ? "" : prev));
+          setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+          setBroadcastTargets((prev) => {
+            const nextSet = new Set(prev);
+            nextSet.delete(sessionId);
+            return nextSet;
+          });
+          setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+          orphanSeenSessionIdsRef.current.delete(sessionId);
+          orphanClosingSessionIdsRef.current.delete(sessionId);
+        });
+    });
+  }, [sessions, splitSlots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1016,52 +1030,6 @@ export function App() {
       window.removeEventListener("pointerup", onPointerUp);
     };
   }, [splitResizeState]);
-
-  useEffect(() => {
-    const clearPointerDragSource = (event: PointerEvent) => {
-      if (panePointerDragSource === null) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      const dropPaneElement = target?.closest("[data-pane-index]") as HTMLElement | null;
-      const dropPaneIndexRaw = dropPaneElement?.dataset?.paneIndex;
-      const dropPaneIndex =
-        typeof dropPaneIndexRaw === "string" && dropPaneIndexRaw.length > 0 ? Number(dropPaneIndexRaw) : null;
-      if (
-        dropPaneIndex !== null &&
-        Number.isInteger(dropPaneIndex) &&
-        dropPaneIndex >= 0 &&
-        dropPaneIndex !== panePointerDragSource
-      ) {
-        swapPaneIndices(panePointerDragSource, dropPaneIndex, "pointer-fallback");
-      }
-      setPanePointerDragSource(null);
-      setPaneDragPointer(null);
-      setDragOverPaneIndex(null);
-    };
-    const updatePointerDragPosition = (event: PointerEvent) => {
-      if (panePointerDragSource === null) {
-        return;
-      }
-      setPaneDragPointer({ x: event.clientX, y: event.clientY });
-    };
-    window.addEventListener("pointermove", updatePointerDragPosition);
-    window.addEventListener("pointerup", clearPointerDragSource);
-    return () => {
-      window.removeEventListener("pointermove", updatePointerDragPosition);
-      window.removeEventListener("pointerup", clearPointerDragSource);
-    };
-  }, [panePointerDragSource]);
-
-  useEffect(() => {
-    if (swapPulsePaneIndices.length === 0) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setSwapPulsePaneIndices([]);
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [swapPulsePaneIndices]);
 
   useEffect(() => {
     if (!isQuickAddMenuOpen) {
@@ -1500,8 +1468,7 @@ export function App() {
 
   const setDragPayload = (event: ReactDragEvent, payload: DragPayload) => {
     const serialized = JSON.stringify(payload);
-    event.dataTransfer.effectAllowed =
-      payload.type === "pane" ? "move" : payload.type === "session" ? "copyMove" : "copy";
+    event.dataTransfer.effectAllowed = payload.type === "session" ? "copyMove" : "copy";
     event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
     event.dataTransfer.setData("text/plain", serialized);
   };
@@ -1518,22 +1485,32 @@ export function App() {
           ? ({ type: "session", sessionId: parsed.sessionId } as DragPayload)
           : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
             ? ({ type: "machine", hostAlias: parsed.hostAlias } as DragPayload)
-            : parsed.type === "pane" && typeof parsed.paneIndex === "number" && Number.isInteger(parsed.paneIndex)
-              ? ({ type: "pane", paneIndex: parsed.paneIndex } as DragPayload)
-              : null;
+            : null;
       return result;
     } catch {
       return null;
     }
   };
 
-  const resolveSplitDirectionFromDrop = (
+  const resolvePaneDropZone = (
     clientX: number,
     clientY: number,
     bounds: Pick<DOMRect, "left" | "top" | "width" | "height"> | null,
-  ): "left" | "right" | "top" | "bottom" => {
+  ): PaneDropZone => {
     if (!bounds) {
-      return "right";
+      return "center";
+    }
+    const relativeX = (clientX - bounds.left) / Math.max(1, bounds.width);
+    const relativeY = (clientY - bounds.top) / Math.max(1, bounds.height);
+    const centerBandStart = 0.33;
+    const centerBandEnd = 0.67;
+    if (
+      relativeX >= centerBandStart &&
+      relativeX <= centerBandEnd &&
+      relativeY >= centerBandStart &&
+      relativeY <= centerBandEnd
+    ) {
+      return "center";
     }
     const centerX = bounds.left + bounds.width / 2;
     const centerY = bounds.top + bounds.height / 2;
@@ -1548,6 +1525,8 @@ export function App() {
   const handlePaneDrop = async (event: ReactDragEvent<HTMLDivElement>, paneIndex: number) => {
     event.preventDefault();
     setDragOverPaneIndex(null);
+    setActiveDropZonePaneIndex(null);
+    setActiveDropZone(null);
     const dropClientX = event.clientX;
     const dropClientY = event.clientY;
     const rawBounds = event.currentTarget?.getBoundingClientRect() ?? null;
@@ -1563,37 +1542,23 @@ export function App() {
     if (!payload) {
       return;
     }
-    if (payload.type === "pane") {
-      if (payload.paneIndex === paneIndex) {
-        return;
-      }
-      swapPaneIndices(payload.paneIndex, paneIndex, "native-drop");
-      return;
-    }
-    const placeSessionOnPane = (sessionId: string) => {
-      const targetHasSession = Boolean(splitSlots[paneIndex]);
-      if (!targetHasSession) {
-        setActivePaneIndex(paneIndex);
-        setActiveSession(sessionId);
-        setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, sessionId));
-        return;
-      }
-      const splitDirection = resolveSplitDirectionFromDrop(dropClientX, dropClientY, dropBounds);
-      const adjacentPaneIndex = splitFocusedPane(splitDirection, paneIndex);
-      setActivePaneIndex(adjacentPaneIndex);
+    const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
+    const assignSessionToZone = (sessionId: string, zone: PaneDropZone, moveExistingSession = false) => {
+      const targetPane = zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex);
+      setActivePaneIndex(targetPane);
       setActiveSession(sessionId);
-      setSplitSlots((prev) => assignSessionToPane(prev, adjacentPaneIndex, sessionId));
+      setSplitSlots((prev) => {
+        const base = moveExistingSession ? removeSessionFromSlots(prev, sessionId) : prev;
+        return assignSessionToPane(base, targetPane, sessionId);
+      });
+    };
+    const placeSessionOnPane = (sessionId: string) => {
+      assignSessionToZone(sessionId, resolvedDropZone, false);
     };
     if (payload.type === "session") {
       const shouldMoveExisting = sessionDropMode === "move";
       if (shouldMoveExisting) {
-        setActivePaneIndex(paneIndex);
-        setActiveSession(payload.sessionId);
-        setSplitSlots((prev) => {
-          const cleared = removeSessionFromSlots(prev, payload.sessionId);
-          const moved = assignSessionToPane(cleared, paneIndex, payload.sessionId);
-          return moved;
-        });
+        assignSessionToZone(payload.sessionId, resolvedDropZone, true);
         return;
       }
       const sourceSession = sessions.find((session) => session.id === payload.sessionId) ?? null;
@@ -1626,9 +1591,6 @@ export function App() {
       if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
         missingDragPayloadLoggedRef.current = true;
       }
-      if (draggingKind === "pane") {
-        return "move";
-      }
       if (draggingKind === "session") {
         return sessionDropMode === "move" ? "move" : "copy";
       }
@@ -1638,9 +1600,6 @@ export function App() {
       return "none";
     }
     missingDragPayloadLoggedRef.current = false;
-    if (payload.type === "pane") {
-      return "move";
-    }
     if (payload.type === "session") {
       return sessionDropMode === "move" ? "move" : "copy";
     }
@@ -1648,9 +1607,6 @@ export function App() {
   };
 
   const getEmptyPaneDropHint = (): string => {
-    if (draggingKind === "pane") {
-      return "Drop pane here to swap.";
-    }
     if (draggingKind === "machine") {
       return sessionDropMode === "move"
         ? "Drop host to move an existing session."
@@ -1660,19 +1616,6 @@ export function App() {
   };
   const getSessionModifierModeText = (): string =>
     sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
-
-  const swapPaneIndices = (
-    fromPaneIndex: number,
-    toPaneIndex: number,
-    _source: "native-drop" | "pointer-fallback",
-  ) => {
-    if (fromPaneIndex === toPaneIndex) {
-      return;
-    }
-    setSplitTree((prev) => swapPaneIndicesInTree(prev, fromPaneIndex, toPaneIndex));
-    setActivePaneIndex(toPaneIndex);
-    setSwapPulsePaneIndices([fromPaneIndex, toPaneIndex]);
-  };
 
   const toggleBroadcastTarget = (sessionId: string) => {
     if (!isBroadcastModeEnabled) {
@@ -1694,11 +1637,8 @@ export function App() {
 
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
-    const next = sessions.filter((session) => session.id !== sessionId);
-    setSessions(next);
-    if (activeSession === sessionId) {
-      setActiveSession(next[0]?.id ?? "");
-    }
+    setSessions((prev) => prev.filter((session) => session.id !== sessionId));
+    setActiveSession((prev) => (prev === sessionId ? "" : prev));
     setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
     setBroadcastTargets((prev) => {
       const nextSet = new Set(prev);
@@ -1706,6 +1646,14 @@ export function App() {
       return nextSet;
     });
     setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+  };
+  const closeSessionInPane = async (paneIndex: number) => {
+    const paneSessionId = splitSlots[paneIndex] ?? null;
+    if (!paneSessionId) {
+      setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
+      return;
+    }
+    await closeSessionById(paneSessionId);
   };
   const closeAllSessions = async (withLayoutReset: boolean) => {
     if (sessionIds.length === 0) {
@@ -1800,8 +1748,19 @@ export function App() {
     if (!isBroadcastModeEnabled) {
       return;
     }
-    const targets = splitSlots.filter((slot): slot is string => Boolean(slot));
-    setBroadcastTargets(new Set(targets));
+    if (visiblePaneSessionIds.length === 0) {
+      return;
+    }
+    setBroadcastTargets((prev) => {
+      const next = new Set(prev);
+      const allVisibleAlreadyTargeted = visiblePaneSessionIds.every((sessionId) => next.has(sessionId));
+      if (allVisibleAlreadyTargeted) {
+        visiblePaneSessionIds.forEach((sessionId) => next.delete(sessionId));
+      } else {
+        visiblePaneSessionIds.forEach((sessionId) => next.add(sessionId));
+      }
+      return next;
+    });
   };
 
   const setBroadcastMode = (enabled: boolean) => {
@@ -1815,7 +1774,7 @@ export function App() {
     setActivePaneIndex(paneIndex);
     switch (actionId) {
       case "pane.clear":
-        setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
+        await closeSessionInPane(paneIndex);
         break;
       case "pane.close":
         await closePaneAndSession(paneIndex);
@@ -2095,19 +2054,26 @@ export function App() {
       const paneIdentity = resolvePaneIdentity(paneIndex);
       const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
       const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
+      const isDropOverlayVisible =
+        (draggingKind === "machine" || draggingKind === "session") &&
+        dragOverPaneIndex === paneIndex &&
+        activeDropZonePaneIndex === paneIndex;
       const hasPaneSession = Boolean(paneSessionId);
       const canClosePane = paneOrder.length > 1;
-      const canResetLayout = paneOrder.length > 1;
       const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
+      const allVisibleAlreadyTargeted =
+        isBroadcastModeEnabled &&
+        visiblePaneSessionIds.length > 0 &&
+        visiblePaneSessionIds.every((sessionId) => broadcastTargets.has(sessionId));
       return (
         <div
           key={`pane-${paneIndex}`}
           data-pane-index={paneIndex}
           className={`split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${
             dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
-          } ${panePointerDragSource === paneIndex ? "is-being-dragged" : ""} ${
-            swapPulsePaneSet.has(paneIndex) ? "is-swap-pulse" : ""
-          } ${isHoverTarget ? "is-host-hover-target" : ""} ${isHoverDimmed ? "is-host-hover-dimmed" : ""} ${
+          } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
+            isHoverDimmed ? "is-host-hover-dimmed" : ""
+          } ${
             hoveredHostAlias ? "is-host-hovering" : ""
           }`}
           draggable={false}
@@ -2118,43 +2084,28 @@ export function App() {
               requestTerminalFocus(paneSessionId);
             }
           }}
-          onPointerDown={(event) => {
-            const target = event.target as HTMLElement | null;
-            const inPaneLabel = Boolean(target?.closest(".split-pane-label"));
-            if (!inPaneLabel || event.button !== 0) {
-              return;
-            }
-            setPanePointerDragSource(paneIndex);
-            setPaneDragPointer({ x: event.clientX, y: event.clientY });
-          }}
-          onPointerEnter={() => {
-            if (panePointerDragSource !== null && panePointerDragSource !== paneIndex) {
-              setDragOverPaneIndex(paneIndex);
-            }
-          }}
-          onPointerUp={() => {
-            if (panePointerDragSource === null) {
-              return;
-            }
-            if (panePointerDragSource !== paneIndex) {
-              swapPaneIndices(panePointerDragSource, paneIndex, "pointer-fallback");
-            }
-            setPanePointerDragSource(null);
-            setDragOverPaneIndex(null);
-          }}
           onDragOver={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = resolveDropEffect(event);
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setDragOverPaneIndex(paneIndex);
+            setActiveDropZonePaneIndex(paneIndex);
+            setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
           }}
           onDragEnter={(event) => {
             event.preventDefault();
             setDragOverPaneIndex(paneIndex);
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setActiveDropZonePaneIndex(paneIndex);
+            setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
           }}
           onDragLeave={(event) => {
             if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
               return;
             }
             setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
+            setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
+            setActiveDropZone(null);
           }}
           onDrop={(event) => {
             void handlePaneDrop(event, paneIndex);
@@ -2169,32 +2120,34 @@ export function App() {
             });
           }}
         >
+          {isDropOverlayVisible && (
+            <div className="pane-drop-zones" aria-hidden="true">
+              <div className={`pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`}>Top</div>
+              <div className={`pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`}>Left</div>
+              <div
+                className={`pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`}
+              >
+                Center
+              </div>
+              <div className={`pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`}>
+                Right
+              </div>
+              <div
+                className={`pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`}
+              >
+                Bottom
+              </div>
+            </div>
+          )}
           <div className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""}`}>
             <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
-              <button
-                type="button"
-                className={`split-pane-index-pill ${activePaneIndex === paneIndex ? "is-active" : ""}`}
-                title={`Focus pane ${paneIndex + 1}`}
-                aria-label={`Focus pane ${paneIndex + 1}`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setActivePaneIndex(paneIndex);
-                  if (paneSessionId) {
-                    setActiveSession(paneSessionId);
-                    requestTerminalFocus(paneSessionId);
-                  }
-                }}
-              >
-                {`Pane ${paneIndex + 1}`}
-              </button>
               <span className="split-pane-label-title" title={paneIdentity}>
                 {paneIdentity}
               </span>
             </div>
             <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
               <button
-                className="btn action-icon-btn pane-toolbar-btn"
+                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane left"
                 aria-label={`Split pane ${paneIndex + 1} left`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2203,10 +2156,10 @@ export function App() {
                   void handleContextAction("layout.split.left", paneIndex);
                 }}
               >
-                <span aria-hidden="true">←</span>
+                <span className="split-icon split-icon-vertical split-icon-vertical-normal" aria-hidden="true" />
               </button>
               <button
-                className="btn action-icon-btn pane-toolbar-btn"
+                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane right"
                 aria-label={`Split pane ${paneIndex + 1} right`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2215,10 +2168,10 @@ export function App() {
                   void handleContextAction("layout.split.right", paneIndex);
                 }}
               >
-                <span aria-hidden="true">→</span>
+                <span className="split-icon split-icon-vertical split-icon-vertical-inverse" aria-hidden="true" />
               </button>
               <button
-                className="btn action-icon-btn pane-toolbar-btn"
+                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane top"
                 aria-label={`Split pane ${paneIndex + 1} top`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2227,10 +2180,10 @@ export function App() {
                   void handleContextAction("layout.split.top", paneIndex);
                 }}
               >
-                <span aria-hidden="true">┬</span>
+                <span className="split-icon split-icon-horizontal split-icon-horizontal-normal" aria-hidden="true" />
               </button>
               <button
-                className="btn action-icon-btn pane-toolbar-btn"
+                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane bottom"
                 aria-label={`Split pane ${paneIndex + 1} bottom`}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -2239,40 +2192,11 @@ export function App() {
                   void handleContextAction("layout.split.bottom", paneIndex);
                 }}
               >
-                <span aria-hidden="true">┴</span>
-              </button>
-              <button
-                type="button"
-                className={`pane-swap-handle pane-toolbar-btn ${panePointerDragSource === paneIndex ? "is-active" : ""}`}
-                title="Drag pane to another pane"
-                aria-label={`Drag pane ${paneIndex + 1} to swap`}
-                onPointerDown={(event) => {
-                  if (event.button !== 0) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setPanePointerDragSource(paneIndex);
-                  setPaneDragPointer({ x: event.clientX, y: event.clientY });
-                }}
-              >
-                ↕
+                <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
               </button>
             </div>
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-quick">
-              <button
-                className="btn action-icon-btn pane-toolbar-btn"
-                title="Clear this pane"
-                aria-label={`Clear pane ${paneIndex + 1}`}
-                disabled={!hasPaneSession}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.clear", paneIndex);
-                }}
-              >
-                <span aria-hidden="true">⌫</span>
-              </button>
+            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
               <button
                 className={`btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
                 title={`Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`}
@@ -2286,7 +2210,9 @@ export function App() {
                 <span aria-hidden="true">@</span>
               </button>
               <button
-                className={`btn action-icon-btn pane-toolbar-btn ${isPaneBroadcastTarget ? "is-broadcast-active" : ""}`}
+                className={`btn action-icon-btn pane-toolbar-btn ${
+                  isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""
+                }`}
                 title="Toggle pane target"
                 aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
                 disabled={!isBroadcastModeEnabled || !hasPaneSession}
@@ -2297,6 +2223,39 @@ export function App() {
                 }}
               >
                 <span aria-hidden="true">◉</span>
+              </button>
+              <button
+                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${
+                  allVisibleAlreadyTargeted ? "is-broadcast-active" : ""
+                }`}
+                title="Target all visible panes"
+                aria-label="Target all visible panes"
+                disabled={!isBroadcastModeEnabled}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleContextAction("broadcast.selectAllVisible", paneIndex);
+                }}
+              >
+                <span className="pane-toolbar-broadcast-all-icon" aria-hidden="true">
+                  ⌁
+                </span>
+              </button>
+            </div>
+            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
+              <button
+                className="btn action-icon-btn pane-toolbar-btn"
+                title="Close session in pane"
+                aria-label={`Close session in pane ${paneIndex + 1}`}
+                disabled={!hasPaneSession}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleContextAction("pane.clear", paneIndex);
+                }}
+              >
+                <span aria-hidden="true">⌫</span>
               </button>
               <button
                 className="btn action-icon-btn action-icon-btn-danger pane-toolbar-btn"
@@ -2310,19 +2269,6 @@ export function App() {
                 }}
               >
                 <span aria-hidden="true">×</span>
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn"
-                title="Reset pane layout"
-                aria-label="Reset pane layout"
-                disabled={!canResetLayout}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  resetPaneLayout();
-                }}
-              >
-                <span aria-hidden="true">↺</span>
               </button>
             </div>
           </div>
@@ -2715,33 +2661,10 @@ export function App() {
               >
                 {renderSplitNode(splitTree)}
               </div>
-              {panePointerDragSource !== null && paneDragPointer ? (
-                <div
-                  className={`pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`}
-                  style={
-                    {
-                      "--ghost-x": `${paneDragPointer.x + 14}px`,
-                      "--ghost-y": `${paneDragPointer.y + 14}px`,
-                    } as CSSProperties
-                  }
-                >
-                  <span className="pane-drag-ghost-title">{dragGhostLabel}</span>
-                  <span className="pane-drag-ghost-subtitle">Moving pane</span>
-                </div>
-              ) : null}
             </div>
             <div className="sessions-footer" role="status">
               <div className="sessions-footer-meta">
                 <div className="footer-layout-controls">
-                  <button
-                    className="btn footer-layout-btn footer-action-btn"
-                    onClick={resetPaneLayout}
-                    disabled={paneOrder.length === 1 && !hasAssignedPaneSessions}
-                    aria-label="Reset pane layout"
-                    title="Reset pane layout"
-                  >
-                    Reset
-                  </button>
                   <button
                     className={`btn footer-layout-btn footer-action-btn ${
                       pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"

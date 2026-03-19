@@ -34,7 +34,7 @@ export const buildPaneContextActions = ({
   const hasPaneSession = Boolean(paneSessionId);
 
   return [
-    { id: "pane.clear", label: "Clear pane", disabled: !hasPaneSession },
+    { id: "pane.clear", label: "Close session in pane", disabled: !hasPaneSession },
     {
       id: "pane.close",
       label: "Close pane (and session)",
