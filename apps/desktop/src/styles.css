@@ -279,8 +279,8 @@ body,
 
 .host-filter-card {
   border-radius: var(--radius-panel);
-  border: 2px solid var(--border-main);
-  background: rgba(11, 16, 20, 0.72);
+  border: 0;
+  background: rgba(11, 16, 20, 0.56);
   padding: var(--pad-panel);
 }
 
@@ -538,9 +538,9 @@ body,
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3);
-  border: 2px solid var(--border-main);
+  border: 0;
   border-radius: var(--radius-panel);
-  background: rgba(12, 16, 19, 0.58);
+  background: rgba(12, 16, 19, 0.34);
   min-height: 0;
 }
 
@@ -636,21 +636,21 @@ body,
 }
 
 .host-item.is-active {
-  box-shadow: inset 0 0 0 1px rgba(220, 232, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(220, 232, 255, 0.22);
 }
 
 .host-item.is-active.is-connected {
-  border-color: rgba(126, 248, 192, 0.78);
+  border-color: rgba(126, 248, 192, 0.88);
   box-shadow:
-    0 0 10px rgba(108, 242, 191, 0.13),
-    inset 0 0 0 1px rgba(108, 242, 191, 0.2);
+    0 0 12px rgba(108, 242, 191, 0.18),
+    inset 0 0 0 1px rgba(108, 242, 191, 0.28);
 }
 
 .host-item.is-active.is-disconnected {
-  border-color: rgba(255, 145, 156, 0.78);
+  border-color: rgba(255, 145, 156, 0.88);
   box-shadow:
-    0 0 10px rgba(255, 127, 137, 0.13),
-    inset 0 0 0 1px rgba(255, 127, 137, 0.2);
+    0 0 12px rgba(255, 127, 137, 0.2),
+    inset 0 0 0 1px rgba(255, 127, 137, 0.28);
 }
 
 .host-gear-btn {
@@ -1216,8 +1216,8 @@ body,
 
 .right-tools-card {
   border-radius: var(--radius-panel);
-  border: 2px solid var(--border-main);
-  background: rgba(11, 16, 20, 0.72);
+  border: 0;
+  background: rgba(11, 16, 20, 0.52);
   padding: var(--pad-panel);
   display: grid;
   gap: var(--space-2);
@@ -1347,8 +1347,8 @@ body,
 
 .session-top-strip {
   border-radius: 12px;
-  border: 1px solid rgba(150, 170, 161, 0.24);
-  background: rgba(10, 15, 18, 0.78);
+  border: 0;
+  background: rgba(10, 15, 18, 0.56);
   padding: 8px;
   display: grid;
   gap: 8px;
@@ -1444,8 +1444,8 @@ body,
   gap: 6px;
   padding: 3px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(150, 170, 161, 0.2);
-  background: rgba(8, 12, 15, 0.78);
+  border: 0;
+  background: rgba(8, 12, 15, 0.6);
   overflow-x: auto;
 }
 
@@ -1621,9 +1621,9 @@ body,
 }
 
 .session-lane {
-  border: 1px solid rgba(150, 170, 161, 0.24);
+  border: 0;
   border-radius: 12px;
-  background: rgba(10, 15, 18, 0.78);
+  background: rgba(10, 15, 18, 0.54);
   padding: 8px;
   display: grid;
   gap: 7px;
@@ -1706,10 +1706,10 @@ body,
 }
 
 .session-card.is-active {
-  border-color: rgba(255, 191, 58, 0.94);
+  border-color: rgba(255, 191, 58, 0.98);
   box-shadow:
-    0 0 14px rgba(255, 191, 58, 0.24),
-    inset 0 0 0 1px rgba(255, 191, 58, 0.26);
+    0 0 16px rgba(255, 191, 58, 0.3),
+    inset 0 0 0 1px rgba(255, 191, 58, 0.34);
   transform: translateY(-1px);
 }
 
@@ -1878,8 +1878,8 @@ body,
 .broadcast-controls {
   padding: 8px;
   border-radius: 14px;
-  border: 2px solid var(--border-main);
-  background: rgba(11, 16, 20, 0.72);
+  border: 0;
+  background: rgba(11, 16, 20, 0.5);
   margin-bottom: 0;
 }
 
@@ -1948,9 +1948,9 @@ body,
   flex: 1 1 auto;
   overflow: hidden;
   border-radius: var(--radius-panel);
-  border: 2px solid rgba(130, 184, 152, 0.24);
-  background: rgba(9, 13, 16, 0.84);
-  padding: var(--space-1);
+  border: 0;
+  background: rgba(9, 13, 16, 0.56);
+  padding: 0;
 }
 
 .terminal-grid.is-pane-resizing,
@@ -1975,12 +1975,12 @@ body,
 }
 
 .split-pane {
-  border: 2px solid rgba(150, 170, 161, 0.3);
+  border: 1px solid rgba(150, 170, 161, 0.2);
   border-radius: 12px;
-  background: rgba(13, 17, 20, 0.78);
+  background: rgba(13, 17, 20, 0.62);
   min-height: 0;
   min-width: 0;
-  padding: 2px;
+  padding: 1px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1994,24 +1994,24 @@ body,
 }
 
 .split-pane.is-focused {
-  border-color: rgba(102, 216, 255, 0.95);
+  border-color: rgba(102, 216, 255, 1);
   box-shadow:
-    0 0 18px rgba(102, 216, 255, 0.24),
-    inset 0 0 0 1px rgba(102, 216, 255, 0.4);
+    0 0 20px rgba(102, 216, 255, 0.32),
+    inset 0 0 0 1px rgba(102, 216, 255, 0.5);
 }
 
 .split-pane.is-drag-over {
-  border-color: rgba(108, 242, 191, 0.95);
+  border-color: rgba(108, 242, 191, 1);
   box-shadow:
-    0 0 16px rgba(108, 242, 191, 0.25),
-    inset 0 0 0 1px rgba(108, 242, 191, 0.3);
+    0 0 18px rgba(108, 242, 191, 0.34),
+    inset 0 0 0 1px rgba(108, 242, 191, 0.4);
 }
 
 .split-pane.is-being-dragged {
-  border-color: rgba(255, 212, 59, 0.96);
+  border-color: rgba(255, 212, 59, 1);
   box-shadow:
-    0 0 18px rgba(255, 212, 59, 0.26),
-    inset 0 0 0 1px rgba(255, 212, 59, 0.4);
+    0 0 20px rgba(255, 212, 59, 0.34),
+    inset 0 0 0 1px rgba(255, 212, 59, 0.46);
 }
 
 .split-pane.is-swap-pulse {
@@ -2019,10 +2019,10 @@ body,
 }
 
 .split-pane.is-host-hover-target {
-  border-color: rgba(108, 242, 191, 0.9);
+  border-color: rgba(108, 242, 191, 0.96);
   box-shadow:
-    0 0 14px rgba(108, 242, 191, 0.2),
-    inset 0 0 0 1px rgba(108, 242, 191, 0.28);
+    0 0 16px rgba(108, 242, 191, 0.28),
+    inset 0 0 0 1px rgba(108, 242, 191, 0.34);
 }
 
 .split-pane.is-host-hover-dimmed {
@@ -2031,11 +2031,11 @@ body,
 }
 
 .split-pane.is-host-hover-target.is-focused {
-  border-color: rgba(102, 216, 255, 0.95);
+  border-color: rgba(102, 216, 255, 1);
   box-shadow:
-    0 0 18px rgba(102, 216, 255, 0.24),
-    0 0 12px rgba(108, 242, 191, 0.18),
-    inset 0 0 0 1px rgba(102, 216, 255, 0.4);
+    0 0 20px rgba(102, 216, 255, 0.32),
+    0 0 14px rgba(108, 242, 191, 0.24),
+    inset 0 0 0 1px rgba(102, 216, 255, 0.5);
 }
 
 @keyframes pane-swap-pulse {
@@ -2062,8 +2062,8 @@ body,
   max-width: none;
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-control);
-  background: rgba(8, 12, 15, 0.76);
-  border: 1px solid rgba(130, 184, 152, 0.24);
+  background: rgba(8, 12, 15, 0.64);
+  border: 0;
   font-size: var(--font-md);
   color: #c4dbd0;
   pointer-events: auto;
@@ -2435,10 +2435,10 @@ body,
 }
 
 .app-settings-content {
-  border: 2px solid rgba(150, 170, 161, 0.28);
+  border: 1px solid rgba(150, 170, 161, 0.2);
   border-radius: var(--radius-panel);
   padding: var(--space-6);
-  background: rgba(14, 18, 21, 0.8);
+  background: rgba(14, 18, 21, 0.68);
 }
 
 .backup-panel {
