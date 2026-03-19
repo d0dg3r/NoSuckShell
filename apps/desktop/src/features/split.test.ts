@@ -67,7 +67,7 @@ describe("split workspace helpers", () => {
     expect(grown[0].width).toBe(layouts[0].width + 60);
     expect(grown[0].height).toBe(layouts[0].height + 50);
     const shrunk = resizePaneLayout(grown, 0, "xy", -10_000, -10_000);
-    expect(shrunk[0].width).toBeGreaterThanOrEqual(280);
-    expect(shrunk[0].height).toBeGreaterThanOrEqual(180);
+    expect(shrunk[0].width).toBeGreaterThanOrEqual(240);
+    expect(shrunk[0].height).toBeGreaterThanOrEqual(150);
   });
 });

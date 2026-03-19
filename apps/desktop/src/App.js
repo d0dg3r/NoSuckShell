@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState, } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { closeSession, deleteHost, deleteLayoutProfile, exportBackup, importBackup, listLayoutProfiles, listHostMetadata, listHosts, saveHost, saveHostMetadata, saveLayoutProfile, sendInput, startSession, touchHostLastUsed, } from "./tauri-api";
+import { closeSession, deleteHost, deleteLayoutProfile, exportBackup, importBackup, listLayoutProfiles, listViewProfiles, listHostMetadata, listHosts, saveHost, saveHostMetadata, saveLayoutProfile, saveViewProfile, deleteViewProfile, reorderViewProfiles, sendInput, startSession, touchHostLastUsed, } from "./tauri-api";
 import { HostForm } from "./components/HostForm";
 import { TerminalPane } from "./components/TerminalPane";
 import { buildPaneContextActions } from "./features/context-actions";
@@ -23,6 +23,7 @@ const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 const appSettingsTabs = [
     { id: "general", label: "General" },
+    { id: "views", label: "Views" },
     { id: "backup", label: "Backup & Restore" },
     { id: "extras", label: "Extras" },
     { id: "help", label: "Help" },
@@ -34,8 +35,45 @@ const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
+const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
+const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
-const SESSION_DROP_POLICY = "spawn_new_from_host";
+const DENSITY_TERMINAL_BASE_FONT = {
+    aggressive: 12,
+    balanced: 13,
+    safe: 14,
+};
+const TERMINAL_FONT_OFFSET_MIN = -3;
+const TERMINAL_FONT_OFFSET_MAX = 6;
+const TERMINAL_FONT_MIN = 9;
+const TERMINAL_FONT_MAX = 22;
+const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
+const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const createEmptyFilterGroup = () => ({
+    id: createId(),
+    mode: "and",
+    rules: [],
+    groups: [],
+});
+const createDefaultViewProfile = () => ({
+    id: createId(),
+    name: "New view",
+    order: 0,
+    filterGroup: createEmptyFilterGroup(),
+    sortRules: [{ field: "host", direction: "asc" }],
+    createdAt: 0,
+    updatedAt: 0,
+});
+const parseBooleanRuleValue = (value) => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+        return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+        return false;
+    }
+    return null;
+};
 const hasTauriTransformCallback = () => {
     if (typeof window === "undefined") {
         return false;
@@ -170,6 +208,85 @@ const parseSplitTree = (raw) => {
     }
     return null;
 };
+const getRuleFieldValue = (row, field) => {
+    switch (field) {
+        case "host":
+            return row.host.host;
+        case "hostName":
+            return row.host.hostName;
+        case "user":
+            return row.displayUser;
+        case "port":
+            return String(row.host.port);
+        case "status":
+            return row.connected ? "connected" : "disconnected";
+        case "favorite":
+            return row.metadata.favorite ? "true" : "false";
+        case "recent":
+            return row.metadata.lastUsedAt ? "true" : "false";
+        case "tag":
+            return row.metadata.tags.join(",");
+        default:
+            return "";
+    }
+};
+const evaluateRule = (row, rule) => {
+    if (rule.field === "favorite" || rule.field === "recent") {
+        const parsed = parseBooleanRuleValue(rule.value);
+        if (parsed !== null && (rule.operator === "equals" || rule.operator === "not_equals")) {
+            const current = rule.field === "favorite" ? row.metadata.favorite : Boolean(row.metadata.lastUsedAt);
+            return rule.operator === "equals" ? current === parsed : current !== parsed;
+        }
+    }
+    const sourceValue = getRuleFieldValue(row, rule.field);
+    const sourceLower = sourceValue.toLowerCase();
+    const ruleValue = rule.value.trim();
+    const ruleLower = ruleValue.toLowerCase();
+    switch (rule.operator) {
+        case "equals":
+            return sourceLower === ruleLower;
+        case "not_equals":
+            return sourceLower !== ruleLower;
+        case "contains":
+            return sourceLower.includes(ruleLower);
+        case "starts_with":
+            return sourceLower.startsWith(ruleLower);
+        case "ends_with":
+            return sourceLower.endsWith(ruleLower);
+        case "greater_than": {
+            const left = Number(sourceValue);
+            const right = Number(ruleValue);
+            return Number.isFinite(left) && Number.isFinite(right) ? left > right : sourceLower > ruleLower;
+        }
+        case "less_than": {
+            const left = Number(sourceValue);
+            const right = Number(ruleValue);
+            return Number.isFinite(left) && Number.isFinite(right) ? left < right : sourceLower < ruleLower;
+        }
+        case "in": {
+            const options = ruleValue
+                .split(",")
+                .map((entry) => entry.trim().toLowerCase())
+                .filter((entry) => entry.length > 0);
+            if (rule.field === "tag") {
+                const tags = row.metadata.tags.map((entry) => entry.trim().toLowerCase());
+                return options.some((entry) => tags.includes(entry));
+            }
+            return options.includes(sourceLower);
+        }
+        default:
+            return true;
+    }
+};
+const evaluateGroup = (row, group) => {
+    const ruleResults = group.rules.map((rule) => evaluateRule(row, rule));
+    const groupResults = group.groups.map((child) => evaluateGroup(row, child));
+    const allResults = [...ruleResults, ...groupResults];
+    if (allResults.length === 0) {
+        return true;
+    }
+    return group.mode === "or" ? allResults.some(Boolean) : allResults.every(Boolean);
+};
 export function App() {
     const [hosts, setHosts] = useState([]);
     const [currentHost, setCurrentHost] = useState(emptyHost());
@@ -205,6 +322,19 @@ export function App() {
     const [isBroadcastModeEnabled, setIsBroadcastModeEnabled] = useState(false);
     const [broadcastTargets, setBroadcastTargets] = useState(new Set());
     const [layoutProfiles, setLayoutProfiles] = useState([]);
+    const [viewProfiles, setViewProfiles] = useState([]);
+    const [selectedSidebarViewId, setSelectedSidebarViewId] = useState(() => {
+        if (typeof window === "undefined") {
+            return "builtin:all";
+        }
+        const persisted = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
+        if (persisted === "builtin:all" || persisted === "builtin:favorites" || persisted?.startsWith("custom:")) {
+            return persisted;
+        }
+        return "builtin:all";
+    });
+    const [selectedViewProfileIdInSettings, setSelectedViewProfileIdInSettings] = useState("");
+    const [viewDraft, setViewDraft] = useState(() => createDefaultViewProfile());
     const [selectedLayoutProfileId, setSelectedLayoutProfileId] = useState("");
     const [pendingLayoutProfileDeleteId, setPendingLayoutProfileDeleteId] = useState("");
     const [layoutProfileName, setLayoutProfileName] = useState("");
@@ -234,6 +364,23 @@ export function App() {
         return persisted !== "false";
     });
     const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+    const [densityProfile, setDensityProfile] = useState(() => {
+        if (typeof window === "undefined") {
+            return "balanced";
+        }
+        const persisted = window.localStorage.getItem(DENSITY_PROFILE_STORAGE_KEY);
+        return persisted === "aggressive" || persisted === "safe" || persisted === "balanced" ? persisted : "balanced";
+    });
+    const [terminalFontOffset, setTerminalFontOffset] = useState(() => {
+        if (typeof window === "undefined") {
+            return 0;
+        }
+        const persisted = Number(window.localStorage.getItem(TERMINAL_FONT_OFFSET_STORAGE_KEY));
+        if (!Number.isFinite(persisted)) {
+            return 0;
+        }
+        return Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(persisted)));
+    });
     const [hoveredHostAlias, setHoveredHostAlias] = useState(null);
     const [contextMenu, setContextMenu] = useState({
         visible: false,
@@ -267,6 +414,11 @@ export function App() {
     const selectedLayoutProfile = useMemo(() => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null, [layoutProfiles, selectedLayoutProfileId]);
     const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
     const isSidebarOpen = isSidebarVisible;
+    const terminalFontSize = useMemo(() => {
+        const base = DENSITY_TERMINAL_BASE_FONT[densityProfile];
+        const next = base + terminalFontOffset;
+        return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, next));
+    }, [densityProfile, terminalFontOffset]);
     const activeHostMetadata = useMemo(() => {
         if (!activeHost) {
             return createDefaultHostMetadata();
@@ -295,12 +447,26 @@ export function App() {
             };
         });
     }, [connectedHosts, hosts, metadataStore.defaultUser, metadataStore.hosts]);
+    const sortedViewProfiles = useMemo(() => [...viewProfiles].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)), [viewProfiles]);
+    const selectedCustomViewProfile = useMemo(() => {
+        if (!selectedSidebarViewId.startsWith("custom:")) {
+            return null;
+        }
+        const id = selectedSidebarViewId.slice("custom:".length);
+        return sortedViewProfiles.find((profile) => profile.id === id) ?? null;
+    }, [selectedSidebarViewId, sortedViewProfiles]);
     const filteredHostRows = useMemo(() => {
         const normalizedSearch = searchQuery.trim().toLowerCase();
         const numericPort = Number(portFilter);
         const hasPortFilter = portFilter.trim().length > 0 && Number.isFinite(numericPort);
         return hostRows
             .filter((row) => {
+            if (selectedSidebarViewId === "builtin:favorites" && !row.metadata.favorite) {
+                return false;
+            }
+            if (selectedCustomViewProfile && !evaluateGroup(row, selectedCustomViewProfile.filterGroup)) {
+                return false;
+            }
             if (normalizedSearch.length > 0) {
                 const haystack = `${row.host.host} ${row.host.hostName} ${row.displayUser}`.toLowerCase();
                 if (!haystack.includes(normalizedSearch)) {
@@ -331,11 +497,53 @@ export function App() {
             if (recentOnly) {
                 return (b.metadata.lastUsedAt ?? 0) - (a.metadata.lastUsedAt ?? 0);
             }
+            if (selectedCustomViewProfile?.sortRules.length) {
+                for (const sortRule of selectedCustomViewProfile.sortRules) {
+                    const factor = sortRule.direction === "asc" ? 1 : -1;
+                    let cmp = 0;
+                    switch (sortRule.field) {
+                        case "host":
+                            cmp = a.host.host.localeCompare(b.host.host);
+                            break;
+                        case "hostName":
+                            cmp = a.host.hostName.localeCompare(b.host.hostName);
+                            break;
+                        case "user":
+                            cmp = a.displayUser.localeCompare(b.displayUser);
+                            break;
+                        case "port":
+                            cmp = a.host.port - b.host.port;
+                            break;
+                        case "lastUsedAt":
+                            cmp = (a.metadata.lastUsedAt ?? 0) - (b.metadata.lastUsedAt ?? 0);
+                            break;
+                        case "status":
+                            cmp = (a.connected ? 1 : 0) - (b.connected ? 1 : 0);
+                            break;
+                        case "favorite":
+                            cmp = (a.metadata.favorite ? 1 : 0) - (b.metadata.favorite ? 1 : 0);
+                            break;
+                        default:
+                            cmp = 0;
+                    }
+                    if (cmp !== 0) {
+                        return cmp * factor;
+                    }
+                }
+            }
             return a.host.host.localeCompare(b.host.host);
         });
-    }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedTagFilter, statusFilter]);
+    }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
     const connectedHostRows = useMemo(() => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)), [filteredHostRows]);
     const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+    const sidebarViews = useMemo(() => [
+        { id: "builtin:all", label: "Alle" },
+        { id: "builtin:favorites", label: "Favoriten" },
+        ...sortedViewProfiles.map((profile) => ({
+            id: `custom:${profile.id}`,
+            label: profile.name,
+        })),
+    ], [sortedViewProfiles]);
     const hoveredHostPaneIndices = useMemo(() => {
         if (!hoveredHostAlias) {
             return new Set();
@@ -396,14 +604,16 @@ export function App() {
         setIsFooterLayoutPanelOpen((prev) => !prev);
     }, []);
     const load = async () => {
-        const [loadedHosts, loadedMetadata, loadedProfiles] = await Promise.all([
+        const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles] = await Promise.all([
             listHosts(),
             listHostMetadata(),
             listLayoutProfiles(),
+            listViewProfiles(),
         ]);
         setHosts(loadedHosts);
         setMetadataStore(loadedMetadata);
         setLayoutProfiles(loadedProfiles);
+        setViewProfiles(loadedViewProfiles);
         setSelectedLayoutProfileId((prev) => {
             if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
                 return prev;
@@ -415,6 +625,12 @@ export function App() {
             setCurrentHost(loadedHosts[0]);
             setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
         }
+        setSelectedViewProfileIdInSettings((prev) => {
+            if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
+                return prev;
+            }
+            return loadedViewProfiles[0]?.id ?? "";
+        });
     };
     useEffect(() => {
         void load().catch((e) => setError(String(e)));
@@ -530,6 +746,33 @@ export function App() {
             setIsSidebarVisible(true);
         }
     }, [isSidebarPinned]);
+    useEffect(() => {
+        window.localStorage.setItem(DENSITY_PROFILE_STORAGE_KEY, densityProfile);
+    }, [densityProfile]);
+    useEffect(() => {
+        window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
+    }, [terminalFontOffset]);
+    useEffect(() => {
+        window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, selectedSidebarViewId);
+    }, [selectedSidebarViewId]);
+    useEffect(() => {
+        if (!selectedSidebarViewId.startsWith("custom:")) {
+            return;
+        }
+        const id = selectedSidebarViewId.slice("custom:".length);
+        if (!viewProfiles.some((profile) => profile.id === id)) {
+            setSelectedSidebarViewId("builtin:all");
+        }
+    }, [selectedSidebarViewId, viewProfiles]);
+    useEffect(() => {
+        if (!selectedViewProfileIdInSettings) {
+            return;
+        }
+        const profile = viewProfiles.find((entry) => entry.id === selectedViewProfileIdInSettings);
+        if (profile) {
+            setViewDraft(profile);
+        }
+    }, [selectedViewProfileIdInSettings, viewProfiles]);
     useEffect(() => {
         if (!isSidebarResizing) {
             return;
@@ -786,6 +1029,90 @@ export function App() {
         setSelectedTagFilter("all");
         setPortFilter("");
     };
+    const selectViewProfileForSettings = (profileId) => {
+        setSelectedViewProfileIdInSettings(profileId);
+        const profile = viewProfiles.find((entry) => entry.id === profileId);
+        if (profile) {
+            setViewDraft(profile);
+        }
+    };
+    const createViewRule = () => ({
+        id: createId(),
+        field: "host",
+        operator: "contains",
+        value: "",
+    });
+    const createNewViewDraft = () => {
+        setViewDraft(createDefaultViewProfile());
+        setSelectedViewProfileIdInSettings("");
+    };
+    const saveCurrentViewDraft = async () => {
+        const normalizedName = viewDraft.name.trim();
+        if (!normalizedName) {
+            setError("View name is required.");
+            return;
+        }
+        const now = Date.now();
+        const nextProfile = {
+            ...viewDraft,
+            name: normalizedName,
+            order: selectedViewProfileIdInSettings.length > 0
+                ? viewDraft.order
+                : viewProfiles.length,
+            createdAt: viewDraft.createdAt || now,
+            updatedAt: now,
+        };
+        try {
+            await saveViewProfile(nextProfile);
+            await load();
+            setSelectedViewProfileIdInSettings(nextProfile.id);
+            setViewDraft(nextProfile);
+            setSelectedSidebarViewId(`custom:${nextProfile.id}`);
+        }
+        catch (e) {
+            setError(String(e));
+        }
+    };
+    const deleteCurrentViewDraft = async () => {
+        if (!selectedViewProfileIdInSettings) {
+            return;
+        }
+        try {
+            await deleteViewProfile(selectedViewProfileIdInSettings);
+            await load();
+            if (selectedSidebarViewId === `custom:${selectedViewProfileIdInSettings}`) {
+                setSelectedSidebarViewId("builtin:all");
+            }
+            createNewViewDraft();
+        }
+        catch (e) {
+            setError(String(e));
+        }
+    };
+    const reorderView = async (direction) => {
+        if (!selectedViewProfileIdInSettings) {
+            return;
+        }
+        const sorted = [...viewProfiles].sort((a, b) => a.order - b.order);
+        const currentIndex = sorted.findIndex((entry) => entry.id === selectedViewProfileIdInSettings);
+        if (currentIndex === -1) {
+            return;
+        }
+        const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+        if (targetIndex < 0 || targetIndex >= sorted.length) {
+            return;
+        }
+        const next = [...sorted];
+        const [item] = next.splice(currentIndex, 1);
+        next.splice(targetIndex, 0, item);
+        try {
+            await reorderViewProfiles(next.map((entry) => entry.id));
+            await load();
+        }
+        catch (e) {
+            setError(String(e));
+        }
+    };
     const handleExportBackup = async () => {
         setBackupMessage("");
         const path = backupExportPath.trim();
@@ -922,21 +1249,6 @@ export function App() {
             setSessions((prev) => {
                 return [...prev, { id: started.session_id, host: host.host }];
             });
-            // #region agent log
-            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                body: JSON.stringify({
-                    sessionId: "be74dc",
-                    runId: "dnd-branch-debug",
-                    hypothesisId: "H6",
-                    location: "App.tsx:connectToHost",
-                    message: "new session started",
-                    data: { hostAlias: host.host, sessionId: started.session_id },
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => { });
-            // #endregion
             setActiveSession(started.session_id);
             setActiveHost(host.host);
             setCurrentHost(host);
@@ -970,21 +1282,6 @@ export function App() {
         setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, startedSessionId));
         setActivePaneIndex(targetPaneIndex);
         setActiveSession(startedSessionId);
-        // #region agent log
-        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-                sessionId: "be74dc",
-                runId: "connect-new-pane",
-                hypothesisId: "H18",
-                location: "App.tsx:connectToHostInNewPane",
-                message: "host list connect assigned session to target pane",
-                data: { hostAlias: host.host, sessionId: startedSessionId, targetPaneIndex, usedExistingEmptyPane },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => { });
-        // #endregion
     };
     const ensureSessionForHost = async (hostAlias) => {
         const host = hosts.find((entry) => entry.host === hostAlias);
@@ -1008,26 +1305,6 @@ export function App() {
             payload.type === "pane" ? "move" : payload.type === "session" ? "copyMove" : "copy";
         event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
         event.dataTransfer.setData("text/plain", serialized);
-        // #region agent log
-        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-                sessionId: "be74dc",
-                runId: "dnd-broken",
-                hypothesisId: "H1",
-                location: "App.tsx:setDragPayload",
-                message: "drag payload initialized",
-                data: {
-                    payloadType: payload.type,
-                    effectAllowed: event.dataTransfer.effectAllowed,
-                    sessionDropMode,
-                    serializedLength: serialized.length,
-                },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => { });
-        // #endregion
     };
     const parseDragPayload = (event) => {
         const encoded = event.dataTransfer.getData(DND_PAYLOAD_MIME) || event.dataTransfer.getData("text/plain");
@@ -1077,26 +1354,6 @@ export function App() {
             }
             : null;
         const payload = parseDragPayload(event);
-        // #region agent log
-        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-                sessionId: "be74dc",
-                runId: "dnd-broken",
-                hypothesisId: "H2",
-                location: "App.tsx:handlePaneDrop",
-                message: "pane drop received",
-                data: {
-                    paneIndex,
-                    payloadType: payload?.type ?? null,
-                    shiftKey: event.shiftKey,
-                    dataTransferTypes: [...event.dataTransfer.types],
-                },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => { });
-        // #endregion
         if (!payload) {
             return;
         }
@@ -1123,54 +1380,12 @@ export function App() {
         };
         if (payload.type === "session") {
             const shouldMoveExisting = sessionDropMode === "move";
-            // #region agent log
-            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                body: JSON.stringify({
-                    sessionId: "be74dc",
-                    runId: "dnd-branch-debug",
-                    hypothesisId: "H5",
-                    location: "App.tsx:handlePaneDrop.sessionBranch",
-                    message: "session drop policy decision",
-                    data: {
-                        shiftKey: event.shiftKey,
-                        sessionDropMode,
-                        policy: SESSION_DROP_POLICY,
-                        shouldMoveExisting,
-                        sourceSessionId: payload.sessionId,
-                        sourcePaneIndex: splitSlots.findIndex((slot) => slot === payload.sessionId),
-                        targetPaneIndex: paneIndex,
-                    },
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => { });
-            // #endregion
             if (shouldMoveExisting) {
                 setActivePaneIndex(paneIndex);
                 setActiveSession(payload.sessionId);
                 setSplitSlots((prev) => {
                     const cleared = removeSessionFromSlots(prev, payload.sessionId);
                     const moved = assignSessionToPane(cleared, paneIndex, payload.sessionId);
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "post-fix",
-                            hypothesisId: "H11",
-                            location: "App.tsx:handlePaneDrop.moveApply",
-                            message: "session moved with source cleanup",
-                            data: {
-                                sessionId: payload.sessionId,
-                                targetPaneIndex: paneIndex,
-                                occurrenceCountAfterMove: moved.filter((slot) => slot === payload.sessionId).length,
-                            },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
                     return moved;
                 });
                 return;
@@ -1203,36 +1418,6 @@ export function App() {
         if (!payload) {
             if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
                 missingDragPayloadLoggedRef.current = true;
-                // #region agent log
-                fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                    body: JSON.stringify({
-                        sessionId: "be74dc",
-                        runId: "dnd-broken",
-                        hypothesisId: "H3",
-                        location: "App.tsx:resolveDropEffect",
-                        message: "dragover payload missing",
-                        data: {
-                            draggingKind,
-                            shiftKey: event.shiftKey,
-                            sessionDropMode,
-                            effectAllowed: event.dataTransfer.effectAllowed,
-                            fallbackDropEffect: draggingKind === "pane"
-                                ? "move"
-                                : draggingKind === "session"
-                                    ? sessionDropMode === "move"
-                                        ? "move"
-                                        : "copy"
-                                    : draggingKind === "machine"
-                                        ? "copy"
-                                        : "none",
-                            dataTransferTypes: [...event.dataTransfer.types],
-                        },
-                        timestamp: Date.now(),
-                    }),
-                }).catch(() => { });
-                // #endregion
             }
             if (draggingKind === "pane") {
                 return "move";
@@ -1704,42 +1889,12 @@ export function App() {
                 }, onDragEnter: (event) => {
                     event.preventDefault();
                     setDragOverPaneIndex(paneIndex);
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "dnd-drop-entry",
-                            hypothesisId: "H8",
-                            location: "App.tsx:splitPane.onDragEnter",
-                            message: "drag entered pane",
-                            data: { paneIndex, draggingKind, shiftKey: event.shiftKey, sessionDropMode },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
                 }, onDragLeave: (event) => {
                     if (event.currentTarget.contains(event.relatedTarget)) {
                         return;
                     }
                     setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
                 }, onDrop: (event) => {
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "dnd-drop-entry",
-                            hypothesisId: "H9",
-                            location: "App.tsx:splitPane.onDrop",
-                            message: "drop event on pane wrapper",
-                            data: { paneIndex, draggingKind, shiftKey: event.shiftKey, types: [...event.dataTransfer.types] },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
                     void handlePaneDrop(event, paneIndex);
                 }, onContextMenu: (event) => {
                     event.preventDefault();
@@ -1778,7 +1933,7 @@ export function App() {
                                     event.stopPropagation();
                                     setPanePointerDragSource(paneIndex);
                                     setPaneDragPointer({ x: event.clientX, y: event.clientY });
-                                }, children: "\u2195" }), _jsxs("div", { className: "split-pane-label-meta", children: [_jsx("span", { className: "split-pane-index-pill", children: `Pane ${paneIndex + 1}` }), _jsx("span", { className: "split-pane-label-title", children: paneIdentity })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("p", { children: "Empty pane." }), _jsx("span", { children: getEmptyPaneDropHint() }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
+                                }, children: "\u2195" }), _jsxs("div", { className: "split-pane-label-meta", children: [_jsx("span", { className: "split-pane-index-pill", children: `Pane ${paneIndex + 1}` }), _jsx("span", { className: "split-pane-label-title", children: paneIdentity })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput, fontSize: terminalFontSize })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("p", { children: "Empty pane." }), _jsx("span", { children: getEmptyPaneDropHint() }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
         }
         const firstRatio = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, node.ratio));
         const secondRatio = 1 - firstRatio;
@@ -1793,62 +1948,10 @@ export function App() {
                 }, children: "\u2605" }), _jsxs("button", { className: `host-item ${row.connected ? "is-connected" : "is-disconnected"} ${activeHost === row.host.host ? "is-active" : ""}`, onMouseEnter: () => setHoveredHostAlias(row.host.host), onMouseLeave: () => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev)), onClick: () => selectHost(row.host.host), onDoubleClick: () => {
                     void connectToHostInNewPane(row.host);
                 }, draggable: true, onDragStart: (event) => {
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "right-drag-check",
-                            hypothesisId: "H12",
-                            location: "App.tsx:host.onDragStart",
-                            message: "host dragstart pointer button info",
-                            data: {
-                                button: event.nativeEvent.button,
-                                buttons: event.nativeEvent.buttons,
-                                ctrlKey: event.ctrlKey,
-                                shiftKey: event.shiftKey,
-                                altKey: event.altKey,
-                            },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
                     setDragPayload(event, { type: "machine", hostAlias: row.host.host });
                     setDraggingKind("machine");
                     missingDragPayloadLoggedRef.current = false;
-                }, onContextMenu: (event) => {
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "right-drag-check",
-                            hypothesisId: "H13",
-                            location: "App.tsx:host.onContextMenu",
-                            message: "host context menu triggered",
-                            data: { button: event.button, buttons: event.buttons },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
-                }, onDragEnd: (event) => {
-                    // #region agent log
-                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-                        body: JSON.stringify({
-                            sessionId: "be74dc",
-                            runId: "dnd-drop-entry",
-                            hypothesisId: "H10",
-                            location: "App.tsx:hostDragEnd",
-                            message: "host drag ended",
-                            data: { dropEffect: event.dataTransfer.dropEffect, dragOverPaneIndex },
-                            timestamp: Date.now(),
-                        }),
-                    }).catch(() => { });
-                    // #endregion
+                }, onDragEnd: () => {
                     setDraggingKind(null);
                     setDragOverPaneIndex(null);
                     missingDragPayloadLoggedRef.current = false;
@@ -1868,7 +1971,7 @@ export function App() {
         "--sidebar-width": `${sidebarWidth}px`,
         "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     };
-    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, style: appShellStyle, children: [_jsx("button", { type: "button", className: "left-rail-edge-handle", "aria-label": isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", title: isSidebarVisible ? "Hide host sidebar" : "Show host sidebar", onMouseEnter: revealSidebar, onClick: () => setIsSidebarVisible((prev) => !prev), children: isSidebarVisible ? "‹" : "›" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsxs("header", { className: "brand", children: [_jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }), _jsxs("div", { className: "brand-header-actions", children: [_jsx("button", { className: `btn sidebar-pin-btn sidebar-header-icon-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Disable manual sidebar mode" : "Enable manual sidebar mode", title: isSidebarPinned ? "Pin on: manual sidebar mode" : "Pin off: auto-hide sidebar mode", onClick: toggleSidebarPinned, children: isSidebarPinned ? "⌃" : "⌄" }), _jsx("button", { className: "app-gear-btn sidebar-header-icon-btn", "aria-label": "Open app settings", title: "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: "\u2699" })] })] }), _jsxs("section", { className: "host-filter-card", children: [_jsxs("div", { className: "filter-head-row", children: [_jsxs("div", { className: "quick-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: "+" }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] }), _jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [draggingKind === "machine" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Host drop mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host" })] })), _jsxs("div", { className: "session-pane-canvas", children: [_jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }), panePointerDragSource !== null && paneDragPointer ? (_jsxs("div", { className: `pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`, style: {
+    return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`, "data-density": densityProfile, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, onClick: toggleSidebarPinned, children: isSidebarPinned ? "◧" : "◨" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsxs("header", { className: "brand", children: [_jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }), _jsxs("div", { className: "brand-utility-stack", children: [_jsxs("div", { className: "brand-utility-row", children: [_jsx("button", { className: `btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onClick: toggleSidebarPinned, children: _jsx("svg", { className: `header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`, viewBox: "0 0 24 24", "aria-hidden": "true", children: isSidebarPinned ? (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" })] })) : (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" }), _jsx("path", { d: "M4.3 4.3l15.4 15.4" })] })) }) }), _jsx("button", { className: "app-gear-btn sidebar-header-icon-btn mono-header-btn", "aria-label": "Open app settings", title: "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: _jsxs("svg", { className: "header-icon-svg settings-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "3.2" }), _jsx("path", { d: "M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" })] }) })] }), _jsxs("div", { className: "quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: _jsx("svg", { className: "add-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: _jsx("path", { d: "M12 6v12M6 12h12" }) }) }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] })] })] }), _jsxs("section", { className: "host-filter-card", children: [_jsx("div", { className: "sidebar-view-tabs", role: "tablist", "aria-label": "Sidebar views", children: sidebarViews.map((view) => (_jsx("button", { className: `tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`, role: "tab", "aria-selected": selectedSidebarViewId === view.id, onClick: () => setSelectedSidebarViewId(view.id), title: view.label, children: view.label }, view.id))) }), _jsxs("div", { className: "filter-head-row", children: [_jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsx("section", { className: "right-dock panel", children: _jsx("div", { className: "sessions-workspace", children: _jsxs("div", { className: "sessions-zone", children: [draggingKind === "machine" && (_jsxs("div", { className: `session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, role: "status", "aria-live": "polite", children: [_jsx("span", { className: "session-dnd-mode-key", children: "Host drop mode" }), _jsx("span", { className: "session-dnd-mode-text", children: sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host" })] })), _jsxs("div", { className: "session-pane-canvas", children: [_jsx("div", { className: `terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`, children: renderSplitNode(splitTree) }), panePointerDragSource !== null && paneDragPointer ? (_jsxs("div", { className: `pane-drag-ghost ${dragOverPaneIndex !== null ? "has-target" : ""}`, style: {
                                             "--ghost-x": `${paneDragPointer.x + 14}px`,
                                             "--ghost-y": `${paneDragPointer.y + 14}px`,
                                         }, children: [_jsx("span", { className: "pane-drag-ghost-title", children: dragGhostLabel }), _jsx("span", { className: "pane-drag-ghost-subtitle", children: "Moving pane" })] })) : null] }), _jsx("div", { className: "sessions-footer", role: "status", children: _jsxs("div", { className: "sessions-footer-meta", children: [_jsxs("div", { className: "footer-layout-controls", children: [_jsx("button", { className: "btn footer-layout-btn footer-action-btn", onClick: resetPaneLayout, disabled: paneOrder.length === 1 && !hasAssignedPaneSessions, "aria-label": "Reset pane layout", title: "Reset pane layout", children: "Reset" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(false), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", title: pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions", children: pendingCloseAllIntent === "close" ? "Confirm close all" : "Close all" }), _jsx("button", { className: `btn footer-layout-btn footer-action-btn ${pendingCloseAllIntent === "reset" ? "btn-danger-confirm" : "btn-danger"}`, onClick: () => void handleCloseAllIntent(true), disabled: sessions.length === 0, "aria-label": pendingCloseAllIntent === "reset"
@@ -1886,12 +1989,54 @@ export function App() {
                                                             ? "Confirm delete selected layout profile"
                                                             : "Delete selected layout profile", children: pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
                                                             ? "Confirm"
-                                                            : "Delete" })] }) }), !isFooterLayoutPanelOpen && (_jsx("div", { className: "sessions-footer-status", children: _jsxs("span", { className: `context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`, children: ["Broadcast: ", isBroadcastModeEnabled ? "ON" : "OFF", " (", broadcastTargets.size, ")"] }) }))] }) })] }) }) }), isAppSettingsOpen && (_jsx("div", { className: "app-settings-overlay", onClick: () => setIsAppSettingsOpen(false), children: _jsxs("section", { className: "app-settings-modal panel", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "App settings" }), _jsx("button", { className: "btn", onClick: () => setIsAppSettingsOpen(false), children: "Close" })] }), _jsx("div", { className: "app-settings-tabs", children: appSettingsTabs.map((tab) => (_jsx("button", { className: `tab-pill ${activeAppSettingsTab === tab.id ? "is-active" : ""}`, onClick: () => setActiveAppSettingsTab(tab.id), children: tab.label }, tab.id))) }), _jsxs("div", { className: "app-settings-content", children: [activeAppSettingsTab === "general" && (_jsx("div", { className: "host-form-grid", children: _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default login user" }), _jsx("input", { className: "input", value: metadataStore.defaultUser, onChange: (event) => {
-                                                    const nextValue = event.target.value;
-                                                    setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
-                                                }, onBlur: (event) => {
-                                                    void applyDefaultUser(event.target.value).catch((e) => setError(String(e)));
-                                                }, placeholder: "ubuntu" }), _jsx("span", { className: "field-help", children: "Used when a host does not define a user." })] }) })), activeAppSettingsTab === "backup" && (_jsxs("div", { className: "backup-panel", children: [_jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export path" }), _jsx("input", { className: "input", value: backupExportPath, onChange: (event) => setBackupExportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export password" }), _jsx("input", { className: "input", type: "password", value: backupExportPassword, onChange: (event) => setBackupExportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "new-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleExportBackup(), disabled: !backupExportPassword, children: "Export backup" }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import path" }), _jsx("input", { className: "input", value: backupImportPath, onChange: (event) => setBackupImportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import password" }), _jsx("input", { className: "input", type: "password", value: backupImportPassword, onChange: (event) => setBackupImportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "current-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleImportBackup(), disabled: !backupImportPassword, children: "Import backup" }), _jsx("p", { className: "muted-copy", children: "Backups are always encrypted. Passwords are never stored." }), backupMessage && _jsx("p", { className: "muted-copy", children: backupMessage })] })), activeAppSettingsTab === "extras" && _jsx("p", { className: "muted-copy", children: "Extras settings placeholder." }), activeAppSettingsTab === "help" && _jsx("p", { className: "muted-copy", children: "Help settings placeholder." }), activeAppSettingsTab === "about" && (_jsxs("section", { className: "about-hero", children: [_jsx("img", { src: logoTerminal, alt: "NoSuckShell hero", className: "about-hero-image" }), _jsx("p", { className: "muted-copy", children: "NoSuckShell helps you manage SSH hosts and sessions in one clean desktop workspace." })] }))] })] }) })), isAddHostModalOpen && (_jsx("div", { className: "app-settings-overlay", onClick: closeAddHostModal, children: _jsxs("section", { className: "app-settings-modal panel add-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Add host" }), _jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsx(HostForm, { host: newHostDraft, onChange: setNewHostDraft }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" }), _jsx("button", { className: "btn btn-primary", onClick: createHost, disabled: !canCreateHost, children: "Add host" })] }), error && _jsx("p", { className: "error-text", children: error })] })] }) })), activeTrustPrompt && (_jsx("div", { className: "app-settings-overlay", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: _jsxs("section", { className: "app-settings-modal panel trust-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Trust host key" }), _jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Close" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsxs("p", { className: "muted-copy", children: ["Session ", _jsx("strong", { children: activeTrustPrompt.sessionId }), " requests trust confirmation for host", " ", _jsx("strong", { children: activeTrustPrompt.hostAlias }), "."] }), _jsxs("label", { className: "field checkbox-field trust-default-checkbox", children: [_jsx("input", { className: "checkbox-input", type: "checkbox", checked: saveTrustHostAsDefault, onChange: (event) => setSaveTrustHostAsDefault(event.target.checked) }), _jsx("span", { className: "field-label", children: "Save as default for this host" })] }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Dismiss" }), _jsx("button", { className: "btn btn-primary", onClick: () => void acceptTrustPrompt(), children: "Trust host" })] })] })] }) })), contextMenu.visible && contextMenu.paneIndex !== null && (_jsx("div", { className: "context-menu", style: { left: contextMenu.x, top: contextMenu.y }, role: "menu", children: buildPaneContextActions({
+                                                            : "Delete" })] }) }), !isFooterLayoutPanelOpen && (_jsx("div", { className: "sessions-footer-status", children: _jsxs("span", { className: `context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`, children: ["Broadcast: ", isBroadcastModeEnabled ? "ON" : "OFF", " (", broadcastTargets.size, ")"] }) }))] }) })] }) }) }), isAppSettingsOpen && (_jsx("div", { className: "app-settings-overlay", onClick: () => setIsAppSettingsOpen(false), children: _jsxs("section", { className: "app-settings-modal panel", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "App settings" }), _jsx("button", { className: "btn", onClick: () => setIsAppSettingsOpen(false), children: "Close" })] }), _jsx("div", { className: "app-settings-tabs", children: appSettingsTabs.map((tab) => (_jsx("button", { className: `tab-pill ${activeAppSettingsTab === tab.id ? "is-active" : ""}`, onClick: () => setActiveAppSettingsTab(tab.id), children: tab.label }, tab.id))) }), _jsxs("div", { className: "app-settings-content", children: [activeAppSettingsTab === "general" && (_jsxs("div", { className: "host-form-grid", children: [_jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default login user" }), _jsx("input", { className: "input", value: metadataStore.defaultUser, onChange: (event) => {
+                                                        const nextValue = event.target.value;
+                                                        setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
+                                                    }, onBlur: (event) => {
+                                                        void applyDefaultUser(event.target.value).catch((e) => setError(String(e)));
+                                                    }, placeholder: "ubuntu" }), _jsx("span", { className: "field-help", children: "Used when a host does not define a user." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Density profile" }), _jsxs("select", { className: "input density-profile-select", value: densityProfile, onChange: (event) => setDensityProfile(event.target.value), children: [_jsx("option", { value: "aggressive", children: "Aggressive compact" }), _jsx("option", { value: "balanced", children: "Balanced compact" }), _jsx("option", { value: "safe", children: "Safe compact" })] }), _jsx("span", { className: "field-help", children: "Controls spacing and font density across the entire app." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Terminal font offset" }), _jsx("input", { className: "input", type: "number", value: terminalFontOffset, min: TERMINAL_FONT_OFFSET_MIN, max: TERMINAL_FONT_OFFSET_MAX, onChange: (event) => {
+                                                        const parsed = Number(event.target.value);
+                                                        if (!Number.isFinite(parsed)) {
+                                                            return;
+                                                        }
+                                                        setTerminalFontOffset(Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))));
+                                                    } }), _jsxs("span", { className: "field-help", children: ["Final terminal size: ", terminalFontSize, "px (profile base + offset, saved separately)."] })] })] })), activeAppSettingsTab === "views" && (_jsxs("section", { className: "backup-panel view-manager-panel", children: [_jsxs("div", { className: "field", children: [_jsx("span", { className: "field-label", children: "Saved custom views" }), _jsx("div", { className: "view-manager-list", children: sortedViewProfiles.length === 0 ? (_jsx("p", { className: "muted-copy", children: "No custom views yet." })) : (sortedViewProfiles.map((profile) => (_jsx("button", { className: `btn ${selectedViewProfileIdInSettings === profile.id ? "btn-primary" : ""}`, onClick: () => selectViewProfileForSettings(profile.id), children: profile.name }, profile.id)))) })] }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: createNewViewDraft, children: "New view" }), _jsx("button", { className: "btn", onClick: () => void reorderView("up"), disabled: !selectedViewProfileIdInSettings, children: "Move up" }), _jsx("button", { className: "btn", onClick: () => void reorderView("down"), disabled: !selectedViewProfileIdInSettings, children: "Move down" }), _jsx("button", { className: "btn btn-danger", onClick: () => void deleteCurrentViewDraft(), disabled: !selectedViewProfileIdInSettings, children: "Delete" })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "View name" }), _jsx("input", { className: "input", value: viewDraft.name, onChange: (event) => setViewDraft((prev) => ({ ...prev, name: event.target.value })), placeholder: "Production hosts" })] }), _jsx("div", { className: "filter-row", children: _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Rule mode" }), _jsxs("select", { className: "input", value: viewDraft.filterGroup.mode, onChange: (event) => setViewDraft((prev) => ({
+                                                            ...prev,
+                                                            filterGroup: { ...prev.filterGroup, mode: event.target.value },
+                                                        })), children: [_jsx("option", { value: "and", children: "All rules (AND)" }), _jsx("option", { value: "or", children: "Any rule (OR)" })] })] }) }), _jsx("div", { className: "view-rule-list", children: viewDraft.filterGroup.rules.map((rule) => (_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: rule.field, onChange: (event) => setViewDraft((prev) => ({
+                                                            ...prev,
+                                                            filterGroup: {
+                                                                ...prev.filterGroup,
+                                                                rules: prev.filterGroup.rules.map((entry) => entry.id === rule.id ? { ...entry, field: event.target.value } : entry),
+                                                            },
+                                                        })), children: [_jsx("option", { value: "host", children: "Alias" }), _jsx("option", { value: "hostName", children: "Hostname" }), _jsx("option", { value: "user", children: "User" }), _jsx("option", { value: "port", children: "Port" }), _jsx("option", { value: "status", children: "Status" }), _jsx("option", { value: "favorite", children: "Favorite" }), _jsx("option", { value: "recent", children: "Recent" }), _jsx("option", { value: "tag", children: "Tag" })] }), _jsxs("select", { className: "input", value: rule.operator, onChange: (event) => setViewDraft((prev) => ({
+                                                            ...prev,
+                                                            filterGroup: {
+                                                                ...prev.filterGroup,
+                                                                rules: prev.filterGroup.rules.map((entry) => entry.id === rule.id ? { ...entry, operator: event.target.value } : entry),
+                                                            },
+                                                        })), children: [_jsx("option", { value: "contains", children: "contains" }), _jsx("option", { value: "equals", children: "equals" }), _jsx("option", { value: "not_equals", children: "not equals" }), _jsx("option", { value: "starts_with", children: "starts with" }), _jsx("option", { value: "ends_with", children: "ends with" }), _jsx("option", { value: "greater_than", children: "greater than" }), _jsx("option", { value: "less_than", children: "less than" }), _jsx("option", { value: "in", children: "in (comma separated)" })] }), _jsx("input", { className: "input", value: rule.value, onChange: (event) => setViewDraft((prev) => ({
+                                                            ...prev,
+                                                            filterGroup: {
+                                                                ...prev.filterGroup,
+                                                                rules: prev.filterGroup.rules.map((entry) => entry.id === rule.id ? { ...entry, value: event.target.value } : entry),
+                                                            },
+                                                        })), placeholder: "value" }), _jsx("button", { className: "btn btn-danger", onClick: () => setViewDraft((prev) => ({
+                                                            ...prev,
+                                                            filterGroup: {
+                                                                ...prev.filterGroup,
+                                                                rules: prev.filterGroup.rules.filter((entry) => entry.id !== rule.id),
+                                                            },
+                                                        })), children: "Remove" })] }, rule.id))) }), _jsx("div", { className: "action-row", children: _jsx("button", { className: "btn", onClick: () => setViewDraft((prev) => ({
+                                                    ...prev,
+                                                    filterGroup: { ...prev.filterGroup, rules: [...prev.filterGroup.rules, createViewRule()] },
+                                                })), children: "Add rule" }) }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: viewDraft.sortRules[0]?.field ?? "host", onChange: (event) => setViewDraft((prev) => ({
+                                                        ...prev,
+                                                        sortRules: [{ field: event.target.value, direction: prev.sortRules[0]?.direction ?? "asc" }],
+                                                    })), children: [_jsx("option", { value: "host", children: "Sort by alias" }), _jsx("option", { value: "hostName", children: "Sort by hostname" }), _jsx("option", { value: "user", children: "Sort by user" }), _jsx("option", { value: "port", children: "Sort by port" }), _jsx("option", { value: "lastUsedAt", children: "Sort by last used" }), _jsx("option", { value: "status", children: "Sort by status" }), _jsx("option", { value: "favorite", children: "Sort by favorite" })] }), _jsxs("select", { className: "input", value: viewDraft.sortRules[0]?.direction ?? "asc", onChange: (event) => setViewDraft((prev) => ({
+                                                        ...prev,
+                                                        sortRules: [{ field: prev.sortRules[0]?.field ?? "host", direction: event.target.value }],
+                                                    })), children: [_jsx("option", { value: "asc", children: "Ascending" }), _jsx("option", { value: "desc", children: "Descending" })] }), _jsx("button", { className: "btn btn-primary", onClick: () => void saveCurrentViewDraft(), children: "Save view" })] }), _jsx("p", { className: "muted-copy", children: "Built-in views are fixed (`Alle`, `Favoriten`). Custom views are persisted and shown as sidebar tabs." })] })), activeAppSettingsTab === "backup" && (_jsxs("div", { className: "backup-panel", children: [_jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export path" }), _jsx("input", { className: "input", value: backupExportPath, onChange: (event) => setBackupExportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Export password" }), _jsx("input", { className: "input", type: "password", value: backupExportPassword, onChange: (event) => setBackupExportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "new-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleExportBackup(), disabled: !backupExportPassword, children: "Export backup" }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import path" }), _jsx("input", { className: "input", value: backupImportPath, onChange: (event) => setBackupImportPath(event.target.value), placeholder: DEFAULT_BACKUP_PATH })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Import password" }), _jsx("input", { className: "input", type: "password", value: backupImportPassword, onChange: (event) => setBackupImportPassword(event.target.value), placeholder: "Enter backup password", autoComplete: "current-password" })] }), _jsx("button", { className: "btn", onClick: () => void handleImportBackup(), disabled: !backupImportPassword, children: "Import backup" }), _jsx("p", { className: "muted-copy", children: "Backups are always encrypted. Passwords are never stored." }), backupMessage && _jsx("p", { className: "muted-copy", children: backupMessage })] })), activeAppSettingsTab === "extras" && _jsx("p", { className: "muted-copy", children: "Extras settings placeholder." }), activeAppSettingsTab === "help" && _jsx("p", { className: "muted-copy", children: "Help settings placeholder." }), activeAppSettingsTab === "about" && (_jsxs("section", { className: "about-hero", children: [_jsx("img", { src: logoTerminal, alt: "NoSuckShell hero", className: "about-hero-image" }), _jsx("p", { className: "muted-copy", children: "NoSuckShell helps you manage SSH hosts and sessions in one clean desktop workspace." })] }))] })] }) })), isAddHostModalOpen && (_jsx("div", { className: "app-settings-overlay", onClick: closeAddHostModal, children: _jsxs("section", { className: "app-settings-modal panel add-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Add host" }), _jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsx(HostForm, { host: newHostDraft, onChange: setNewHostDraft }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: closeAddHostModal, children: "Cancel" }), _jsx("button", { className: "btn btn-primary", onClick: createHost, disabled: !canCreateHost, children: "Add host" })] }), error && _jsx("p", { className: "error-text", children: error })] })] }) })), activeTrustPrompt && (_jsx("div", { className: "app-settings-overlay", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: _jsxs("section", { className: "app-settings-modal panel trust-host-modal", onClick: (event) => event.stopPropagation(), children: [_jsxs("header", { className: "panel-header", children: [_jsx("h2", { children: "Trust host key" }), _jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Close" })] }), _jsxs("div", { className: "app-settings-content", children: [_jsxs("p", { className: "muted-copy", children: ["Session ", _jsx("strong", { children: activeTrustPrompt.sessionId }), " requests trust confirmation for host", " ", _jsx("strong", { children: activeTrustPrompt.hostAlias }), "."] }), _jsxs("label", { className: "field checkbox-field trust-default-checkbox", children: [_jsx("input", { className: "checkbox-input", type: "checkbox", checked: saveTrustHostAsDefault, onChange: (event) => setSaveTrustHostAsDefault(event.target.checked) }), _jsx("span", { className: "field-label", children: "Save as default for this host" })] }), _jsxs("div", { className: "action-row", children: [_jsx("button", { className: "btn", onClick: () => dismissTrustPrompt(activeTrustPrompt.sessionId), children: "Dismiss" }), _jsx("button", { className: "btn btn-primary", onClick: () => void acceptTrustPrompt(), children: "Trust host" })] })] })] }) })), contextMenu.visible && contextMenu.paneIndex !== null && (_jsx("div", { className: "context-menu", style: { left: contextMenu.x, top: contextMenu.y }, role: "menu", children: buildPaneContextActions({
                     paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
                     canClosePane: paneOrder.length > 1,
                     broadcastModeEnabled: isBroadcastModeEnabled,

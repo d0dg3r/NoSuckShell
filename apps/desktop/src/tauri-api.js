@@ -14,3 +14,7 @@ export const importBackup = (path, password) => invoke("import_backup", { path, 
 export const listLayoutProfiles = () => invoke("list_layout_profiles");
 export const saveLayoutProfile = (profile) => invoke("save_layout_profile", { profile });
 export const deleteLayoutProfile = (profileId) => invoke("delete_layout_profile", { profileId });
+export const listViewProfiles = () => invoke("list_view_profiles");
+export const saveViewProfile = (profile) => invoke("save_view_profile", { profile });
+export const deleteViewProfile = (profileId) => invoke("delete_view_profile", { profileId });
+export const reorderViewProfiles = (ids) => invoke("reorder_view_profiles", { ids });

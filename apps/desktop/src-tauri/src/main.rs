@@ -3,6 +3,7 @@ mod host_metadata;
 mod layout_profiles;
 mod session;
 mod ssh_config;
+mod view_profiles;
 
 use backup::{create_backup_payload, export_encrypted_backup, import_encrypted_backup};
 use host_metadata::{load_metadata, save_metadata, touch_host_last_used as touch_host_last_used_backend, HostMetadataStore};
@@ -14,6 +15,11 @@ use session::SessionState;
 use ssh_config::{
     delete_host_from_file, load_hosts, load_ssh_config_raw, save_host_to_file, write_ssh_config_raw,
     HostConfig,
+};
+use view_profiles::{
+    delete_view_profile as delete_view_profile_backend, load_view_profiles,
+    reorder_view_profiles as reorder_view_profiles_backend, save_view_profile as save_view_profile_backend,
+    ViewProfile,
 };
 use tauri::State;
 
@@ -118,6 +124,26 @@ fn delete_layout_profile(profile_id: String) -> Result<(), String> {
     delete_layout_profile_backend(&profile_id).map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn list_view_profiles() -> Result<Vec<ViewProfile>, String> {
+    load_view_profiles().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn save_view_profile(profile: ViewProfile) -> Result<(), String> {
+    save_view_profile_backend(&profile).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn delete_view_profile(profile_id: String) -> Result<(), String> {
+    delete_view_profile_backend(&profile_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn reorder_view_profiles(ids: Vec<String>) -> Result<(), String> {
+    reorder_view_profiles_backend(&ids).map_err(|err| err.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionState::default())
@@ -136,7 +162,11 @@ fn main() {
             import_backup,
             list_layout_profiles,
             save_layout_profile,
-            delete_layout_profile
+            delete_layout_profile,
+            list_view_profiles,
+            save_view_profile,
+            delete_view_profile,
+            reorder_view_profiles
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoSuckShell");

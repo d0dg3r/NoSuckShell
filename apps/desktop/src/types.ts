@@ -72,3 +72,56 @@ export type LayoutProfile = {
   createdAt: number;
   updatedAt: number;
 };
+
+export type ViewBuiltInId = "all" | "favorites";
+
+export type ViewFilterField =
+  | "host"
+  | "hostName"
+  | "user"
+  | "port"
+  | "status"
+  | "favorite"
+  | "recent"
+  | "tag";
+
+export type ViewFilterOperator =
+  | "equals"
+  | "not_equals"
+  | "contains"
+  | "starts_with"
+  | "ends_with"
+  | "greater_than"
+  | "less_than"
+  | "in";
+
+export type ViewFilterRule = {
+  id: string;
+  field: ViewFilterField;
+  operator: ViewFilterOperator;
+  value: string;
+};
+
+export type ViewFilterGroup = {
+  id: string;
+  mode: "and" | "or";
+  rules: ViewFilterRule[];
+  groups: ViewFilterGroup[];
+};
+
+export type ViewSortField = "host" | "hostName" | "user" | "port" | "lastUsedAt" | "status" | "favorite";
+
+export type ViewSortRule = {
+  field: ViewSortField;
+  direction: "asc" | "desc";
+};
+
+export type ViewProfile = {
+  id: string;
+  name: string;
+  order: number;
+  filterGroup: ViewFilterGroup;
+  sortRules: ViewSortRule[];
+  createdAt: number;
+  updatedAt: number;
+};

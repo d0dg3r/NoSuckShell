@@ -14,7 +14,7 @@ const hasTauriTransformCallback = () => {
         .__TAURI_INTERNALS__;
     return typeof tauriInternals?.transformCallback === "function";
 };
-export function TerminalPane({ sessionId, onUserInput }) {
+export function TerminalPane({ sessionId, onUserInput, fontSize }) {
     const rootRef = useRef(null);
     const terminalRef = useRef(null);
     const fitAddonRef = useRef(null);
@@ -31,7 +31,7 @@ export function TerminalPane({ sessionId, onUserInput }) {
             convertEol: true,
             cursorBlink: true,
             fontFamily: "monospace",
-            fontSize: 14,
+            fontSize,
             theme: {
                 background: "#0f141f",
                 foreground: "#dce6f8",
@@ -148,6 +148,6 @@ export function TerminalPane({ sessionId, onUserInput }) {
             }
             terminal.dispose();
         };
-    }, [sessionId]);
+    }, [fontSize, sessionId]);
     return _jsx("div", { ref: rootRef, className: "terminal-root" });
 }

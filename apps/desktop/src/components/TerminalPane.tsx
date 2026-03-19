@@ -8,6 +8,7 @@ import type { SessionOutputEvent } from "../types";
 type Props = {
   sessionId: string;
   onUserInput: (sessionId: string, data: string) => void;
+  fontSize: number;
 };
 
 const sessionBuffers = new Map<string, string>();
@@ -21,7 +22,7 @@ const hasTauriTransformCallback = (): boolean => {
   return typeof tauriInternals?.transformCallback === "function";
 };
 
-export function TerminalPane({ sessionId, onUserInput }: Props) {
+export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -40,7 +41,7 @@ export function TerminalPane({ sessionId, onUserInput }: Props) {
       convertEol: true,
       cursorBlink: true,
       fontFamily: "monospace",
-      fontSize: 14,
+      fontSize,
       theme: {
         background: "#0f141f",
         foreground: "#dce6f8",
@@ -164,7 +165,7 @@ export function TerminalPane({ sessionId, onUserInput }: Props) {
       }
       terminal.dispose();
     };
-  }, [sessionId]);
+  }, [fontSize, sessionId]);
 
   return <div ref={rootRef} className="terminal-root" />;
 }

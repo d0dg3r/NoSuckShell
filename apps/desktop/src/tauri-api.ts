@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { HostConfig, HostMetadataStore, LayoutProfile, SessionStarted } from "./types";
+import type { HostConfig, HostMetadataStore, LayoutProfile, SessionStarted, ViewProfile } from "./types";
 
 export const listHosts = (): Promise<HostConfig[]> => invoke("list_hosts");
 
@@ -47,3 +47,15 @@ export const saveLayoutProfile = (profile: LayoutProfile): Promise<void> =>
 
 export const deleteLayoutProfile = (profileId: string): Promise<void> =>
   invoke("delete_layout_profile", { profileId });
+
+export const listViewProfiles = (): Promise<ViewProfile[]> =>
+  invoke("list_view_profiles");
+
+export const saveViewProfile = (profile: ViewProfile): Promise<void> =>
+  invoke("save_view_profile", { profile });
+
+export const deleteViewProfile = (profileId: string): Promise<void> =>
+  invoke("delete_view_profile", { profileId });
+
+export const reorderViewProfiles = (ids: string[]): Promise<void> =>
+  invoke("reorder_view_profiles", { ids });

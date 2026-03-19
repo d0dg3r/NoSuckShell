@@ -3,10 +3,10 @@ import type { PaneLayoutItem } from "../types";
 export type SplitSlots = Array<string | null>;
 export type ResizeAxis = "x" | "y" | "xy";
 
-export const DEFAULT_PANE_WIDTH = 420;
-export const DEFAULT_PANE_HEIGHT = 260;
-export const MIN_PANE_WIDTH = 280;
-export const MIN_PANE_HEIGHT = 180;
+export const DEFAULT_PANE_WIDTH = 380;
+export const DEFAULT_PANE_HEIGHT = 220;
+export const MIN_PANE_WIDTH = 240;
+export const MIN_PANE_HEIGHT = 150;
 
 let paneIdCounter = 0;
 const createPaneId = (): string => {

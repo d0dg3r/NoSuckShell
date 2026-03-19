@@ -16,11 +16,15 @@ import {
   exportBackup,
   importBackup,
   listLayoutProfiles,
+  listViewProfiles,
   listHostMetadata,
   listHosts,
   saveHost,
   saveHostMetadata,
   saveLayoutProfile,
+  saveViewProfile,
+  deleteViewProfile,
+  reorderViewProfiles,
   sendInput,
   startSession,
   touchHostLastUsed,
@@ -49,6 +53,12 @@ import type {
   LayoutSplitTreeNode,
   PaneLayoutItem,
   SessionOutputEvent,
+  ViewFilterField,
+  ViewFilterGroup,
+  ViewFilterOperator,
+  ViewFilterRule,
+  ViewProfile,
+  ViewSortField,
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTerminal from "../../../img/logo_terminal.png";
@@ -76,8 +86,9 @@ type HostRowViewModel = {
   displayUser: string;
 };
 
-type AppSettingsTab = "general" | "backup" | "extras" | "help" | "about";
-type SessionDropPolicy = "spawn_new_from_host" | "move_existing";
+type AppSettingsTab = "general" | "views" | "backup" | "extras" | "help" | "about";
+type DensityProfile = "aggressive" | "balanced" | "safe";
+type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
 type DragPayload =
   | { type: "session"; sessionId: string }
   | { type: "machine"; hostAlias: string }
@@ -108,6 +119,7 @@ const MAX_SPLIT_RATIO = 0.8;
 
 const appSettingsTabs: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "general", label: "General" },
+  { id: "views", label: "Views" },
   { id: "backup", label: "Backup & Restore" },
   { id: "extras", label: "Extras" },
   { id: "help", label: "Help" },
@@ -119,8 +131,47 @@ const SIDEBAR_DEFAULT_WIDTH = 280;
 const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
+const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
+const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
-const SESSION_DROP_POLICY: SessionDropPolicy = "spawn_new_from_host";
+const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
+  aggressive: 12,
+  balanced: 13,
+  safe: 14,
+};
+const TERMINAL_FONT_OFFSET_MIN = -3;
+const TERMINAL_FONT_OFFSET_MAX = 6;
+const TERMINAL_FONT_MIN = 9;
+const TERMINAL_FONT_MAX = 22;
+const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
+
+const createId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const createEmptyFilterGroup = (): ViewFilterGroup => ({
+  id: createId(),
+  mode: "and",
+  rules: [],
+  groups: [],
+});
+const createDefaultViewProfile = (): ViewProfile => ({
+  id: createId(),
+  name: "New view",
+  order: 0,
+  filterGroup: createEmptyFilterGroup(),
+  sortRules: [{ field: "host", direction: "asc" }],
+  createdAt: 0,
+  updatedAt: 0,
+});
+
+const parseBooleanRuleValue = (value: string): boolean | null => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0" || normalized === "no") {
+    return false;
+  }
+  return null;
+};
 const hasTauriTransformCallback = (): boolean => {
   if (typeof window === "undefined") {
     return false;
@@ -263,6 +314,89 @@ const parseSplitTree = (raw: LayoutSplitTreeNode | null | undefined): SplitTreeN
   return null;
 };
 
+const getRuleFieldValue = (row: HostRowViewModel, field: ViewFilterField): string => {
+  switch (field) {
+    case "host":
+      return row.host.host;
+    case "hostName":
+      return row.host.hostName;
+    case "user":
+      return row.displayUser;
+    case "port":
+      return String(row.host.port);
+    case "status":
+      return row.connected ? "connected" : "disconnected";
+    case "favorite":
+      return row.metadata.favorite ? "true" : "false";
+    case "recent":
+      return row.metadata.lastUsedAt ? "true" : "false";
+    case "tag":
+      return row.metadata.tags.join(",");
+    default:
+      return "";
+  }
+};
+
+const evaluateRule = (row: HostRowViewModel, rule: ViewFilterRule): boolean => {
+  if (rule.field === "favorite" || rule.field === "recent") {
+    const parsed = parseBooleanRuleValue(rule.value);
+    if (parsed !== null && (rule.operator === "equals" || rule.operator === "not_equals")) {
+      const current = rule.field === "favorite" ? row.metadata.favorite : Boolean(row.metadata.lastUsedAt);
+      return rule.operator === "equals" ? current === parsed : current !== parsed;
+    }
+  }
+  const sourceValue = getRuleFieldValue(row, rule.field);
+  const sourceLower = sourceValue.toLowerCase();
+  const ruleValue = rule.value.trim();
+  const ruleLower = ruleValue.toLowerCase();
+
+  switch (rule.operator as ViewFilterOperator) {
+    case "equals":
+      return sourceLower === ruleLower;
+    case "not_equals":
+      return sourceLower !== ruleLower;
+    case "contains":
+      return sourceLower.includes(ruleLower);
+    case "starts_with":
+      return sourceLower.startsWith(ruleLower);
+    case "ends_with":
+      return sourceLower.endsWith(ruleLower);
+    case "greater_than": {
+      const left = Number(sourceValue);
+      const right = Number(ruleValue);
+      return Number.isFinite(left) && Number.isFinite(right) ? left > right : sourceLower > ruleLower;
+    }
+    case "less_than": {
+      const left = Number(sourceValue);
+      const right = Number(ruleValue);
+      return Number.isFinite(left) && Number.isFinite(right) ? left < right : sourceLower < ruleLower;
+    }
+    case "in": {
+      const options = ruleValue
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => entry.length > 0);
+      if (rule.field === "tag") {
+        const tags = row.metadata.tags.map((entry) => entry.trim().toLowerCase());
+        return options.some((entry) => tags.includes(entry));
+      }
+      return options.includes(sourceLower);
+    }
+    default:
+      return true;
+  }
+};
+
+const evaluateGroup = (row: HostRowViewModel, group: ViewFilterGroup): boolean => {
+  const ruleResults = group.rules.map((rule) => evaluateRule(row, rule));
+  const groupResults = group.groups.map((child) => evaluateGroup(row, child));
+  const allResults = [...ruleResults, ...groupResults];
+  if (allResults.length === 0) {
+    return true;
+  }
+  return group.mode === "or" ? allResults.some(Boolean) : allResults.every(Boolean);
+};
+
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
   const [currentHost, setCurrentHost] = useState<HostConfig>(emptyHost());
@@ -298,6 +432,19 @@ export function App() {
   const [isBroadcastModeEnabled, setIsBroadcastModeEnabled] = useState<boolean>(false);
   const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set());
   const [layoutProfiles, setLayoutProfiles] = useState<LayoutProfile[]>([]);
+  const [viewProfiles, setViewProfiles] = useState<ViewProfile[]>([]);
+  const [selectedSidebarViewId, setSelectedSidebarViewId] = useState<SidebarViewId>(() => {
+    if (typeof window === "undefined") {
+      return "builtin:all";
+    }
+    const persisted = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
+    if (persisted === "builtin:all" || persisted === "builtin:favorites" || persisted?.startsWith("custom:")) {
+      return persisted as SidebarViewId;
+    }
+    return "builtin:all";
+  });
+  const [selectedViewProfileIdInSettings, setSelectedViewProfileIdInSettings] = useState<string>("");
+  const [viewDraft, setViewDraft] = useState<ViewProfile>(() => createDefaultViewProfile());
   const [selectedLayoutProfileId, setSelectedLayoutProfileId] = useState<string>("");
   const [pendingLayoutProfileDeleteId, setPendingLayoutProfileDeleteId] = useState<string>("");
   const [layoutProfileName, setLayoutProfileName] = useState<string>("");
@@ -327,6 +474,23 @@ export function App() {
     return persisted !== "false";
   });
   const [isSidebarVisible, setIsSidebarVisible] = useState<boolean>(true);
+  const [densityProfile, setDensityProfile] = useState<DensityProfile>(() => {
+    if (typeof window === "undefined") {
+      return "balanced";
+    }
+    const persisted = window.localStorage.getItem(DENSITY_PROFILE_STORAGE_KEY);
+    return persisted === "aggressive" || persisted === "safe" || persisted === "balanced" ? persisted : "balanced";
+  });
+  const [terminalFontOffset, setTerminalFontOffset] = useState<number>(() => {
+    if (typeof window === "undefined") {
+      return 0;
+    }
+    const persisted = Number(window.localStorage.getItem(TERMINAL_FONT_OFFSET_STORAGE_KEY));
+    if (!Number.isFinite(persisted)) {
+      return 0;
+    }
+    return Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(persisted)));
+  });
   const [hoveredHostAlias, setHoveredHostAlias] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
@@ -370,6 +534,11 @@ export function App() {
   );
   const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
   const isSidebarOpen = isSidebarVisible;
+  const terminalFontSize = useMemo(() => {
+    const base = DENSITY_TERMINAL_BASE_FONT[densityProfile];
+    const next = base + terminalFontOffset;
+    return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, next));
+  }, [densityProfile, terminalFontOffset]);
 
 
   const activeHostMetadata = useMemo(() => {
@@ -400,12 +569,29 @@ export function App() {
       };
     });
   }, [connectedHosts, hosts, metadataStore.defaultUser, metadataStore.hosts]);
+  const sortedViewProfiles = useMemo(
+    () => [...viewProfiles].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)),
+    [viewProfiles],
+  );
+  const selectedCustomViewProfile = useMemo(() => {
+    if (!selectedSidebarViewId.startsWith("custom:")) {
+      return null;
+    }
+    const id = selectedSidebarViewId.slice("custom:".length);
+    return sortedViewProfiles.find((profile) => profile.id === id) ?? null;
+  }, [selectedSidebarViewId, sortedViewProfiles]);
   const filteredHostRows = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
     const numericPort = Number(portFilter);
     const hasPortFilter = portFilter.trim().length > 0 && Number.isFinite(numericPort);
     return hostRows
       .filter((row) => {
+        if (selectedSidebarViewId === "builtin:favorites" && !row.metadata.favorite) {
+          return false;
+        }
+        if (selectedCustomViewProfile && !evaluateGroup(row, selectedCustomViewProfile.filterGroup)) {
+          return false;
+        }
         if (normalizedSearch.length > 0) {
           const haystack = `${row.host.host} ${row.host.hostName} ${row.displayUser}`.toLowerCase();
           if (!haystack.includes(normalizedSearch)) {
@@ -436,14 +622,59 @@ export function App() {
         if (recentOnly) {
           return (b.metadata.lastUsedAt ?? 0) - (a.metadata.lastUsedAt ?? 0);
         }
+        if (selectedCustomViewProfile?.sortRules.length) {
+          for (const sortRule of selectedCustomViewProfile.sortRules) {
+            const factor = sortRule.direction === "asc" ? 1 : -1;
+            let cmp = 0;
+            switch (sortRule.field as ViewSortField) {
+              case "host":
+                cmp = a.host.host.localeCompare(b.host.host);
+                break;
+              case "hostName":
+                cmp = a.host.hostName.localeCompare(b.host.hostName);
+                break;
+              case "user":
+                cmp = a.displayUser.localeCompare(b.displayUser);
+                break;
+              case "port":
+                cmp = a.host.port - b.host.port;
+                break;
+              case "lastUsedAt":
+                cmp = (a.metadata.lastUsedAt ?? 0) - (b.metadata.lastUsedAt ?? 0);
+                break;
+              case "status":
+                cmp = (a.connected ? 1 : 0) - (b.connected ? 1 : 0);
+                break;
+              case "favorite":
+                cmp = (a.metadata.favorite ? 1 : 0) - (b.metadata.favorite ? 1 : 0);
+                break;
+              default:
+                cmp = 0;
+            }
+            if (cmp !== 0) {
+              return cmp * factor;
+            }
+          }
+        }
         return a.host.host.localeCompare(b.host.host);
       });
-  }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedTagFilter, statusFilter]);
+  }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
   const connectedHostRows = useMemo(
     () => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)),
     [filteredHostRows],
   );
   const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+  const sidebarViews = useMemo(
+    () => [
+      { id: "builtin:all" as SidebarViewId, label: "Alle" },
+      { id: "builtin:favorites" as SidebarViewId, label: "Favoriten" },
+      ...sortedViewProfiles.map((profile) => ({
+        id: `custom:${profile.id}` as SidebarViewId,
+        label: profile.name,
+      })),
+    ],
+    [sortedViewProfiles],
+  );
   const hoveredHostPaneIndices = useMemo(() => {
     if (!hoveredHostAlias) {
       return new Set<number>();
@@ -510,14 +741,16 @@ export function App() {
   }, []);
 
   const load = async () => {
-    const [loadedHosts, loadedMetadata, loadedProfiles] = await Promise.all([
+    const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles] = await Promise.all([
       listHosts(),
       listHostMetadata(),
       listLayoutProfiles(),
+      listViewProfiles(),
     ]);
     setHosts(loadedHosts);
     setMetadataStore(loadedMetadata);
     setLayoutProfiles(loadedProfiles);
+    setViewProfiles(loadedViewProfiles);
     setSelectedLayoutProfileId((prev) => {
       if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
         return prev;
@@ -529,6 +762,12 @@ export function App() {
       setCurrentHost(loadedHosts[0]);
       setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
     }
+    setSelectedViewProfileIdInSettings((prev) => {
+      if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
+        return prev;
+      }
+      return loadedViewProfiles[0]?.id ?? "";
+    });
   };
 
   useEffect(() => {
@@ -655,6 +894,33 @@ export function App() {
       setIsSidebarVisible(true);
     }
   }, [isSidebarPinned]);
+  useEffect(() => {
+    window.localStorage.setItem(DENSITY_PROFILE_STORAGE_KEY, densityProfile);
+  }, [densityProfile]);
+  useEffect(() => {
+    window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
+  }, [terminalFontOffset]);
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, selectedSidebarViewId);
+  }, [selectedSidebarViewId]);
+  useEffect(() => {
+    if (!selectedSidebarViewId.startsWith("custom:")) {
+      return;
+    }
+    const id = selectedSidebarViewId.slice("custom:".length);
+    if (!viewProfiles.some((profile) => profile.id === id)) {
+      setSelectedSidebarViewId("builtin:all");
+    }
+  }, [selectedSidebarViewId, viewProfiles]);
+  useEffect(() => {
+    if (!selectedViewProfileIdInSettings) {
+      return;
+    }
+    const profile = viewProfiles.find((entry) => entry.id === selectedViewProfileIdInSettings);
+    if (profile) {
+      setViewDraft(profile);
+    }
+  }, [selectedViewProfileIdInSettings, viewProfiles]);
 
   useEffect(() => {
     if (!isSidebarResizing) {
@@ -940,6 +1206,94 @@ export function App() {
     setPortFilter("");
   };
 
+  const selectViewProfileForSettings = (profileId: string) => {
+    setSelectedViewProfileIdInSettings(profileId);
+    const profile = viewProfiles.find((entry) => entry.id === profileId);
+    if (profile) {
+      setViewDraft(profile);
+    }
+  };
+
+  const createViewRule = (): ViewFilterRule => ({
+    id: createId(),
+    field: "host",
+    operator: "contains",
+    value: "",
+  });
+
+  const createNewViewDraft = () => {
+    setViewDraft(createDefaultViewProfile());
+    setSelectedViewProfileIdInSettings("");
+  };
+
+  const saveCurrentViewDraft = async () => {
+    const normalizedName = viewDraft.name.trim();
+    if (!normalizedName) {
+      setError("View name is required.");
+      return;
+    }
+    const now = Date.now();
+    const nextProfile: ViewProfile = {
+      ...viewDraft,
+      name: normalizedName,
+      order:
+        selectedViewProfileIdInSettings.length > 0
+          ? viewDraft.order
+          : viewProfiles.length,
+      createdAt: viewDraft.createdAt || now,
+      updatedAt: now,
+    };
+    try {
+      await saveViewProfile(nextProfile);
+      await load();
+      setSelectedViewProfileIdInSettings(nextProfile.id);
+      setViewDraft(nextProfile);
+      setSelectedSidebarViewId(`custom:${nextProfile.id}`);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const deleteCurrentViewDraft = async () => {
+    if (!selectedViewProfileIdInSettings) {
+      return;
+    }
+    try {
+      await deleteViewProfile(selectedViewProfileIdInSettings);
+      await load();
+      if (selectedSidebarViewId === `custom:${selectedViewProfileIdInSettings}`) {
+        setSelectedSidebarViewId("builtin:all");
+      }
+      createNewViewDraft();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const reorderView = async (direction: "up" | "down") => {
+    if (!selectedViewProfileIdInSettings) {
+      return;
+    }
+    const sorted = [...viewProfiles].sort((a, b) => a.order - b.order);
+    const currentIndex = sorted.findIndex((entry) => entry.id === selectedViewProfileIdInSettings);
+    if (currentIndex === -1) {
+      return;
+    }
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= sorted.length) {
+      return;
+    }
+    const next = [...sorted];
+    const [item] = next.splice(currentIndex, 1);
+    next.splice(targetIndex, 0, item);
+    try {
+      await reorderViewProfiles(next.map((entry) => entry.id));
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const handleExportBackup = async () => {
     setBackupMessage("");
     const path = backupExportPath.trim();
@@ -1079,21 +1433,6 @@ export function App() {
       setSessions((prev) => {
         return [...prev, { id: started.session_id, host: host.host }];
       });
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-        body: JSON.stringify({
-          sessionId: "be74dc",
-          runId: "dnd-branch-debug",
-          hypothesisId: "H6",
-          location: "App.tsx:connectToHost",
-          message: "new session started",
-          data: { hostAlias: host.host, sessionId: started.session_id },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setActiveSession(started.session_id);
       setActiveHost(host.host);
       setCurrentHost(host);
@@ -1127,21 +1466,6 @@ export function App() {
     setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, startedSessionId));
     setActivePaneIndex(targetPaneIndex);
     setActiveSession(startedSessionId);
-    // #region agent log
-    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-      body: JSON.stringify({
-        sessionId: "be74dc",
-        runId: "connect-new-pane",
-        hypothesisId: "H18",
-        location: "App.tsx:connectToHostInNewPane",
-        message: "host list connect assigned session to target pane",
-        data: { hostAlias: host.host, sessionId: startedSessionId, targetPaneIndex, usedExistingEmptyPane },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   };
 
   const ensureSessionForHost = async (hostAlias: string): Promise<string | null> => {
@@ -1167,26 +1491,6 @@ export function App() {
       payload.type === "pane" ? "move" : payload.type === "session" ? "copyMove" : "copy";
     event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
     event.dataTransfer.setData("text/plain", serialized);
-    // #region agent log
-    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-      body: JSON.stringify({
-        sessionId: "be74dc",
-        runId: "dnd-broken",
-        hypothesisId: "H1",
-        location: "App.tsx:setDragPayload",
-        message: "drag payload initialized",
-        data: {
-          payloadType: payload.type,
-          effectAllowed: event.dataTransfer.effectAllowed,
-          sessionDropMode,
-          serializedLength: serialized.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   };
 
   const parseDragPayload = (event: ReactDragEvent): DragPayload | null => {
@@ -1243,26 +1547,6 @@ export function App() {
         }
       : null;
     const payload = parseDragPayload(event);
-    // #region agent log
-    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-      body: JSON.stringify({
-        sessionId: "be74dc",
-        runId: "dnd-broken",
-        hypothesisId: "H2",
-        location: "App.tsx:handlePaneDrop",
-        message: "pane drop received",
-        data: {
-          paneIndex,
-          payloadType: payload?.type ?? null,
-          shiftKey: event.shiftKey,
-          dataTransferTypes: [...event.dataTransfer.types],
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (!payload) {
       return;
     }
@@ -1289,54 +1573,12 @@ export function App() {
     };
     if (payload.type === "session") {
       const shouldMoveExisting = sessionDropMode === "move";
-      // #region agent log
-      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-        body: JSON.stringify({
-          sessionId: "be74dc",
-          runId: "dnd-branch-debug",
-          hypothesisId: "H5",
-          location: "App.tsx:handlePaneDrop.sessionBranch",
-          message: "session drop policy decision",
-          data: {
-            shiftKey: event.shiftKey,
-            sessionDropMode,
-            policy: SESSION_DROP_POLICY,
-            shouldMoveExisting,
-            sourceSessionId: payload.sessionId,
-            sourcePaneIndex: splitSlots.findIndex((slot) => slot === payload.sessionId),
-            targetPaneIndex: paneIndex,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (shouldMoveExisting) {
         setActivePaneIndex(paneIndex);
         setActiveSession(payload.sessionId);
         setSplitSlots((prev) => {
           const cleared = removeSessionFromSlots(prev, payload.sessionId);
           const moved = assignSessionToPane(cleared, paneIndex, payload.sessionId);
-          // #region agent log
-          fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-              sessionId: "be74dc",
-              runId: "post-fix",
-              hypothesisId: "H11",
-              location: "App.tsx:handlePaneDrop.moveApply",
-              message: "session moved with source cleanup",
-              data: {
-                sessionId: payload.sessionId,
-                targetPaneIndex: paneIndex,
-                occurrenceCountAfterMove: moved.filter((slot) => slot === payload.sessionId).length,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           return moved;
         });
         return;
@@ -1370,37 +1612,6 @@ export function App() {
     if (!payload) {
       if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
         missingDragPayloadLoggedRef.current = true;
-        // #region agent log
-        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-          body: JSON.stringify({
-            sessionId: "be74dc",
-            runId: "dnd-broken",
-            hypothesisId: "H3",
-            location: "App.tsx:resolveDropEffect",
-            message: "dragover payload missing",
-            data: {
-              draggingKind,
-              shiftKey: event.shiftKey,
-              sessionDropMode,
-              effectAllowed: event.dataTransfer.effectAllowed,
-              fallbackDropEffect:
-                draggingKind === "pane"
-                  ? "move"
-                  : draggingKind === "session"
-                    ? sessionDropMode === "move"
-                      ? "move"
-                      : "copy"
-                    : draggingKind === "machine"
-                      ? "copy"
-                      : "none",
-              dataTransferTypes: [...event.dataTransfer.types],
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
       }
       if (draggingKind === "pane") {
         return "move";
@@ -1921,21 +2132,6 @@ export function App() {
           onDragEnter={(event) => {
             event.preventDefault();
             setDragOverPaneIndex(paneIndex);
-            // #region agent log
-            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-              body: JSON.stringify({
-                sessionId: "be74dc",
-                runId: "dnd-drop-entry",
-                hypothesisId: "H8",
-                location: "App.tsx:splitPane.onDragEnter",
-                message: "drag entered pane",
-                data: { paneIndex, draggingKind, shiftKey: event.shiftKey, sessionDropMode },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
           }}
           onDragLeave={(event) => {
             if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -1944,21 +2140,6 @@ export function App() {
             setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
           }}
           onDrop={(event) => {
-            // #region agent log
-            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-              body: JSON.stringify({
-                sessionId: "be74dc",
-                runId: "dnd-drop-entry",
-                hypothesisId: "H9",
-                location: "App.tsx:splitPane.onDrop",
-                message: "drop event on pane wrapper",
-                data: { paneIndex, draggingKind, shiftKey: event.shiftKey, types: [...event.dataTransfer.types] },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
             void handlePaneDrop(event, paneIndex);
           }}
           onContextMenu={(event) => {
@@ -2082,7 +2263,7 @@ export function App() {
             </div>
           </div>
           {paneSessionId ? (
-            <TerminalPane sessionId={paneSessionId} onUserInput={handleTerminalInput} />
+            <TerminalPane sessionId={paneSessionId} onUserInput={handleTerminalInput} fontSize={terminalFontSize} />
           ) : (
             <div className="empty-pane split-empty-pane">
               <p>Empty pane.</p>
@@ -2150,64 +2331,11 @@ export function App() {
         }}
         draggable
         onDragStart={(event) => {
-          // #region agent log
-          fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-              sessionId: "be74dc",
-              runId: "right-drag-check",
-              hypothesisId: "H12",
-              location: "App.tsx:host.onDragStart",
-              message: "host dragstart pointer button info",
-              data: {
-                button: event.nativeEvent.button,
-                buttons: event.nativeEvent.buttons,
-                ctrlKey: event.ctrlKey,
-                shiftKey: event.shiftKey,
-                altKey: event.altKey,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           setDragPayload(event, { type: "machine", hostAlias: row.host.host });
           setDraggingKind("machine");
           missingDragPayloadLoggedRef.current = false;
         }}
-        onContextMenu={(event) => {
-          // #region agent log
-          fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-              sessionId: "be74dc",
-              runId: "right-drag-check",
-              hypothesisId: "H13",
-              location: "App.tsx:host.onContextMenu",
-              message: "host context menu triggered",
-              data: { button: event.button, buttons: event.buttons },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-        }}
-        onDragEnd={(event) => {
-          // #region agent log
-          fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "be74dc" },
-            body: JSON.stringify({
-              sessionId: "be74dc",
-              runId: "dnd-drop-entry",
-              hypothesisId: "H10",
-              location: "App.tsx:hostDragEnd",
-              message: "host drag ended",
-              data: { dropEffect: event.dataTransfer.dropEffect, dragOverPaneIndex },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
+        onDragEnd={() => {
           setDraggingKind(null);
           setDragOverPaneIndex(null);
           missingDragPayloadLoggedRef.current = false;
@@ -2312,17 +2440,19 @@ export function App() {
       className={`app-shell ${isSidebarResizing ? "is-resizing" : ""} ${
         isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"
       } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`}
+      data-density={densityProfile}
       style={appShellStyle}
     >
       <button
         type="button"
-        className="left-rail-edge-handle"
-        aria-label={isSidebarVisible ? "Hide host sidebar" : "Show host sidebar"}
-        title={isSidebarVisible ? "Hide host sidebar" : "Show host sidebar"}
+        className={`left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`}
+        aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
+        title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
         onMouseEnter={revealSidebar}
-        onClick={() => setIsSidebarVisible((prev) => !prev)}
+        onMouseLeave={maybeHideSidebar}
+        onClick={toggleSidebarPinned}
       >
-        {isSidebarVisible ? "‹" : "›"}
+        {isSidebarPinned ? "◧" : "◨"}
       </button>
       <aside
         className={`left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${
@@ -2335,37 +2465,52 @@ export function App() {
           <div className="brand-logo-card">
             <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
           </div>
-          <div className="brand-header-actions">
-            <button
-              className={`btn sidebar-pin-btn sidebar-header-icon-btn ${isSidebarPinned ? "is-active" : ""}`}
-              aria-pressed={isSidebarPinned}
-              aria-label={isSidebarPinned ? "Disable manual sidebar mode" : "Enable manual sidebar mode"}
-              title={isSidebarPinned ? "Pin on: manual sidebar mode" : "Pin off: auto-hide sidebar mode"}
-              onClick={toggleSidebarPinned}
-            >
-              {isSidebarPinned ? "⌃" : "⌄"}
-            </button>
-            <button
-              className="app-gear-btn sidebar-header-icon-btn"
-              aria-label="Open app settings"
-              title="Open app settings"
-              onClick={() => setIsAppSettingsOpen((prev) => !prev)}
-            >
-              ⚙
-            </button>
-          </div>
-        </header>
-
-        <section className="host-filter-card">
-          <div className="filter-head-row">
-            <div className="quick-add-wrap" ref={quickAddMenuRef}>
+          <div className="brand-utility-stack">
+            <div className="brand-utility-row">
+              <button
+                className={`btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`}
+                aria-pressed={isSidebarPinned}
+                aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
+                title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
+                onClick={toggleSidebarPinned}
+              >
+                <svg className={`header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`} viewBox="0 0 24 24" aria-hidden="true">
+                  {isSidebarPinned ? (
+                    <>
+                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
+                      <path d="M12 14.4v7.1" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
+                      <path d="M12 14.4v7.1" />
+                      <path d="M4.3 4.3l15.4 15.4" />
+                    </>
+                  )}
+                </svg>
+              </button>
+              <button
+                className="app-gear-btn sidebar-header-icon-btn mono-header-btn"
+                aria-label="Open app settings"
+                title="Open app settings"
+                onClick={() => setIsAppSettingsOpen((prev) => !prev)}
+              >
+                <svg className="header-icon-svg settings-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3.2" />
+                  <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap" ref={quickAddMenuRef}>
               <button
                 className="btn host-plus-btn"
                 aria-label="Open add menu"
                 title="Add host"
                 onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
               >
-                +
+                <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 6v12M6 12h12" />
+                </svg>
               </button>
               {isQuickAddMenuOpen && (
                 <div className="quick-add-menu" role="menu">
@@ -2384,6 +2529,25 @@ export function App() {
                 </div>
               )}
             </div>
+          </div>
+        </header>
+
+        <section className="host-filter-card">
+          <div className="sidebar-view-tabs" role="tablist" aria-label="Sidebar views">
+            {sidebarViews.map((view) => (
+              <button
+                key={view.id}
+                className={`tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`}
+                role="tab"
+                aria-selected={selectedSidebarViewId === view.id}
+                onClick={() => setSelectedSidebarViewId(view.id)}
+                title={view.label}
+              >
+                {view.label}
+              </button>
+            ))}
+          </div>
+          <div className="filter-head-row">
             <input
               className="input host-search-input"
               value={searchQuery}
@@ -2707,7 +2871,241 @@ export function App() {
                     />
                     <span className="field-help">Used when a host does not define a user.</span>
                   </label>
+                  <label className="field">
+                    <span className="field-label">Density profile</span>
+                    <select
+                      className="input density-profile-select"
+                      value={densityProfile}
+                      onChange={(event) => setDensityProfile(event.target.value as DensityProfile)}
+                    >
+                      <option value="aggressive">Aggressive compact</option>
+                      <option value="balanced">Balanced compact</option>
+                      <option value="safe">Safe compact</option>
+                    </select>
+                    <span className="field-help">Controls spacing and font density across the entire app.</span>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Terminal font offset</span>
+                    <input
+                      className="input"
+                      type="number"
+                      value={terminalFontOffset}
+                      min={TERMINAL_FONT_OFFSET_MIN}
+                      max={TERMINAL_FONT_OFFSET_MAX}
+                      onChange={(event) => {
+                        const parsed = Number(event.target.value);
+                        if (!Number.isFinite(parsed)) {
+                          return;
+                        }
+                        setTerminalFontOffset(
+                          Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
+                        );
+                      }}
+                    />
+                    <span className="field-help">
+                      Final terminal size: {terminalFontSize}px (profile base + offset, saved separately).
+                    </span>
+                  </label>
                 </div>
+              )}
+              {activeAppSettingsTab === "views" && (
+                <section className="backup-panel view-manager-panel">
+                  <div className="field">
+                    <span className="field-label">Saved custom views</span>
+                    <div className="view-manager-list">
+                      {sortedViewProfiles.length === 0 ? (
+                        <p className="muted-copy">No custom views yet.</p>
+                      ) : (
+                        sortedViewProfiles.map((profile) => (
+                          <button
+                            key={profile.id}
+                            className={`btn ${selectedViewProfileIdInSettings === profile.id ? "btn-primary" : ""}`}
+                            onClick={() => selectViewProfileForSettings(profile.id)}
+                          >
+                            {profile.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="action-row">
+                    <button className="btn" onClick={createNewViewDraft}>
+                      New view
+                    </button>
+                    <button className="btn" onClick={() => void reorderView("up")} disabled={!selectedViewProfileIdInSettings}>
+                      Move up
+                    </button>
+                    <button className="btn" onClick={() => void reorderView("down")} disabled={!selectedViewProfileIdInSettings}>
+                      Move down
+                    </button>
+                    <button className="btn btn-danger" onClick={() => void deleteCurrentViewDraft()} disabled={!selectedViewProfileIdInSettings}>
+                      Delete
+                    </button>
+                  </div>
+                  <label className="field">
+                    <span className="field-label">View name</span>
+                    <input
+                      className="input"
+                      value={viewDraft.name}
+                      onChange={(event) => setViewDraft((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="Production hosts"
+                    />
+                  </label>
+                  <div className="filter-row">
+                    <label className="field">
+                      <span className="field-label">Rule mode</span>
+                      <select
+                        className="input"
+                        value={viewDraft.filterGroup.mode}
+                        onChange={(event) =>
+                          setViewDraft((prev) => ({
+                            ...prev,
+                            filterGroup: { ...prev.filterGroup, mode: event.target.value as "and" | "or" },
+                          }))
+                        }
+                      >
+                        <option value="and">All rules (AND)</option>
+                        <option value="or">Any rule (OR)</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="view-rule-list">
+                    {viewDraft.filterGroup.rules.map((rule) => (
+                      <div className="filter-row" key={rule.id}>
+                        <select
+                          className="input"
+                          value={rule.field}
+                          onChange={(event) =>
+                            setViewDraft((prev) => ({
+                              ...prev,
+                              filterGroup: {
+                                ...prev.filterGroup,
+                                rules: prev.filterGroup.rules.map((entry) =>
+                                  entry.id === rule.id ? { ...entry, field: event.target.value as ViewFilterField } : entry,
+                                ),
+                              },
+                            }))
+                          }
+                        >
+                          <option value="host">Alias</option>
+                          <option value="hostName">Hostname</option>
+                          <option value="user">User</option>
+                          <option value="port">Port</option>
+                          <option value="status">Status</option>
+                          <option value="favorite">Favorite</option>
+                          <option value="recent">Recent</option>
+                          <option value="tag">Tag</option>
+                        </select>
+                        <select
+                          className="input"
+                          value={rule.operator}
+                          onChange={(event) =>
+                            setViewDraft((prev) => ({
+                              ...prev,
+                              filterGroup: {
+                                ...prev.filterGroup,
+                                rules: prev.filterGroup.rules.map((entry) =>
+                                  entry.id === rule.id ? { ...entry, operator: event.target.value as ViewFilterOperator } : entry,
+                                ),
+                              },
+                            }))
+                          }
+                        >
+                          <option value="contains">contains</option>
+                          <option value="equals">equals</option>
+                          <option value="not_equals">not equals</option>
+                          <option value="starts_with">starts with</option>
+                          <option value="ends_with">ends with</option>
+                          <option value="greater_than">greater than</option>
+                          <option value="less_than">less than</option>
+                          <option value="in">in (comma separated)</option>
+                        </select>
+                        <input
+                          className="input"
+                          value={rule.value}
+                          onChange={(event) =>
+                            setViewDraft((prev) => ({
+                              ...prev,
+                              filterGroup: {
+                                ...prev.filterGroup,
+                                rules: prev.filterGroup.rules.map((entry) =>
+                                  entry.id === rule.id ? { ...entry, value: event.target.value } : entry,
+                                ),
+                              },
+                            }))
+                          }
+                          placeholder="value"
+                        />
+                        <button
+                          className="btn btn-danger"
+                          onClick={() =>
+                            setViewDraft((prev) => ({
+                              ...prev,
+                              filterGroup: {
+                                ...prev.filterGroup,
+                                rules: prev.filterGroup.rules.filter((entry) => entry.id !== rule.id),
+                              },
+                            }))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="action-row">
+                    <button
+                      className="btn"
+                      onClick={() =>
+                        setViewDraft((prev) => ({
+                          ...prev,
+                          filterGroup: { ...prev.filterGroup, rules: [...prev.filterGroup.rules, createViewRule()] },
+                        }))
+                      }
+                    >
+                      Add rule
+                    </button>
+                  </div>
+                  <div className="filter-row">
+                    <select
+                      className="input"
+                      value={viewDraft.sortRules[0]?.field ?? "host"}
+                      onChange={(event) =>
+                        setViewDraft((prev) => ({
+                          ...prev,
+                          sortRules: [{ field: event.target.value as ViewSortField, direction: prev.sortRules[0]?.direction ?? "asc" }],
+                        }))
+                      }
+                    >
+                      <option value="host">Sort by alias</option>
+                      <option value="hostName">Sort by hostname</option>
+                      <option value="user">Sort by user</option>
+                      <option value="port">Sort by port</option>
+                      <option value="lastUsedAt">Sort by last used</option>
+                      <option value="status">Sort by status</option>
+                      <option value="favorite">Sort by favorite</option>
+                    </select>
+                    <select
+                      className="input"
+                      value={viewDraft.sortRules[0]?.direction ?? "asc"}
+                      onChange={(event) =>
+                        setViewDraft((prev) => ({
+                          ...prev,
+                          sortRules: [{ field: prev.sortRules[0]?.field ?? "host", direction: event.target.value as "asc" | "desc" }],
+                        }))
+                      }
+                    >
+                      <option value="asc">Ascending</option>
+                      <option value="desc">Descending</option>
+                    </select>
+                    <button className="btn btn-primary" onClick={() => void saveCurrentViewDraft()}>
+                      Save view
+                    </button>
+                  </div>
+                  <p className="muted-copy">
+                    Built-in views are fixed (`Alle`, `Favoriten`). Custom views are persisted and shown as sidebar tabs.
+                  </p>
+                </section>
               )}
               {activeAppSettingsTab === "backup" && (
                 <div className="backup-panel">
