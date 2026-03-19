@@ -580,8 +580,8 @@ body,
 
 .host-item {
   appearance: none;
-  border: 2px solid rgba(150, 170, 161, 0.34);
-  background: rgba(19, 23, 26, 0.9);
+  border: 1px solid transparent;
+  background: rgba(19, 23, 26, 0.78);
   color: var(--text-main);
   border-radius: var(--radius-control);
   padding: var(--space-3) var(--space-4);
@@ -595,11 +595,11 @@ body,
 }
 
 .host-item.is-connected {
-  border-color: rgba(108, 242, 191, 0.56);
+  background: linear-gradient(180deg, rgba(20, 28, 28, 0.88), rgba(16, 23, 24, 0.84));
 }
 
 .host-item.is-disconnected {
-  border-color: rgba(255, 127, 137, 0.54);
+  background: linear-gradient(180deg, rgba(29, 22, 24, 0.86), rgba(22, 18, 20, 0.82));
 }
 
 .host-item[draggable="true"] {
@@ -628,28 +628,30 @@ body,
 }
 
 .host-item.is-connected:hover {
-  border-color: rgba(126, 248, 192, 0.72);
+  background: linear-gradient(180deg, rgba(24, 34, 34, 0.92), rgba(18, 28, 28, 0.88));
 }
 
 .host-item.is-disconnected:hover {
-  border-color: rgba(255, 145, 156, 0.72);
+  background: linear-gradient(180deg, rgba(34, 25, 28, 0.9), rgba(26, 20, 23, 0.86));
 }
 
 .host-item.is-active {
-  box-shadow: inset 0 0 0 1px rgba(220, 232, 255, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(220, 232, 255, 0.24),
+    inset 0 0 0 1px rgba(220, 232, 255, 0.22);
 }
 
 .host-item.is-active.is-connected {
-  border-color: rgba(126, 248, 192, 0.88);
   box-shadow:
     0 0 12px rgba(108, 242, 191, 0.18),
+    0 0 0 1px rgba(126, 248, 192, 0.7),
     inset 0 0 0 1px rgba(108, 242, 191, 0.28);
 }
 
 .host-item.is-active.is-disconnected {
-  border-color: rgba(255, 145, 156, 0.88);
   box-shadow:
     0 0 12px rgba(255, 127, 137, 0.2),
+    0 0 0 1px rgba(255, 145, 156, 0.72),
     inset 0 0 0 1px rgba(255, 127, 137, 0.28);
 }
 
@@ -1427,8 +1429,8 @@ body,
 
 .context-pill {
   border-radius: 999px;
-  border: 1px solid rgba(150, 170, 161, 0.3);
-  background: rgba(15, 22, 26, 0.72);
+  border: 0;
+  background: rgba(20, 28, 33, 0.72);
   color: #d5e4da;
   font-size: 11px;
   font-weight: 600;
@@ -1652,8 +1654,8 @@ body,
   min-height: 20px;
   padding: 1px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(150, 170, 161, 0.32);
-  background: rgba(16, 23, 28, 0.82);
+  border: 0;
+  background: rgba(20, 29, 34, 0.8);
   color: #d6e6dd;
   font-size: 11px;
   font-weight: 700;
@@ -1677,9 +1679,9 @@ body,
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 2px solid rgba(150, 170, 161, 0.46);
+  border: 1px solid transparent;
   border-radius: 11px;
-  background: rgba(19, 25, 29, 0.9);
+  background: rgba(19, 25, 29, 0.78);
   color: #dfece4;
   padding: 6px 6px 6px 8px;
   transition:
@@ -1690,25 +1692,26 @@ body,
 }
 
 .session-card.is-connected {
-  border-color: rgba(102, 216, 255, 0.58);
+  background: linear-gradient(180deg, rgba(19, 27, 33, 0.88), rgba(16, 23, 28, 0.84));
 }
 
 .session-card.is-assigned {
-  border-color: rgba(126, 248, 192, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(126, 248, 192, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(126, 248, 192, 0.54),
+    inset 0 0 0 1px rgba(126, 248, 192, 0.12);
 }
 
 .session-card.is-broadcast-target {
-  border-color: rgba(255, 191, 58, 0.95);
   box-shadow:
     0 0 10px rgba(255, 191, 58, 0.2),
+    0 0 0 1px rgba(255, 191, 58, 0.72),
     inset 0 0 0 1px rgba(255, 191, 58, 0.2);
 }
 
 .session-card.is-active {
-  border-color: rgba(255, 191, 58, 0.98);
   box-shadow:
     0 0 16px rgba(255, 191, 58, 0.3),
+    0 0 0 1px rgba(255, 191, 58, 0.88),
     inset 0 0 0 1px rgba(255, 191, 58, 0.34);
   transform: translateY(-1px);
 }
@@ -1749,8 +1752,8 @@ body,
 
 .session-card-pane-pill {
   border-radius: 999px;
-  border: 1px solid rgba(102, 216, 255, 0.55);
-  background: rgba(15, 23, 28, 0.8);
+  border: 0;
+  background: rgba(26, 37, 44, 0.82);
   color: #d7f5ff;
   padding: 2px 8px;
   font-size: 10px;
@@ -1758,7 +1761,7 @@ body,
 }
 
 .session-card-pane-pill.is-unassigned {
-  border-color: rgba(150, 170, 161, 0.45);
+  background: rgba(27, 33, 37, 0.82);
   color: #ceded5;
 }
 
@@ -1897,9 +1900,9 @@ body,
 
 .target-chip {
   appearance: none;
-  border: 2px solid rgba(130, 184, 152, 0.42);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(24, 30, 34, 0.88);
+  background: rgba(24, 30, 34, 0.76);
   color: #d5e4da;
   padding: 6px 10px;
   font-size: 12px;
@@ -1915,13 +1918,13 @@ body,
 }
 
 .target-chip:hover:not(:disabled) {
-  border-color: rgba(126, 248, 192, 0.9);
+  box-shadow: 0 0 0 1px rgba(126, 248, 192, 0.72);
 }
 
 .target-chip.is-active {
-  border-color: rgba(255, 191, 58, 0.95);
+  box-shadow: 0 0 0 1px rgba(255, 191, 58, 0.9);
   color: #fff1be;
-  box-shadow: 0 0 12px rgba(255, 191, 58, 0.2);
+  background: rgba(46, 35, 19, 0.78);
 }
 
 .target-chip:disabled {
@@ -1975,9 +1978,9 @@ body,
 }
 
 .split-pane {
-  border: 1px solid rgba(150, 170, 161, 0.2);
+  border: 1px solid transparent;
   border-radius: 12px;
-  background: rgba(13, 17, 20, 0.62);
+  background: rgba(13, 17, 20, 0.7);
   min-height: 0;
   min-width: 0;
   padding: 1px;
@@ -2465,8 +2468,8 @@ body,
   min-height: 360px;
   height: 100%;
   border-radius: var(--radius-panel);
-  border: 2px solid rgba(130, 184, 152, 0.28);
-  background: #0f141f;
+  border: 0;
+  background: rgba(15, 20, 31, 0.94);
   padding: var(--space-4);
 }
 
