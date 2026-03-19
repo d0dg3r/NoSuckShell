@@ -369,7 +369,7 @@ export function App() {
     [layoutProfiles, selectedLayoutProfileId],
   );
   const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
-  const isSidebarOpen = isSidebarPinned || isSidebarVisible;
+  const isSidebarOpen = isSidebarVisible;
 
 
   const activeHostMetadata = useMemo(() => {
@@ -1652,15 +1652,7 @@ export function App() {
   };
   const toggleSidebarPinned = () => {
     clearSidebarHideTimeout();
-    setIsSidebarPinned((prev) => {
-      const next = !prev;
-      if (!next) {
-        setIsSidebarVisible(false);
-      } else {
-        setIsSidebarVisible(true);
-      }
-      return next;
-    });
+    setIsSidebarPinned((prev) => !prev);
   };
   const revealSidebar = () => {
     clearSidebarHideTimeout();
@@ -2324,7 +2316,7 @@ export function App() {
     >
       <button
         type="button"
-        className={`left-rail-edge-handle ${isSidebarPinned ? "is-hidden" : ""}`}
+        className="left-rail-edge-handle"
         aria-label={isSidebarVisible ? "Hide host sidebar" : "Show host sidebar"}
         title={isSidebarVisible ? "Hide host sidebar" : "Show host sidebar"}
         onMouseEnter={revealSidebar}
@@ -2343,28 +2335,26 @@ export function App() {
           <div className="brand-logo-card">
             <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
           </div>
-        </header>
-
-        <section className="host-actions-card">
-          <div className="left-rail-actions">
+          <div className="brand-header-actions">
             <button
-              className={`btn sidebar-pin-btn ${isSidebarPinned ? "is-active" : ""}`}
+              className={`btn sidebar-pin-btn sidebar-header-icon-btn ${isSidebarPinned ? "is-active" : ""}`}
               aria-pressed={isSidebarPinned}
-              aria-label={isSidebarPinned ? "Unpin host sidebar" : "Pin host sidebar"}
-              title={isSidebarPinned ? "Unpin sidebar (auto-hide)" : "Pin sidebar"}
+              aria-label={isSidebarPinned ? "Disable manual sidebar mode" : "Enable manual sidebar mode"}
+              title={isSidebarPinned ? "Pin on: manual sidebar mode" : "Pin off: auto-hide sidebar mode"}
               onClick={toggleSidebarPinned}
             >
-              {isSidebarPinned ? "Pin on" : "Pin off"}
+              {isSidebarPinned ? "⌃" : "⌄"}
             </button>
             <button
-              className="app-gear-btn"
+              className="app-gear-btn sidebar-header-icon-btn"
               aria-label="Open app settings"
+              title="Open app settings"
               onClick={() => setIsAppSettingsOpen((prev) => !prev)}
             >
               ⚙
             </button>
           </div>
-        </section>
+        </header>
 
         <section className="host-filter-card">
           <div className="filter-head-row">

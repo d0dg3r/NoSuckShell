@@ -266,7 +266,7 @@ export function App() {
     const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
     const selectedLayoutProfile = useMemo(() => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null, [layoutProfiles, selectedLayoutProfileId]);
     const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
-    const isSidebarOpen = isSidebarPinned || isSidebarVisible;
+    const isSidebarOpen = isSidebarVisible;
     const activeHostMetadata = useMemo(() => {
         if (!activeHost) {
             return createDefaultHostMetadata();
@@ -1468,16 +1468,7 @@ export function App() {
     };
     const toggleSidebarPinned = () => {
         clearSidebarHideTimeout();
-        setIsSidebarPinned((prev) => {
-            const next = !prev;
-            if (!next) {
-                setIsSidebarVisible(false);
-            }
-            else {
-                setIsSidebarVisible(true);
-            }
-            return next;
-        });
+        setIsSidebarPinned((prev) => !prev);
     };
     const revealSidebar = () => {
         clearSidebarHideTimeout();
