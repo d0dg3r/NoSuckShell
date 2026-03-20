@@ -8,6 +8,7 @@ import { TerminalPane } from "./components/TerminalPane";
 import { buildPaneContextActions } from "./features/context-actions";
 import { buildQuickConnectUserCandidates, parseHostPortInput, parseQuickConnectCommandInput, } from "./features/quick-connect";
 import { assignSessionToPane, clearPaneAtIndex, createPaneLayoutItem, createPaneLayoutsFromSlots, createInitialPaneState, MIN_PANE_HEIGHT, MIN_PANE_WIDTH, reconcilePaneLayouts, removeSessionFromSlots, resolveInputTargets, sanitizeBroadcastTargets, } from "./features/split";
+import { sortRowsByFavoriteThenAlias } from "./features/host-order";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTransparent from "../../../img/logo_tranparent.png";
 import logoTerminal from "../../../img/logo_terminal.png";
@@ -575,7 +576,7 @@ export function App() {
             return "c";
         }
         const persisted = window.localStorage.getItem(AUTO_ARRANGE_MODE_STORAGE_KEY);
-        return persisted === "off" || persisted === "c" ? persisted : "c";
+        return persisted === "off" || persisted === "a" || persisted === "b" || persisted === "c" ? persisted : "c";
     });
     const [layoutMode, setLayoutMode] = useState(() => readLayoutMode());
     const [workspaceOrder, setWorkspaceOrder] = useState([DEFAULT_WORKSPACE_ID]);
@@ -616,6 +617,7 @@ export function App() {
     const orphanSeenSessionIdsRef = useRef(new Set());
     const orphanClosingSessionIdsRef = useRef(new Set());
     const lastInternalDragPayloadRef = useRef(null);
+    const suppressHostClickAliasRef = useRef(null);
     const isApplyingWorkspaceSnapshotRef = useRef(false);
     const isAutoArrangeApplyingRef = useRef(false);
     const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState(null);
@@ -778,8 +780,8 @@ export function App() {
             return a.host.host.localeCompare(b.host.host);
         });
     }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
-    const connectedHostRows = useMemo(() => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)), [filteredHostRows]);
-    const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+    const connectedHostRows = useMemo(() => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => row.connected)), [filteredHostRows]);
+    const otherHostRows = useMemo(() => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => !row.connected)), [filteredHostRows]);
     const sidebarViews = useMemo(() => [
         { id: "builtin:all", label: "Alle" },
         { id: "builtin:favorites", label: "Favoriten" },
@@ -1308,7 +1310,7 @@ export function App() {
         });
     }, [activePaneIndex, activeSession, activeWorkspaceId, paneLayouts, splitSlots, splitTree]);
     useEffect(() => {
-        if (autoArrangeMode !== "c") {
+        if (autoArrangeMode === "off") {
             return;
         }
         if (isAutoArrangeApplyingRef.current) {
@@ -1316,8 +1318,10 @@ export function App() {
         }
         const nextSplitTree = rebalanceSplitTree(splitTree);
         const nextSplitSlots = compactSplitSlotsByPaneOrder(splitSlots, paneOrder);
-        const splitTreeChanged = nextSplitTree !== splitTree;
-        const splitSlotsChanged = nextSplitSlots !== splitSlots;
+        const shouldRebalanceTree = autoArrangeMode === "b" || autoArrangeMode === "c";
+        const shouldCompactSlots = autoArrangeMode === "a" || autoArrangeMode === "c";
+        const splitTreeChanged = shouldRebalanceTree && nextSplitTree !== splitTree;
+        const splitSlotsChanged = shouldCompactSlots && nextSplitSlots !== splitSlots;
         if (!splitTreeChanged && !splitSlotsChanged) {
             return;
         }
@@ -2009,16 +2013,83 @@ export function App() {
     const placeSessionIntoNewOrFreePane = (sessionId) => {
         const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
         const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-        const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right");
+        const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right", activePaneIndex, "empty");
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "host-doubleclick-pre-fix",
+                hypothesisId: "H10",
+                location: "App.tsx:placeSessionIntoNewOrFreePane",
+                message: "placing session into pane",
+                data: {
+                    sessionId,
+                    usedExistingEmptyPane,
+                    firstFreePaneIndex: typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : null,
+                    targetPaneIndex,
+                    activePaneIndex,
+                    paneOrderLength: paneOrder.length,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
         setActivePaneIndex(targetPaneIndex);
         setActiveSession(sessionId);
     };
     const connectToHostInNewPane = async (host) => {
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "host-doubleclick-pre-fix",
+                hypothesisId: "H11",
+                location: "App.tsx:connectToHostInNewPane:entry",
+                message: "connect to host in new pane called",
+                data: { hostAlias: host.host, activeHost, activePaneIndex },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         const startedSessionId = await connectToHost(host);
         if (!startedSessionId) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "host-doubleclick-pre-fix",
+                    hypothesisId: "H11",
+                    location: "App.tsx:connectToHostInNewPane:failedStart",
+                    message: "connect to host returned no session id",
+                    data: { hostAlias: host.host },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return;
         }
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "host-doubleclick-pre-fix",
+                hypothesisId: "H11",
+                location: "App.tsx:connectToHostInNewPane:started",
+                message: "connect to host returned session id",
+                data: { hostAlias: host.host, startedSessionId },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         placeSessionIntoNewOrFreePane(startedSessionId);
     };
     const connectLocalShellInNewPane = async () => {
@@ -2268,12 +2339,42 @@ export function App() {
         event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
         event.dataTransfer.setData("text/plain", serialized);
         lastInternalDragPayloadRef.current = payload;
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "workspace-move-pre-fix",
+                hypothesisId: "H1",
+                location: "App.tsx:setDragPayload",
+                message: "drag payload prepared",
+                data: { payloadType: payload.type, sessionId: payload.type === "session" ? payload.sessionId : null },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
     };
     const parseDragPayload = (event) => {
         const customPayload = event.dataTransfer.getData(DND_PAYLOAD_MIME);
         const plainPayload = event.dataTransfer.getData("text/plain");
         const encoded = customPayload || plainPayload;
         if (!encoded) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H1",
+                    location: "App.tsx:parseDragPayload",
+                    message: "no encoded drag payload; fallback used",
+                    data: { hasFallback: Boolean(lastInternalDragPayloadRef.current) },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return lastInternalDragPayloadRef.current;
         }
         try {
@@ -2283,9 +2384,43 @@ export function App() {
                 : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
                     ? { type: "machine", hostAlias: parsed.hostAlias }
                     : null;
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H1",
+                    location: "App.tsx:parseDragPayload",
+                    message: "drag payload parsed",
+                    data: {
+                        parsedType: parsed?.type ?? null,
+                        resultType: result?.type ?? null,
+                        usesFallback: !result && Boolean(lastInternalDragPayloadRef.current),
+                    },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return result ?? lastInternalDragPayloadRef.current;
         }
         catch {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H1",
+                    location: "App.tsx:parseDragPayload",
+                    message: "drag payload parse error; fallback used",
+                    data: { hasFallback: Boolean(lastInternalDragPayloadRef.current) },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return lastInternalDragPayloadRef.current;
         }
     };
@@ -2334,8 +2469,52 @@ export function App() {
             return;
         }
         const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
+        const sourcePaneIndex = payload.type === "session" ? splitSlots.findIndex((slot) => slot === payload.sessionId) : -1;
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "pane-self-drop-pre-fix",
+                hypothesisId: "H14",
+                location: "App.tsx:handlePaneDrop:entry",
+                message: "pane drop entry evaluated",
+                data: {
+                    paneIndex,
+                    resolvedDropZone,
+                    payloadType: payload.type,
+                    sessionDropMode,
+                    sourcePaneIndex,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         const assignSessionToZone = (sessionId, zone, moveExistingSession = false) => {
             const targetPane = zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex);
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "pane-self-drop-pre-fix",
+                    hypothesisId: "H15",
+                    location: "App.tsx:handlePaneDrop:assignSessionToZone",
+                    message: "session assigned to drop zone",
+                    data: {
+                        droppedSessionId: sessionId,
+                        zone,
+                        paneIndex,
+                        targetPane,
+                        moveExistingSession,
+                        sourcePaneIndexForDroppedSession: splitSlots.findIndex((slot) => slot === sessionId),
+                    },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             setActivePaneIndex(targetPane);
             setActiveSession(sessionId);
             setSplitSlots((prev) => {
@@ -2722,28 +2901,172 @@ export function App() {
         }
     }, [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots]);
     const sendSessionToWorkspace = useCallback((sessionId, targetWorkspaceId) => {
+        const sourcePaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
+        const canCloseSourcePane = sourcePaneIndex >= 0 && paneOrder.includes(sourcePaneIndex) && paneOrder.length > 1;
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "workspace-move-pre-fix",
+                hypothesisId: "H3",
+                location: "App.tsx:sendSessionToWorkspace:entry",
+                message: "send session to workspace called",
+                data: {
+                    inputSessionId: sessionId || null,
+                    targetWorkspaceId,
+                    activeWorkspaceId,
+                    hasTargetSnapshot: Boolean(workspaceSnapshots[targetWorkspaceId]),
+                    sourcePaneIndex,
+                    sourcePaneCount: paneOrder.length,
+                    canCloseSourcePane,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         if (!sessionId || !workspaceSnapshots[targetWorkspaceId]) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H3",
+                    location: "App.tsx:sendSessionToWorkspace:earlyReturnMissing",
+                    message: "aborted due to missing sessionId or target snapshot",
+                    data: { hasSessionId: Boolean(sessionId), hasTargetSnapshot: Boolean(workspaceSnapshots[targetWorkspaceId]) },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return;
         }
         if (targetWorkspaceId === activeWorkspaceId) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H2",
+                    location: "App.tsx:sendSessionToWorkspace:earlyReturnSameWorkspace",
+                    message: "aborted because target equals active workspace",
+                    data: { targetWorkspaceId, activeWorkspaceId, sessionId },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             return;
         }
         const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
         const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
         const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
-        const normalizedTargetPaneIndex = typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : (targetPaneOrder[0] ?? 0);
-        const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, normalizedTargetPaneIndex, sessionId);
+        const nextTargetPaneIndex = typeof firstFreePaneIndex === "number"
+            ? firstFreePaneIndex
+            : Math.max(-1, ...targetPaneOrder) + 1;
+        const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
+        const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
+        if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
+            nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+        }
+        const nextTargetSplitTree = typeof firstFreePaneIndex === "number"
+            ? cloneSplitTree(targetSnapshot.splitTree)
+            : {
+                id: `split-workspace-${createId()}`,
+                type: "split",
+                axis: "vertical",
+                ratio: splitRatioDefaultValue,
+                first: cloneSplitTree(targetSnapshot.splitTree),
+                second: createLeafNode(nextTargetPaneIndex),
+            };
         const nextTargetSnapshot = {
             ...cloneWorkspaceSnapshot(targetSnapshot),
             splitSlots: nextTargetSlots,
-            activePaneIndex: normalizedTargetPaneIndex,
+            paneLayouts: nextTargetPaneLayouts,
+            splitTree: nextTargetSplitTree,
+            activePaneIndex: nextTargetPaneIndex,
             activeSessionId: sessionId,
         };
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+            body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "workspace-move-pre-fix",
+                hypothesisId: "H4",
+                location: "App.tsx:sendSessionToWorkspace:assign",
+                message: "session assigned into target workspace snapshot",
+                data: {
+                    targetWorkspaceId,
+                    nextTargetPaneIndex,
+                    targetPaneOrderLength: targetPaneOrder.length,
+                    firstFreePaneIndex: typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : null,
+                    createdNewPane: typeof firstFreePaneIndex !== "number",
+                    targetActivePaneIndex: nextTargetSnapshot.activePaneIndex,
+                    targetActiveSessionId: nextTargetSnapshot.activeSessionId,
+                },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => { });
+        // #endregion
         setWorkspaceSnapshots((prev) => ({
             ...prev,
             [targetWorkspaceId]: nextTargetSnapshot,
         }));
-        setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+        setSplitSlots((prev) => {
+            const cleared = removeSessionFromSlots(prev, sessionId);
+            return canCloseSourcePane ? clearPaneAtIndex(cleared, sourcePaneIndex) : cleared;
+        });
+        if (canCloseSourcePane) {
+            setSplitTree((prev) => {
+                const next = removePaneFromTree(prev, sourcePaneIndex);
+                if (!next) {
+                    return prev;
+                }
+                const maxPaneIndex = Math.max(...collectPaneOrder(next));
+                if (nextPaneIndexRef.current <= maxPaneIndex) {
+                    nextPaneIndexRef.current = maxPaneIndex + 1;
+                }
+                return next;
+            });
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "post-fix",
+                    hypothesisId: "H6",
+                    location: "App.tsx:sendSessionToWorkspace:sourcePaneClosed",
+                    message: "source pane closed after sending session",
+                    data: { sourcePaneIndex, sourcePaneCount: paneOrder.length, sessionId },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
+        }
+        else {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "post-fix",
+                    hypothesisId: "H6",
+                    location: "App.tsx:sendSessionToWorkspace:sourcePaneNotClosed",
+                    message: "source pane kept after sending session",
+                    data: { sourcePaneIndex, sourcePaneCount: paneOrder.length, canCloseSourcePane, sessionId },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
+        }
         setBroadcastTargets((prev) => {
             const next = new Set(prev);
             next.delete(sessionId);
@@ -2752,7 +3075,7 @@ export function App() {
         if (activeSession === sessionId) {
             setActiveSession("");
         }
-    }, [activeSession, activeWorkspaceId, workspaceSnapshots]);
+    }, [activeSession, activeWorkspaceId, paneOrder, splitRatioDefaultValue, splitSlots, workspaceSnapshots]);
     const handleContextAction = async (actionId, paneIndex, options) => {
         setActivePaneIndex(paneIndex);
         const preferredSplitMode = options?.preferredSplitMode ?? "duplicate";
@@ -2904,10 +3227,40 @@ export function App() {
         }));
         setActivePaneIndex(newPaneIndex);
         if (splitMode === "duplicate" && sourceSessionId) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "pane-self-drop-pre-fix",
+                    hypothesisId: "H16",
+                    location: "App.tsx:splitFocusedPane:duplicateSpawnPath",
+                    message: "split focused pane duplicate path triggered",
+                    data: { sourceSessionId, direction, paneIndex, newPaneIndex },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => { });
+            // #endregion
             const sourceSession = sessions.find((session) => session.id === sourceSessionId) ?? null;
             if (sourceSession) {
                 void spawnSessionFromExistingSession(sourceSession).then((spawnedSessionId) => {
                     if (!spawnedSessionId) {
+                        // #region agent log
+                        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                            body: JSON.stringify({
+                                sessionId: "46a972",
+                                runId: "pane-self-drop-pre-fix",
+                                hypothesisId: "H16",
+                                location: "App.tsx:splitFocusedPane:duplicateSpawnFailed",
+                                message: "duplicate spawn returned empty session id",
+                                data: { sourceSessionId, direction, paneIndex, newPaneIndex },
+                                timestamp: Date.now(),
+                            }),
+                        }).catch(() => { });
+                        // #endregion
                         return;
                     }
                     setSplitSlots((prev) => assignSessionToPane(prev, newPaneIndex, spawnedSessionId));
@@ -3155,9 +3508,31 @@ export function App() {
     const renderHostRow = (row, key) => (_jsxs("div", { className: "host-row", children: [_jsxs("div", { className: `host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${activeHost === row.host.host ? "is-active" : ""} ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`, children: [_jsx("button", { className: `host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${row.metadata.favorite ? "is-active" : ""}`, "aria-label": `Toggle favorite for ${row.host.host}`, onClick: (event) => {
                             event.stopPropagation();
                             void toggleFavoriteForHost(row.host.host);
-                        }, children: "\u2605" }), _jsxs("div", { role: "button", tabIndex: 0, "aria-label": `SSH host ${row.host.host}`, className: "host-item", onClick: () => {
-                            toggleHostSelection(row.host);
-                        }, onMouseEnter: () => setHoveredHostAlias(row.host.host), onMouseLeave: () => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev)), onDoubleClick: () => {
+                        }, children: "\u2605" }), _jsxs("div", { role: "button", tabIndex: 0, "aria-label": `SSH host ${row.host.host}`, className: "host-item", onMouseEnter: () => {
+                            // Nur Hover-Verhalten für verbundene Hosts aktivieren, um Flackern zu vermeiden
+                            if (row.connected) {
+                                setHoveredHostAlias(row.host.host);
+                            }
+                        }, onMouseLeave: () => {
+                            if (row.connected) {
+                                setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
+                            }
+                        }, onDoubleClick: () => {
+                            // #region agent log
+                            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                                body: JSON.stringify({
+                                    sessionId: "46a972",
+                                    runId: "host-doubleclick-pre-fix",
+                                    hypothesisId: "H11",
+                                    location: "App.tsx:hostItem:onDoubleClick",
+                                    message: "host item double clicked",
+                                    data: { hostAlias: row.host.host, activeHostBefore: activeHost },
+                                    timestamp: Date.now(),
+                                }),
+                            }).catch(() => { });
+                            // #endregion
                             void connectToHostInNewPane(row.host);
                         }, onKeyDown: (event) => {
                             if (event.key === "Enter" || event.key === " ") {
@@ -3168,6 +3543,22 @@ export function App() {
                                 void connectToHostInNewPane(row.host);
                             }
                         }, draggable: true, onDragStart: (event) => {
+                            suppressHostClickAliasRef.current = row.host.host;
+                            // #region agent log
+                            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                                body: JSON.stringify({
+                                    sessionId: "46a972",
+                                    runId: "host-doubleclick-pre-fix",
+                                    hypothesisId: "H13",
+                                    location: "App.tsx:hostItem:onDragStart",
+                                    message: "host drag started",
+                                    data: { hostAlias: row.host.host, activeHostBefore: activeHost },
+                                    timestamp: Date.now(),
+                                }),
+                            }).catch(() => { });
+                            // #endregion
                             setDragPayload(event, { type: "machine", hostAlias: row.host.host });
                             setDraggingKind("machine");
                             missingDragPayloadLoggedRef.current = false;
@@ -3197,14 +3588,57 @@ export function App() {
         : [];
     return (_jsxs("main", { className: `app-shell ${isSidebarResizing ? "is-resizing" : ""} ${isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"} ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}${layoutMode === "wide" ? " app-shell--layout-wide" : ""}${layoutMode === "compact" ? " app-shell--layout-compact" : ""}${isStackedShell ? " app-shell--stacked-mobile" : ""}${isStackedShell && mobileShellTab === "hosts" ? " app-shell--mobile-panel-hosts" : ""}${isStackedShell && mobileShellTab === "terminal" ? " app-shell--mobile-panel-terminal" : ""}`, "data-density": densityProfile, "data-list-tone": listTonePreset, "data-frame-mode": frameModePreset, "data-ui-font": uiFontPreset, style: appShellStyle, children: [_jsx("button", { type: "button", className: `left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, onClick: toggleSidebarPinned, children: isSidebarPinned ? "◧" : "◨" }), _jsxs("aside", { className: `left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`, onMouseEnter: revealSidebar, onMouseLeave: maybeHideSidebar, children: [_jsxs("header", { className: "brand", children: [_jsx("div", { className: "brand-logo-card", children: _jsx("img", { src: logoTextTransparent, alt: "NoSuckShell logo", className: "brand-logo" }) }), _jsxs("div", { className: "brand-utility-stack", children: [_jsxs("div", { className: "brand-utility-row", children: [_jsx("button", { className: `btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`, "aria-pressed": isSidebarPinned, "aria-label": isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)", title: isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin", onClick: toggleSidebarPinned, children: _jsx("svg", { className: `header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`, viewBox: "0 0 24 24", "aria-hidden": "true", children: isSidebarPinned ? (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" })] })) : (_jsxs(_Fragment, { children: [_jsx("path", { d: "M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" }), _jsx("path", { d: "M12 14.4v7.1" }), _jsx("path", { d: "M4.3 4.3l15.4 15.4" })] })) }) }), _jsx("button", { className: "app-gear-btn sidebar-header-icon-btn mono-header-btn", "aria-label": "Open app settings", title: "Open app settings", onClick: () => setIsAppSettingsOpen((prev) => !prev), children: _jsxs("svg", { className: "header-icon-svg settings-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "3.2" }), _jsx("path", { d: "M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" })] }) })] }), _jsxs("div", { className: "quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap", ref: quickAddMenuRef, children: [_jsx("button", { className: "btn host-plus-btn", "aria-label": "Open add menu", title: "Add host", onClick: () => setIsQuickAddMenuOpen((prev) => !prev), children: _jsx("svg", { className: "add-icon-svg", viewBox: "0 0 24 24", "aria-hidden": "true", children: _jsx("path", { d: "M12 6v12M6 12h12" }) }) }), isQuickAddMenuOpen && (_jsxs("div", { className: "quick-add-menu", role: "menu", children: [_jsx("button", { className: "quick-add-menu-item", onClick: () => void connectLocalShellInNewPane(), children: "New local terminal" }), _jsx("button", { className: "quick-add-menu-item", onClick: () => openQuickConnectModal(), children: "Quick connect terminal" }), _jsx("button", { className: "quick-add-menu-item", onClick: openAddHostModal, children: "Add host" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add group" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add user" }), _jsx("button", { className: "quick-add-menu-item", disabled: true, children: "Add key" })] }))] })] })] }), _jsxs("section", { className: "host-filter-card", children: [_jsx("div", { className: "sidebar-view-tabs", role: "tablist", "aria-label": "Sidebar views", children: sidebarViews.map((view) => (_jsx("button", { className: `tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`, role: "tab", "aria-selected": selectedSidebarViewId === view.id, onClick: () => setSelectedSidebarViewId(view.id), title: view.label, children: view.label }, view.id))) }), _jsxs("div", { className: "filter-head-row", children: [_jsx("input", { className: "input host-search-input", value: searchQuery, onChange: (event) => setSearchQuery(event.target.value), placeholder: "Search alias, hostname, user" }), _jsxs("button", { className: `btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`, onClick: () => setShowAdvancedFilters((prev) => !prev), "aria-expanded": showAdvancedFilters, "aria-controls": "advanced-host-filters", children: ["Filters ", showAdvancedFilters ? "−" : "+"] }), _jsx("span", { className: "pill-muted", children: filteredHostRows.length })] }), _jsxs("div", { id: "advanced-host-filters", className: `advanced-filters ${showAdvancedFilters ? "is-open" : ""}`, children: [_jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: statusFilter, onChange: (event) => setStatusFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All status" }), _jsx("option", { value: "connected", children: "Connected" }), _jsx("option", { value: "disconnected", children: "Disconnected" })] }), _jsx("input", { className: "input", type: "number", value: portFilter, onChange: (event) => setPortFilter(event.target.value), placeholder: "Port" })] }), _jsxs("div", { className: "filter-row", children: [_jsxs("select", { className: "input", value: selectedTagFilter, onChange: (event) => setSelectedTagFilter(event.target.value), children: [_jsx("option", { value: "all", children: "All tags" }), availableTags.map((tag) => (_jsx("option", { value: tag, children: tag }, tag)))] }), _jsx("button", { className: `btn ${favoritesOnly ? "btn-primary" : ""}`, onClick: () => setFavoritesOnly((prev) => !prev), children: "Favorites" })] }), _jsxs("div", { className: "filter-row", children: [_jsx("button", { className: `btn ${recentOnly ? "btn-primary" : ""}`, onClick: () => setRecentOnly((prev) => !prev), children: "Recent" }), _jsx("button", { className: "btn", onClick: clearFilters, children: "Reset filters" })] })] })] }), _jsx("div", { className: "host-list", children: filteredHostRows.length === 0 ? (_jsxs("div", { className: "empty-pane", children: [_jsx("p", { children: "No hosts match the active filters." }), _jsx("span", { children: "Adjust or reset filters to show hosts." })] })) : (_jsxs(_Fragment, { children: [connectedHostRows.length > 0 && (_jsxs("div", { className: "host-list-top", children: [_jsx("p", { className: "host-list-section-title", children: "Connected" }), connectedHostRows.map((row, index) => renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`))] })), _jsx("div", { className: "host-list-scroll", children: otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`)) })] })) })] }), _jsx("div", { className: `sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`, role: "separator", "aria-orientation": "vertical", "aria-label": "Resize host sidebar", onPointerDown: startSidebarResize }), _jsxs("section", { className: "right-dock panel", children: [_jsxs("div", { className: "workspace-tabs", role: "tablist", "aria-label": "Terminal workspaces", children: [workspaceTabs.map((workspace) => (_jsx("button", { type: "button", role: "tab", "aria-selected": workspace.id === activeWorkspaceId, className: `btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`, onClick: () => switchWorkspace(workspace.id), onDragOver: (event) => {
                                     const payload = parseDragPayload(event);
-                                    if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                                    const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                                    // #region agent log
+                                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                                        body: JSON.stringify({
+                                            sessionId: "46a972",
+                                            runId: "workspace-move-pre-fix",
+                                            hypothesisId: "H2",
+                                            location: "App.tsx:workspaceTab:onDragOver",
+                                            message: "workspace tab drag over evaluated",
+                                            data: {
+                                                workspaceId: workspace.id,
+                                                activeWorkspaceId,
+                                                payloadType: payload?.type ?? null,
+                                                shouldReject,
+                                            },
+                                            timestamp: Date.now(),
+                                        }),
+                                    }).catch(() => { });
+                                    // #endregion
+                                    if (shouldReject) {
                                         return;
                                     }
                                     event.preventDefault();
                                     event.dataTransfer.dropEffect = "move";
                                 }, onDrop: (event) => {
                                     const payload = parseDragPayload(event);
-                                    if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                                    const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                                    // #region agent log
+                                    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                                        body: JSON.stringify({
+                                            sessionId: "46a972",
+                                            runId: "workspace-move-pre-fix",
+                                            hypothesisId: "H2",
+                                            location: "App.tsx:workspaceTab:onDrop",
+                                            message: "workspace tab drop evaluated",
+                                            data: {
+                                                workspaceId: workspace.id,
+                                                activeWorkspaceId,
+                                                payloadType: payload?.type ?? null,
+                                                payloadSessionId: payload?.type === "session" ? payload.sessionId : null,
+                                                shouldReject,
+                                            },
+                                            timestamp: Date.now(),
+                                        }),
+                                    }).catch(() => { });
+                                    // #endregion
+                                    if (shouldReject) {
                                         return;
                                     }
                                     event.preventDefault();
@@ -3237,7 +3671,7 @@ export function App() {
                                                                         return;
                                                                     }
                                                                     setTerminalFontOffset(Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))));
-                                                                } }), _jsxs("span", { className: "field-help", children: ["Current terminal size: ", terminalFontSize, "px."] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "List tone intensity" }), _jsxs("select", { className: "input density-profile-select", value: listTonePreset, onChange: (event) => setListTonePreset(event.target.value), children: [_jsx("option", { value: "subtle", children: "Subtle" }), _jsx("option", { value: "strong", children: "Strong" })] }), _jsx("span", { className: "field-help", children: "Controls host/session/chip color intensity." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Frame mode" }), _jsxs("select", { className: "input density-profile-select", value: frameModePreset, onChange: (event) => setFrameModePreset(event.target.value), children: [_jsx("option", { value: "cleaner", children: "Cleaner" }), _jsx("option", { value: "balanced", children: "Balanced" }), _jsx("option", { value: "clearer", children: "Clearer" })] }), _jsx("span", { className: "field-help", children: "Hover/focus frame strength." })] })] })] }) })), activeAppSettingsTab === "layout" && (_jsx("div", { className: "settings-stack", children: _jsxs("section", { className: "settings-card", children: [_jsxs("header", { className: "settings-card-head", children: [_jsx("h3", { children: "Window behavior" }), _jsx("p", { className: "muted-copy", children: "Define how hosts and terminals are arranged across screen sizes." })] }), _jsxs("div", { className: "host-form-grid", children: [_jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Window layout" }), _jsxs("select", { className: "input density-profile-select", value: layoutMode, onChange: (event) => setLayoutMode(event.target.value), children: [_jsx("option", { value: "auto", children: "Auto \u2014 stack below 900px" }), _jsx("option", { value: "wide", children: "Wide \u2014 always side-by-side" }), _jsx("option", { value: "compact", children: "Compact \u2014 always stacked" })] }), _jsx("span", { className: "field-help", children: "Auto uses mobile shell on narrow screens. Wide keeps desktop grid. Compact stays stacked." })] }), _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default split ratio preset" }), _jsxs("select", { className: "input density-profile-select", value: splitRatioPreset, onChange: (event) => setSplitRatioPreset(event.target.value), children: [_jsx("option", { value: "50-50", children: "50/50" }), _jsx("option", { value: "60-40", children: "60/40" }), _jsx("option", { value: "70-30", children: "70/30" })] }), _jsx("span", { className: "field-help", children: "Applies only to newly created pane splits." })] }), _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Auto arrange mode" }), _jsxs("select", { className: "input density-profile-select", value: autoArrangeMode, onChange: (event) => setAutoArrangeMode(event.target.value), children: [_jsx("option", { value: "c", children: "Mode C (open/close + layout changes)" }), _jsx("option", { value: "off", children: "Off" })] }), _jsx("span", { className: "field-help", children: "Mode C keeps open pane sessions compact and split ratios balanced." })] })] })] }) })), activeAppSettingsTab === "connections" && (_jsxs("div", { className: "settings-stack", children: [_jsxs("section", { className: "settings-card", children: [_jsxs("header", { className: "settings-card-head", children: [_jsx("h3", { children: "Defaults" }), _jsx("p", { className: "muted-copy", children: "Connection defaults applied before manual overrides." })] }), _jsx("div", { className: "host-form-grid", children: _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default login user" }), _jsx("input", { className: "input", value: metadataStore.defaultUser, onChange: (event) => {
+                                                                } }), _jsxs("span", { className: "field-help", children: ["Current terminal size: ", terminalFontSize, "px."] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "List tone intensity" }), _jsxs("select", { className: "input density-profile-select", value: listTonePreset, onChange: (event) => setListTonePreset(event.target.value), children: [_jsx("option", { value: "subtle", children: "Subtle" }), _jsx("option", { value: "strong", children: "Strong" })] }), _jsx("span", { className: "field-help", children: "Controls host/session/chip color intensity." })] }), _jsxs("label", { className: "field", children: [_jsx("span", { className: "field-label", children: "Frame mode" }), _jsxs("select", { className: "input density-profile-select", value: frameModePreset, onChange: (event) => setFrameModePreset(event.target.value), children: [_jsx("option", { value: "cleaner", children: "Cleaner" }), _jsx("option", { value: "balanced", children: "Balanced" }), _jsx("option", { value: "clearer", children: "Clearer" })] }), _jsx("span", { className: "field-help", children: "Hover/focus frame strength." })] })] })] }) })), activeAppSettingsTab === "layout" && (_jsx("div", { className: "settings-stack", children: _jsxs("section", { className: "settings-card", children: [_jsxs("header", { className: "settings-card-head", children: [_jsx("h3", { children: "Window behavior" }), _jsx("p", { className: "muted-copy", children: "Define how hosts and terminals are arranged across screen sizes." })] }), _jsxs("div", { className: "host-form-grid", children: [_jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Window layout" }), _jsxs("select", { className: "input density-profile-select", value: layoutMode, onChange: (event) => setLayoutMode(event.target.value), children: [_jsx("option", { value: "auto", children: "Auto \u2014 stack below 900px" }), _jsx("option", { value: "wide", children: "Wide \u2014 always side-by-side" }), _jsx("option", { value: "compact", children: "Compact \u2014 always stacked" })] }), _jsx("span", { className: "field-help", children: "Auto uses mobile shell on narrow screens. Wide keeps desktop grid. Compact stays stacked." })] }), _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default split ratio preset" }), _jsxs("select", { className: "input density-profile-select", value: splitRatioPreset, onChange: (event) => setSplitRatioPreset(event.target.value), children: [_jsx("option", { value: "50-50", children: "50/50" }), _jsx("option", { value: "60-40", children: "60/40" }), _jsx("option", { value: "70-30", children: "70/30" })] }), _jsx("span", { className: "field-help", children: "Applies only to newly created pane splits." })] }), _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Auto arrange mode" }), _jsxs("select", { className: "input density-profile-select", value: autoArrangeMode, onChange: (event) => setAutoArrangeMode(event.target.value), children: [_jsx("option", { value: "a", children: "Mode A (open/close only)" }), _jsx("option", { value: "b", children: "Mode B (layout changes only)" }), _jsx("option", { value: "c", children: "Mode C (open/close + layout changes)" }), _jsx("option", { value: "off", children: "Off" })] }), _jsx("span", { className: "field-help", children: "Mode A compacts session slots. Mode B rebalances split ratios. Mode C applies both." })] })] })] }) })), activeAppSettingsTab === "connections" && (_jsxs("div", { className: "settings-stack", children: [_jsxs("section", { className: "settings-card", children: [_jsxs("header", { className: "settings-card-head", children: [_jsx("h3", { children: "Defaults" }), _jsx("p", { className: "muted-copy", children: "Connection defaults applied before manual overrides." })] }), _jsx("div", { className: "host-form-grid", children: _jsxs("label", { className: "field field-span-2", children: [_jsx("span", { className: "field-label", children: "Default login user" }), _jsx("input", { className: "input", value: metadataStore.defaultUser, onChange: (event) => {
                                                                     const nextValue = event.target.value;
                                                                     setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
                                                                 }, onBlur: (event) => {

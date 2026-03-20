@@ -60,6 +60,7 @@ import {
   resolveInputTargets,
   sanitizeBroadcastTargets,
 } from "./features/split";
+import { sortRowsByFavoriteThenAlias } from "./features/host-order";
 import type {
   HostConfig,
   HostMetadata,
@@ -148,7 +149,7 @@ type QuickConnectWizardStep = 1 | 2;
 type SettingsOpenMode = "modal" | "docked";
 type LayoutMode = "auto" | "wide" | "compact";
 type SplitRatioPreset = "50-50" | "60-40" | "70-30";
-type AutoArrangeMode = "off" | "c";
+type AutoArrangeMode = "off" | "a" | "b" | "c";
 type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
 type SplitMode = "duplicate" | "empty";
 type WorkspaceSnapshot = {
@@ -751,7 +752,7 @@ export function App() {
       return "c";
     }
     const persisted = window.localStorage.getItem(AUTO_ARRANGE_MODE_STORAGE_KEY);
-    return persisted === "off" || persisted === "c" ? persisted : "c";
+    return persisted === "off" || persisted === "a" || persisted === "b" || persisted === "c" ? persisted : "c";
   });
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readLayoutMode());
   const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
@@ -794,6 +795,7 @@ export function App() {
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
+  const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
   const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
@@ -994,10 +996,13 @@ export function App() {
       });
   }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
   const connectedHostRows = useMemo(
-    () => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)),
+    () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => row.connected)),
     [filteredHostRows],
   );
-  const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+  const otherHostRows = useMemo(
+    () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => !row.connected)),
+    [filteredHostRows],
+  );
   const sidebarViews = useMemo(
     () => [
       { id: "builtin:all" as SidebarViewId, label: "Alle" },
@@ -1592,7 +1597,7 @@ export function App() {
     });
   }, [activePaneIndex, activeSession, activeWorkspaceId, paneLayouts, splitSlots, splitTree]);
   useEffect(() => {
-    if (autoArrangeMode !== "c") {
+    if (autoArrangeMode === "off") {
       return;
     }
     if (isAutoArrangeApplyingRef.current) {
@@ -1600,8 +1605,10 @@ export function App() {
     }
     const nextSplitTree = rebalanceSplitTree(splitTree);
     const nextSplitSlots = compactSplitSlotsByPaneOrder(splitSlots, paneOrder);
-    const splitTreeChanged = nextSplitTree !== splitTree;
-    const splitSlotsChanged = nextSplitSlots !== splitSlots;
+    const shouldRebalanceTree = autoArrangeMode === "b" || autoArrangeMode === "c";
+    const shouldCompactSlots = autoArrangeMode === "a" || autoArrangeMode === "c";
+    const splitTreeChanged = shouldRebalanceTree && nextSplitTree !== splitTree;
+    const splitSlotsChanged = shouldCompactSlots && nextSplitSlots !== splitSlots;
     if (!splitTreeChanged && !splitSlotsChanged) {
       return;
     }
@@ -2342,17 +2349,84 @@ export function App() {
   const placeSessionIntoNewOrFreePane = (sessionId: string) => {
     const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
     const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right");
+    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right", activePaneIndex, "empty");
+    // #region agent log
+    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+      body: JSON.stringify({
+        sessionId: "46a972",
+        runId: "host-doubleclick-pre-fix",
+        hypothesisId: "H10",
+        location: "App.tsx:placeSessionIntoNewOrFreePane",
+        message: "placing session into pane",
+        data: {
+          sessionId,
+          usedExistingEmptyPane,
+          firstFreePaneIndex: typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : null,
+          targetPaneIndex,
+          activePaneIndex,
+          paneOrderLength: paneOrder.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
     setActivePaneIndex(targetPaneIndex);
     setActiveSession(sessionId);
   };
 
   const connectToHostInNewPane = async (host: HostConfig): Promise<void> => {
+    // #region agent log
+    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+      body: JSON.stringify({
+        sessionId: "46a972",
+        runId: "host-doubleclick-pre-fix",
+        hypothesisId: "H11",
+        location: "App.tsx:connectToHostInNewPane:entry",
+        message: "connect to host in new pane called",
+        data: { hostAlias: host.host, activeHost, activePaneIndex },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const startedSessionId = await connectToHost(host);
     if (!startedSessionId) {
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "host-doubleclick-pre-fix",
+          hypothesisId: "H11",
+          location: "App.tsx:connectToHostInNewPane:failedStart",
+          message: "connect to host returned no session id",
+          data: { hostAlias: host.host },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return;
     }
+    // #region agent log
+    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+      body: JSON.stringify({
+        sessionId: "46a972",
+        runId: "host-doubleclick-pre-fix",
+        hypothesisId: "H11",
+        location: "App.tsx:connectToHostInNewPane:started",
+        message: "connect to host returned session id",
+        data: { hostAlias: host.host, startedSessionId },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     placeSessionIntoNewOrFreePane(startedSessionId);
   };
 
@@ -2607,6 +2681,21 @@ export function App() {
     event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
     event.dataTransfer.setData("text/plain", serialized);
     lastInternalDragPayloadRef.current = payload;
+    // #region agent log
+    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+      body: JSON.stringify({
+        sessionId: "46a972",
+        runId: "workspace-move-pre-fix",
+        hypothesisId: "H1",
+        location: "App.tsx:setDragPayload",
+        message: "drag payload prepared",
+        data: { payloadType: payload.type, sessionId: payload.type === "session" ? payload.sessionId : null },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   };
 
   const parseDragPayload = (event: ReactDragEvent): DragPayload | null => {
@@ -2614,6 +2703,21 @@ export function App() {
     const plainPayload = event.dataTransfer.getData("text/plain");
     const encoded = customPayload || plainPayload;
     if (!encoded) {
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "workspace-move-pre-fix",
+          hypothesisId: "H1",
+          location: "App.tsx:parseDragPayload",
+          message: "no encoded drag payload; fallback used",
+          data: { hasFallback: Boolean(lastInternalDragPayloadRef.current) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return lastInternalDragPayloadRef.current;
     }
     try {
@@ -2624,8 +2728,42 @@ export function App() {
           : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
             ? ({ type: "machine", hostAlias: parsed.hostAlias } as DragPayload)
             : null;
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "workspace-move-pre-fix",
+          hypothesisId: "H1",
+          location: "App.tsx:parseDragPayload",
+          message: "drag payload parsed",
+          data: {
+            parsedType: parsed?.type ?? null,
+            resultType: result?.type ?? null,
+            usesFallback: !result && Boolean(lastInternalDragPayloadRef.current),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return result ?? lastInternalDragPayloadRef.current;
     } catch {
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "workspace-move-pre-fix",
+          hypothesisId: "H1",
+          location: "App.tsx:parseDragPayload",
+          message: "drag payload parse error; fallback used",
+          data: { hasFallback: Boolean(lastInternalDragPayloadRef.current) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return lastInternalDragPayloadRef.current;
     }
   };
@@ -2682,8 +2820,53 @@ export function App() {
       return;
     }
     const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
+    const sourcePaneIndex =
+      payload.type === "session" ? splitSlots.findIndex((slot) => slot === payload.sessionId) : -1;
+    // #region agent log
+    fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+      body: JSON.stringify({
+        sessionId: "46a972",
+        runId: "pane-self-drop-pre-fix",
+        hypothesisId: "H14",
+        location: "App.tsx:handlePaneDrop:entry",
+        message: "pane drop entry evaluated",
+        data: {
+          paneIndex,
+          resolvedDropZone,
+          payloadType: payload.type,
+          sessionDropMode,
+          sourcePaneIndex,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const assignSessionToZone = (sessionId: string, zone: PaneDropZone, moveExistingSession = false) => {
       const targetPane = zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex);
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "pane-self-drop-pre-fix",
+          hypothesisId: "H15",
+          location: "App.tsx:handlePaneDrop:assignSessionToZone",
+          message: "session assigned to drop zone",
+          data: {
+            droppedSessionId: sessionId,
+            zone,
+            paneIndex,
+            targetPane,
+            moveExistingSession,
+            sourcePaneIndexForDroppedSession: splitSlots.findIndex((slot) => slot === sessionId),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setActivePaneIndex(targetPane);
       setActiveSession(sessionId);
       setSplitSlots((prev) => {
@@ -3094,28 +3277,173 @@ export function App() {
   );
   const sendSessionToWorkspace = useCallback(
     (sessionId: string, targetWorkspaceId: string) => {
+      const sourcePaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
+      const canCloseSourcePane = sourcePaneIndex >= 0 && paneOrder.includes(sourcePaneIndex) && paneOrder.length > 1;
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "workspace-move-pre-fix",
+          hypothesisId: "H3",
+          location: "App.tsx:sendSessionToWorkspace:entry",
+          message: "send session to workspace called",
+          data: {
+            inputSessionId: sessionId || null,
+            targetWorkspaceId,
+            activeWorkspaceId,
+            hasTargetSnapshot: Boolean(workspaceSnapshots[targetWorkspaceId]),
+            sourcePaneIndex,
+            sourcePaneCount: paneOrder.length,
+            canCloseSourcePane,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (!sessionId || !workspaceSnapshots[targetWorkspaceId]) {
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+          body: JSON.stringify({
+            sessionId: "46a972",
+            runId: "workspace-move-pre-fix",
+            hypothesisId: "H3",
+            location: "App.tsx:sendSessionToWorkspace:earlyReturnMissing",
+            message: "aborted due to missing sessionId or target snapshot",
+            data: { hasSessionId: Boolean(sessionId), hasTargetSnapshot: Boolean(workspaceSnapshots[targetWorkspaceId]) },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         return;
       }
       if (targetWorkspaceId === activeWorkspaceId) {
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+          body: JSON.stringify({
+            sessionId: "46a972",
+            runId: "workspace-move-pre-fix",
+            hypothesisId: "H2",
+            location: "App.tsx:sendSessionToWorkspace:earlyReturnSameWorkspace",
+            message: "aborted because target equals active workspace",
+            data: { targetWorkspaceId, activeWorkspaceId, sessionId },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         return;
       }
       const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
       const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
       const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
-      const normalizedTargetPaneIndex = typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : (targetPaneOrder[0] ?? 0);
-      const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, normalizedTargetPaneIndex, sessionId);
+      const nextTargetPaneIndex =
+        typeof firstFreePaneIndex === "number"
+          ? firstFreePaneIndex
+          : Math.max(-1, ...targetPaneOrder) + 1;
+      const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
+      const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
+      if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
+        nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+      }
+      const nextTargetSplitTree: SplitTreeNode =
+        typeof firstFreePaneIndex === "number"
+          ? cloneSplitTree(targetSnapshot.splitTree)
+          : {
+              id: `split-workspace-${createId()}`,
+              type: "split",
+              axis: "vertical",
+              ratio: splitRatioDefaultValue,
+              first: cloneSplitTree(targetSnapshot.splitTree),
+              second: createLeafNode(nextTargetPaneIndex),
+            };
       const nextTargetSnapshot: WorkspaceSnapshot = {
         ...cloneWorkspaceSnapshot(targetSnapshot),
         splitSlots: nextTargetSlots,
-        activePaneIndex: normalizedTargetPaneIndex,
+        paneLayouts: nextTargetPaneLayouts,
+        splitTree: nextTargetSplitTree,
+        activePaneIndex: nextTargetPaneIndex,
         activeSessionId: sessionId,
       };
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "workspace-move-pre-fix",
+          hypothesisId: "H4",
+          location: "App.tsx:sendSessionToWorkspace:assign",
+          message: "session assigned into target workspace snapshot",
+          data: {
+            targetWorkspaceId,
+            nextTargetPaneIndex,
+            targetPaneOrderLength: targetPaneOrder.length,
+            firstFreePaneIndex: typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : null,
+            createdNewPane: typeof firstFreePaneIndex !== "number",
+            targetActivePaneIndex: nextTargetSnapshot.activePaneIndex,
+            targetActiveSessionId: nextTargetSnapshot.activeSessionId,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setWorkspaceSnapshots((prev) => ({
         ...prev,
         [targetWorkspaceId]: nextTargetSnapshot,
       }));
-      setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+      setSplitSlots((prev) => {
+        const cleared = removeSessionFromSlots(prev, sessionId);
+        return canCloseSourcePane ? clearPaneAtIndex(cleared, sourcePaneIndex) : cleared;
+      });
+      if (canCloseSourcePane) {
+        setSplitTree((prev) => {
+          const next = removePaneFromTree(prev, sourcePaneIndex);
+          if (!next) {
+            return prev;
+          }
+          const maxPaneIndex = Math.max(...collectPaneOrder(next));
+          if (nextPaneIndexRef.current <= maxPaneIndex) {
+            nextPaneIndexRef.current = maxPaneIndex + 1;
+          }
+          return next;
+        });
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+          body: JSON.stringify({
+            sessionId: "46a972",
+            runId: "post-fix",
+            hypothesisId: "H6",
+            location: "App.tsx:sendSessionToWorkspace:sourcePaneClosed",
+            message: "source pane closed after sending session",
+            data: { sourcePaneIndex, sourcePaneCount: paneOrder.length, sessionId },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      } else {
+        // #region agent log
+        fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+          body: JSON.stringify({
+            sessionId: "46a972",
+            runId: "post-fix",
+            hypothesisId: "H6",
+            location: "App.tsx:sendSessionToWorkspace:sourcePaneNotClosed",
+            message: "source pane kept after sending session",
+            data: { sourcePaneIndex, sourcePaneCount: paneOrder.length, canCloseSourcePane, sessionId },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+      }
       setBroadcastTargets((prev) => {
         const next = new Set(prev);
         next.delete(sessionId);
@@ -3125,7 +3453,7 @@ export function App() {
         setActiveSession("");
       }
     },
-    [activeSession, activeWorkspaceId, workspaceSnapshots],
+    [activeSession, activeWorkspaceId, paneOrder, splitRatioDefaultValue, splitSlots, workspaceSnapshots],
   );
 
   const handleContextAction = async (
@@ -3304,10 +3632,40 @@ export function App() {
     );
     setActivePaneIndex(newPaneIndex);
     if (splitMode === "duplicate" && sourceSessionId) {
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+        body: JSON.stringify({
+          sessionId: "46a972",
+          runId: "pane-self-drop-pre-fix",
+          hypothesisId: "H16",
+          location: "App.tsx:splitFocusedPane:duplicateSpawnPath",
+          message: "split focused pane duplicate path triggered",
+          data: { sourceSessionId, direction, paneIndex, newPaneIndex },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const sourceSession = sessions.find((session) => session.id === sourceSessionId) ?? null;
       if (sourceSession) {
         void spawnSessionFromExistingSession(sourceSession).then((spawnedSessionId) => {
           if (!spawnedSessionId) {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+              body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "pane-self-drop-pre-fix",
+                hypothesisId: "H16",
+                location: "App.tsx:splitFocusedPane:duplicateSpawnFailed",
+                message: "duplicate spawn returned empty session id",
+                data: { sourceSessionId, direction, paneIndex, newPaneIndex },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
             return;
           }
           setSplitSlots((prev) => assignSessionToPane(prev, newPaneIndex, spawnedSessionId));
@@ -3820,12 +4178,33 @@ export function App() {
           tabIndex={0}
           aria-label={`SSH host ${row.host.host}`}
           className="host-item"
-          onClick={() => {
-            toggleHostSelection(row.host);
+          onMouseEnter={() => {
+            // Nur Hover-Verhalten für verbundene Hosts aktivieren, um Flackern zu vermeiden
+            if (row.connected) {
+              setHoveredHostAlias(row.host.host);
+            }
           }}
-          onMouseEnter={() => setHoveredHostAlias(row.host.host)}
-          onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
+          onMouseLeave={() => {
+            if (row.connected) {
+              setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
+            }
+          }}
           onDoubleClick={() => {
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+              body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "host-doubleclick-pre-fix",
+                hypothesisId: "H11",
+                location: "App.tsx:hostItem:onDoubleClick",
+                message: "host item double clicked",
+                data: { hostAlias: row.host.host, activeHostBefore: activeHost },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
             void connectToHostInNewPane(row.host);
           }}
           onKeyDown={(event) => {
@@ -3839,6 +4218,22 @@ export function App() {
           }}
           draggable
           onDragStart={(event) => {
+            suppressHostClickAliasRef.current = row.host.host;
+            // #region agent log
+            fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+              body: JSON.stringify({
+                sessionId: "46a972",
+                runId: "host-doubleclick-pre-fix",
+                hypothesisId: "H13",
+                location: "App.tsx:hostItem:onDragStart",
+                message: "host drag started",
+                data: { hostAlias: row.host.host, activeHostBefore: activeHost },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
             setDragPayload(event, { type: "machine", hostAlias: row.host.host });
             setDraggingKind("machine");
             missingDragPayloadLoggedRef.current = false;
@@ -4176,7 +4571,28 @@ export function App() {
               onClick={() => switchWorkspace(workspace.id)}
               onDragOver={(event) => {
                 const payload = parseDragPayload(event);
-                if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                // #region agent log
+                fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                  body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H2",
+                    location: "App.tsx:workspaceTab:onDragOver",
+                    message: "workspace tab drag over evaluated",
+                    data: {
+                      workspaceId: workspace.id,
+                      activeWorkspaceId,
+                      payloadType: payload?.type ?? null,
+                      shouldReject,
+                    },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {});
+                // #endregion
+                if (shouldReject) {
                   return;
                 }
                 event.preventDefault();
@@ -4184,7 +4600,29 @@ export function App() {
               }}
               onDrop={(event) => {
                 const payload = parseDragPayload(event);
-                if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                // #region agent log
+                fetch("http://127.0.0.1:7498/ingest/1fd4618e-1a4f-4b3a-baf2-b03e2eb2e5ab", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "46a972" },
+                  body: JSON.stringify({
+                    sessionId: "46a972",
+                    runId: "workspace-move-pre-fix",
+                    hypothesisId: "H2",
+                    location: "App.tsx:workspaceTab:onDrop",
+                    message: "workspace tab drop evaluated",
+                    data: {
+                      workspaceId: workspace.id,
+                      activeWorkspaceId,
+                      payloadType: payload?.type ?? null,
+                      payloadSessionId: payload?.type === "session" ? payload.sessionId : null,
+                      shouldReject,
+                    },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {});
+                // #endregion
+                if (shouldReject) {
                   return;
                 }
                 event.preventDefault();
@@ -4616,10 +5054,14 @@ export function App() {
                           value={autoArrangeMode}
                           onChange={(event) => setAutoArrangeMode(event.target.value as AutoArrangeMode)}
                         >
+                          <option value="a">Mode A (open/close only)</option>
+                          <option value="b">Mode B (layout changes only)</option>
                           <option value="c">Mode C (open/close + layout changes)</option>
                           <option value="off">Off</option>
                         </select>
-                        <span className="field-help">Mode C keeps open pane sessions compact and split ratios balanced.</span>
+                        <span className="field-help">
+                          Mode A compacts session slots. Mode B rebalances split ratios. Mode C applies both.
+                        </span>
                       </label>
                     </div>
                   </section>
