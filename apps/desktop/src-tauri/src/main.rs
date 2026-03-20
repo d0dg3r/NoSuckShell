@@ -1,8 +1,11 @@
 mod backup;
 mod host_metadata;
+mod key_crypto;
 mod layout_profiles;
+mod secure_store;
 mod session;
 mod ssh_config;
+mod store_models;
 mod view_profiles;
 
 use backup::{create_backup_payload, export_encrypted_backup, import_encrypted_backup};
@@ -10,6 +13,12 @@ use host_metadata::{load_metadata, save_metadata, touch_host_last_used as touch_
 use layout_profiles::{
     delete_layout_profile as delete_layout_profile_backend, load_layout_profiles,
     save_layout_profile as save_layout_profile_backend, LayoutProfile,
+};
+use secure_store::{
+    assign_host_binding as assign_host_binding_backend, create_encrypted_key as create_encrypted_key_backend,
+    delete_key as delete_key_backend, list_groups as list_groups_backend, list_store_objects as list_store_objects_backend,
+    list_tags as list_tags_backend, list_users as list_users_backend, resolve_host_config_for_session,
+    save_store_objects as save_store_objects_backend, unlock_key_material as unlock_key_material_backend,
 };
 use session::SessionState;
 use ssh_config::{
@@ -22,10 +31,48 @@ use view_profiles::{
     ViewProfile,
 };
 use tauri::State;
+use store_models::{EntityStore, HostBinding, SshKeyObject, TagObject, UserObject, GroupObject};
 
 #[derive(serde::Serialize)]
 struct SessionStarted {
     session_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct QuickSshSessionRequest {
+    #[serde(rename = "hostName")]
+    host_name: String,
+    #[serde(default)]
+    user: String,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(rename = "identityFile", default)]
+    identity_file: String,
+    #[serde(rename = "proxyJump", default)]
+    proxy_jump: String,
+    #[serde(rename = "proxyCommand", default)]
+    proxy_command: String,
+}
+
+fn normalize_quick_ssh_request(request: QuickSshSessionRequest) -> Result<HostConfig, String> {
+    let host_name = request.host_name.trim();
+    if host_name.is_empty() {
+        return Err("HostName is required for quick connect.".to_string());
+    }
+    let port = request.port.unwrap_or(22);
+    if port == 0 {
+        return Err("Port must be between 1 and 65535.".to_string());
+    }
+    let user = request.user.trim();
+    Ok(HostConfig {
+        host: format!("quick-{host_name}"),
+        host_name: host_name.to_string(),
+        user: user.to_string(),
+        port,
+        identity_file: request.identity_file.trim().to_string(),
+        proxy_jump: request.proxy_jump.trim().to_string(),
+        proxy_command: request.proxy_command.trim().to_string(),
+    })
 }
 
 #[tauri::command]
@@ -64,8 +111,79 @@ fn start_session(
     sessions: State<'_, SessionState>,
     host: HostConfig,
 ) -> Result<SessionStarted, String> {
+    let resolved_host = resolve_host_config_for_session(&host).map_err(|err| err.to_string())?;
+    let session_id = sessions.start(app, resolved_host).map_err(|err| err.to_string())?;
+    Ok(SessionStarted { session_id })
+}
+
+#[tauri::command]
+fn start_local_session(
+    app: tauri::AppHandle,
+    sessions: State<'_, SessionState>,
+) -> Result<SessionStarted, String> {
+    let session_id = sessions.start_local(app).map_err(|err| err.to_string())?;
+    Ok(SessionStarted { session_id })
+}
+
+#[tauri::command]
+fn start_quick_ssh_session(
+    app: tauri::AppHandle,
+    sessions: State<'_, SessionState>,
+    request: QuickSshSessionRequest,
+) -> Result<SessionStarted, String> {
+    let host = normalize_quick_ssh_request(request)?;
     let session_id = sessions.start(app, host).map_err(|err| err.to_string())?;
     Ok(SessionStarted { session_id })
+}
+
+#[tauri::command]
+fn list_store_objects() -> Result<EntityStore, String> {
+    list_store_objects_backend().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn save_store_objects(store: EntityStore) -> Result<(), String> {
+    save_store_objects_backend(&store).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn assign_host_binding(host_alias: String, binding: HostBinding) -> Result<(), String> {
+    assign_host_binding_backend(&host_alias, binding).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_users() -> Result<Vec<UserObject>, String> {
+    list_users_backend().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_groups() -> Result<Vec<GroupObject>, String> {
+    list_groups_backend().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn list_tags() -> Result<Vec<TagObject>, String> {
+    list_tags_backend().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn create_encrypted_key(
+    name: String,
+    private_key_pem: String,
+    public_key: String,
+    passphrase: Option<String>,
+) -> Result<SshKeyObject, String> {
+    create_encrypted_key_backend(name, private_key_pem, public_key, passphrase).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn unlock_key_material(key_id: String, passphrase: Option<String>) -> Result<String, String> {
+    unlock_key_material_backend(&key_id, passphrase).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn delete_key(key_id: String) -> Result<(), String> {
+    delete_key_backend(&key_id).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -155,9 +273,20 @@ fn main() {
             save_host_metadata,
             touch_host_last_used,
             start_session,
+            start_local_session,
+            start_quick_ssh_session,
             send_input,
             resize_session,
             close_session,
+            list_store_objects,
+            save_store_objects,
+            assign_host_binding,
+            list_users,
+            list_groups,
+            list_tags,
+            create_encrypted_key,
+            unlock_key_material,
+            delete_key,
             export_backup,
             import_backup,
             list_layout_profiles,
@@ -170,4 +299,41 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoSuckShell");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_quick_ssh_request, QuickSshSessionRequest};
+
+    #[test]
+    fn normalizes_quick_ssh_request_with_defaults() {
+        let request = QuickSshSessionRequest {
+            host_name: "srv.internal".to_string(),
+            user: String::new(),
+            port: None,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+
+        let normalized = normalize_quick_ssh_request(request).expect("request should normalize");
+        assert_eq!(normalized.host, "quick-srv.internal");
+        assert_eq!(normalized.host_name, "srv.internal");
+        assert_eq!(normalized.port, 22);
+    }
+
+    #[test]
+    fn rejects_empty_quick_ssh_host_name() {
+        let request = QuickSshSessionRequest {
+            host_name: "   ".to_string(),
+            user: "deploy".to_string(),
+            port: Some(22),
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+
+        let result = normalize_quick_ssh_request(request);
+        assert!(result.is_err());
+    }
 }

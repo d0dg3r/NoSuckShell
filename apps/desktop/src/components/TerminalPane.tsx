@@ -9,6 +9,7 @@ type Props = {
   sessionId: string;
   onUserInput: (sessionId: string, data: string) => void;
   fontSize: number;
+  fontFamily: string;
 };
 
 const sessionBuffers = new Map<string, string>();
@@ -24,7 +25,7 @@ const hasTauriTransformCallback = (): boolean => {
   return typeof tauriInternals?.transformCallback === "function";
 };
 
-export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
+export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -47,7 +48,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     const terminal = new Terminal({
       convertEol: true,
       cursorBlink: true,
-      fontFamily: "monospace",
+      fontFamily,
       fontSize,
       theme: {
         background: "#0b0d10",
@@ -209,6 +210,14 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     window.addEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
     window.addEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
     scheduleFitAndResize();
+    const fontFaceSet = typeof document !== "undefined" ? document.fonts : null;
+    if (fontFaceSet) {
+      void fontFaceSet.ready.then(() => {
+        if (!disposed) {
+          scheduleFitAndResize();
+        }
+      });
+    }
 
     return () => {
       disposed = true;
@@ -229,7 +238,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       }
       terminal.dispose();
     };
-  }, [fontSize, sessionId]);
+  }, [fontFamily, fontSize, sessionId]);
 
   return (
     <div ref={rootRef} className="terminal-root">

@@ -3,7 +3,9 @@ use anyhow::Context;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::env;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
@@ -58,6 +60,35 @@ pub fn build_ssh_command(host: &HostConfig) -> CommandBuilder {
     command
 }
 
+fn resolve_local_shell_path(explicit_shell: Option<&str>) -> String {
+    if let Some(shell) = explicit_shell {
+        let trimmed = shell.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(shell_from_env) = env::var("SHELL") {
+        let trimmed = shell_from_env.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if Path::new("/bin/zsh").exists() {
+        return "/bin/zsh".to_string();
+    }
+    if Path::new("/bin/bash").exists() {
+        return "/bin/bash".to_string();
+    }
+    "sh".to_string()
+}
+
+pub fn build_local_shell_command(explicit_shell: Option<&str>) -> CommandBuilder {
+    let shell = resolve_local_shell_path(explicit_shell);
+    let mut command = CommandBuilder::new(shell);
+    command.arg("-l");
+    command
+}
+
 impl SessionState {
     pub fn start(&self, app: AppHandle, host: HostConfig) -> anyhow::Result<String> {
         let pty_system = native_pty_system();
@@ -69,16 +100,30 @@ impl SessionState {
                 pixel_height: 0,
             })
             .context("failed to allocate pty")?;
-        self.spawn_and_register(app, pair, host)
+        let command = build_ssh_command(&host);
+        self.spawn_and_register_command(app, pair, command)
     }
 
-    fn spawn_and_register(
+    pub fn start_local(&self, app: AppHandle) -> anyhow::Result<String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 30,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("failed to allocate pty")?;
+        let command = build_local_shell_command(None);
+        self.spawn_and_register_command(app, pair, command)
+    }
+
+    fn spawn_and_register_command(
         &self,
         app: AppHandle,
         pair: PtyPair,
-        host: HostConfig,
+        mut command: CommandBuilder,
     ) -> anyhow::Result<String> {
-        let mut command = build_ssh_command(&host);
         command.env("TERM", "xterm-256color");
 
         let child = pair
@@ -202,7 +247,7 @@ impl SessionState {
 
 #[cfg(test)]
 mod tests {
-    use super::build_ssh_command;
+    use super::{build_local_shell_command, build_ssh_command};
     use crate::ssh_config::HostConfig;
 
     #[test]
@@ -227,5 +272,13 @@ mod tests {
         assert!(rendered.contains("-J"));
         assert!(rendered.contains("bastion"));
         assert!(rendered.contains("deploy@10.0.0.5"));
+    }
+
+    #[test]
+    fn builds_local_shell_command_from_explicit_shell() {
+        let cmd = build_local_shell_command(Some("/usr/bin/fish"));
+        let rendered = format!("{cmd:?}");
+        assert!(rendered.contains("/usr/bin/fish"));
+        assert!(rendered.contains("-l"));
     }
 }

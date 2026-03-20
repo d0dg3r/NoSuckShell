@@ -16,6 +16,15 @@ Cross-platform SSH manager desktop app (Tauri + React) focused on fast host mana
 
 ## Run locally
 
+From the repository root, the first `npm run tauri:dev` / `desktop:build` will install dependencies under `apps/desktop` automatically if they are missing. You can still install explicitly:
+
+```bash
+npm run desktop:install
+WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev
+```
+
+Or from `apps/desktop`:
+
 ```bash
 cd apps/desktop
 npm install

@@ -56,6 +56,8 @@ export const listHosts = () => invoke("list_hosts");
 export const saveHost = (host) => invoke("save_host", { host });
 export const deleteHost = (hostName) => invoke("delete_host", { hostName });
 export const startSession = (host) => invoke("start_session", { host });
+export const startLocalSession = () => invoke("start_local_session");
+export const startQuickSshSession = (request) => invoke("start_quick_ssh_session", { request });
 export const sendInput = (sessionId, data) => {
     return new Promise((resolve, reject) => {
         enqueueSessionInput(sessionId, data, resolve, reject);
@@ -76,3 +78,12 @@ export const listViewProfiles = () => invoke("list_view_profiles");
 export const saveViewProfile = (profile) => invoke("save_view_profile", { profile });
 export const deleteViewProfile = (profileId) => invoke("delete_view_profile", { profileId });
 export const reorderViewProfiles = (ids) => invoke("reorder_view_profiles", { ids });
+export const listStoreObjects = () => invoke("list_store_objects");
+export const saveStoreObjects = (store) => invoke("save_store_objects", { store });
+export const assignHostBinding = (hostAlias, binding) => invoke("assign_host_binding", { hostAlias, binding });
+export const listUsers = () => invoke("list_users");
+export const listGroups = () => invoke("list_groups");
+export const listTags = () => invoke("list_tags");
+export const createEncryptedKey = (name, privateKeyPem, publicKey, passphrase) => invoke("create_encrypted_key", { name, privateKeyPem, publicKey, passphrase });
+export const unlockKeyMaterial = (keyId, passphrase) => invoke("unlock_key_material", { keyId, passphrase });
+export const deleteKeyById = (keyId) => invoke("delete_key", { keyId });

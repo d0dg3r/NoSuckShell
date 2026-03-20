@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -26,12 +28,25 @@ import {
   deleteViewProfile,
   reorderViewProfiles,
   sendInput,
+  listStoreObjects,
+  saveStoreObjects,
+  createEncryptedKey,
+  unlockKeyMaterial,
+  deleteKeyById,
+  startLocalSession,
+  startQuickSshSession,
   startSession,
   touchHostLastUsed,
 } from "./tauri-api";
 import { HostForm } from "./components/HostForm";
+import { HelpPanel } from "./components/HelpPanel";
 import { TerminalPane } from "./components/TerminalPane";
 import { buildPaneContextActions, type ContextActionId } from "./features/context-actions";
+import {
+  buildQuickConnectUserCandidates,
+  parseHostPortInput,
+  parseQuickConnectCommandInput,
+} from "./features/quick-connect";
 import {
   assignSessionToPane,
   clearPaneAtIndex,
@@ -49,9 +64,16 @@ import type {
   HostConfig,
   HostMetadata,
   HostMetadataStore,
+  EntityStore,
+  HostBinding,
+  UserObject,
+  GroupObject,
+  TagObject,
+  SshKeyObject,
   LayoutProfile,
   LayoutSplitTreeNode,
   PaneLayoutItem,
+  QuickSshSessionRequest,
   SessionOutputEvent,
   ViewFilterField,
   ViewFilterGroup,
@@ -74,9 +96,37 @@ const emptyHost = (): HostConfig => ({
   proxyCommand: "",
 });
 
-type SessionTab = {
+const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => ({
+  hostName: "",
+  user: defaultUser.trim(),
+  identityFile: "",
+  proxyJump: "",
+  proxyCommand: "",
+});
+
+type SavedSshSessionTab = {
   id: string;
-  host: string;
+  kind: "sshSaved";
+  hostAlias: string;
+};
+type QuickSshSessionTab = {
+  id: string;
+  kind: "sshQuick";
+  label: string;
+  request: QuickSshSessionRequest;
+};
+type LocalSessionTab = {
+  id: string;
+  kind: "local";
+  label: string;
+};
+type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab;
+type QuickConnectDraft = {
+  hostName: string;
+  user: string;
+  identityFile: string;
+  proxyJump: string;
+  proxyCommand: string;
 };
 
 type HostStatusFilter = "all" | "connected" | "disconnected";
@@ -87,11 +137,29 @@ type HostRowViewModel = {
   displayUser: string;
 };
 
-type AppSettingsTab = "general" | "views" | "backup" | "extras" | "help" | "about";
+type AppSettingsTab = "appearance" | "layout" | "connections" | "data" | "store" | "views" | "help" | "about";
 type DensityProfile = "aggressive" | "balanced" | "safe";
 type ListTonePreset = "subtle" | "strong";
 type FrameModePreset = "cleaner" | "balanced" | "clearer";
+type UiFontPreset = "inter" | "manrope" | "ibm-plex-sans";
+type TerminalFontPreset = "jetbrains-mono" | "ibm-plex-mono" | "source-code-pro";
+type QuickConnectMode = "wizard" | "smart" | "command";
+type QuickConnectWizardStep = 1 | 2;
+type SettingsOpenMode = "modal" | "docked";
+type LayoutMode = "auto" | "wide" | "compact";
+type SplitRatioPreset = "50-50" | "60-40" | "70-30";
+type AutoArrangeMode = "off" | "c";
 type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
+type SplitMode = "duplicate" | "empty";
+type WorkspaceSnapshot = {
+  id: string;
+  name: string;
+  splitSlots: Array<string | null>;
+  paneLayouts: PaneLayoutItem[];
+  splitTree: SplitTreeNode;
+  activePaneIndex: number;
+  activeSessionId: string;
+};
 type DragPayload =
   | { type: "session"; sessionId: string }
   | { type: "machine"; hostAlias: string };
@@ -101,6 +169,7 @@ type ContextMenuState = {
   x: number;
   y: number;
   paneIndex: number | null;
+  splitMode: SplitMode;
 };
 type SplitAxis = "horizontal" | "vertical";
 type SplitLeafNode = { id: string; type: "leaf"; paneIndex: number };
@@ -121,10 +190,12 @@ const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 
 const appSettingsTabs: Array<{ id: AppSettingsTab; label: string }> = [
-  { id: "general", label: "General" },
+  { id: "appearance", label: "Appearance" },
+  { id: "layout", label: "Layout & Navigation" },
+  { id: "connections", label: "Connections" },
+  { id: "data", label: "Data & Backup" },
   { id: "views", label: "Views" },
-  { id: "backup", label: "Backup & Restore" },
-  { id: "extras", label: "Extras" },
+  { id: "store", label: "Identity Store" },
   { id: "help", label: "Help" },
   { id: "about", label: "About" },
 ];
@@ -138,7 +209,29 @@ const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
 const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
 const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
 const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
+const UI_FONT_PRESET_STORAGE_KEY = "nosuckshell.ui.fontPreset";
+const TERMINAL_FONT_PRESET_STORAGE_KEY = "nosuckshell.terminal.fontPreset";
+const QUICK_CONNECT_MODE_STORAGE_KEY = "nosuckshell.quickConnect.mode";
+const QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY = "nosuckshell.quickConnect.autoTrust";
+const SPLIT_RATIO_PRESET_STORAGE_KEY = "nosuckshell.layout.splitRatioPreset";
+const AUTO_ARRANGE_MODE_STORAGE_KEY = "nosuckshell.layout.autoArrangeMode";
+const WORKSPACES_STORAGE_KEY = "nosuckshell.layout.workspaces.v1";
+const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
+const DEFAULT_WORKSPACE_ID = "workspace-main";
+const SPLIT_RATIO_PRESET_VALUE: Record<SplitRatioPreset, number> = {
+  "50-50": 0.5,
+  "60-40": 0.6,
+  "70-30": 0.7,
+};
+const TERMINAL_FONT_FAMILY_BY_PRESET: Record<TerminalFontPreset, string> = {
+  "jetbrains-mono":
+    '"JetBrains Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+  "ibm-plex-mono":
+    '"IBM Plex Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+  "source-code-pro":
+    '"Source Code Pro", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+};
 const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
   aggressive: 12,
   balanced: 13,
@@ -149,6 +242,9 @@ const TERMINAL_FONT_OFFSET_MAX = 6;
 const TERMINAL_FONT_MIN = 9;
 const TERMINAL_FONT_MAX = 22;
 const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
+const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
+/** Must match CSS breakpoint for stacked-mobile shell */
+const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
 
 const createId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const createEmptyFilterGroup = (): ViewFilterGroup => ({
@@ -187,9 +283,98 @@ const hasTauriTransformCallback = (): boolean => {
 };
 
 const clampSidebarWidth = (value: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
+const readLayoutMode = (): LayoutMode => {
+  if (typeof window === "undefined") {
+    return "auto";
+  }
+  const persisted = window.localStorage.getItem(LAYOUT_MODE_STORAGE_KEY);
+  return persisted === "wide" || persisted === "compact" ? persisted : "auto";
+};
+const readSplitRatioPreset = (): SplitRatioPreset => {
+  if (typeof window === "undefined") {
+    return "60-40";
+  }
+  const persisted = window.localStorage.getItem(SPLIT_RATIO_PRESET_STORAGE_KEY);
+  return persisted === "50-50" || persisted === "60-40" || persisted === "70-30" ? persisted : "60-40";
+};
 const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
+const createDefaultEntityStore = (): EntityStore => ({
+  schemaVersion: 1,
+  updatedAt: 0,
+  users: {},
+  groups: {},
+  keys: {},
+  tags: {},
+  hostBindings: {},
+});
 const createDefaultHostMetadata = (): HostMetadata => ({ favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false });
 const createLeafNode = (paneIndex: number): SplitLeafNode => ({ id: `leaf-${paneIndex}`, type: "leaf", paneIndex });
+const cloneSplitTree = (node: SplitTreeNode): SplitTreeNode =>
+  node.type === "leaf"
+    ? { ...node }
+    : {
+        ...node,
+        first: cloneSplitTree(node.first),
+        second: cloneSplitTree(node.second),
+      };
+const clonePaneLayouts = (layouts: PaneLayoutItem[]): PaneLayoutItem[] => layouts.map((entry) => ({ ...entry }));
+const cloneWorkspaceSnapshot = (snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
+  ...snapshot,
+  splitSlots: [...snapshot.splitSlots],
+  paneLayouts: clonePaneLayouts(snapshot.paneLayouts),
+  splitTree: cloneSplitTree(snapshot.splitTree),
+});
+const rebalanceSplitTree = (node: SplitTreeNode): SplitTreeNode => {
+  if (node.type === "leaf") {
+    return node;
+  }
+  const nextFirst = rebalanceSplitTree(node.first);
+  const nextSecond = rebalanceSplitTree(node.second);
+  const nextRatio = 0.5;
+  if (nextFirst === node.first && nextSecond === node.second && node.ratio === nextRatio) {
+    return node;
+  }
+  return {
+    ...node,
+    ratio: nextRatio,
+    first: nextFirst,
+    second: nextSecond,
+  };
+};
+const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOrder: number[]): Array<string | null> => {
+  if (paneOrder.length === 0) {
+    return slots;
+  }
+  const occupied = paneOrder
+    .map((paneIndex) => slots[paneIndex] ?? null)
+    .filter((sessionId): sessionId is string => Boolean(sessionId));
+  const maxPaneIndex = Math.max(0, ...paneOrder);
+  const next = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
+  paneOrder.forEach((paneIndex, index) => {
+    next[paneIndex] = occupied[index] ?? null;
+  });
+  if (next.length !== slots.length) {
+    return next;
+  }
+  for (let index = 0; index < next.length; index += 1) {
+    if (next[index] !== slots[index]) {
+      return next;
+    }
+  }
+  return slots;
+};
+const createEmptyWorkspaceSnapshot = (id: string, name: string): WorkspaceSnapshot => {
+  const splitSlots = createInitialPaneState();
+  return {
+    id,
+    name,
+    splitSlots,
+    paneLayouts: createPaneLayoutsFromSlots(splitSlots),
+    splitTree: createLeafNode(0),
+    activePaneIndex: 0,
+    activeSessionId: "",
+  };
+};
 const collectPaneOrder = (node: SplitTreeNode): number[] =>
   node.type === "leaf" ? [node.paneIndex] : [...collectPaneOrder(node.first), ...collectPaneOrder(node.second)];
 const replacePaneInTree = (
@@ -393,9 +578,41 @@ export function App() {
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
   const [metadataStore, setMetadataStore] = useState<HostMetadataStore>(() => createDefaultMetadataStore());
+  const [entityStore, setEntityStore] = useState<EntityStore>(() => createDefaultEntityStore());
+  const [storePassphrase, setStorePassphrase] = useState<string>("");
+  const [storeUserDraft, setStoreUserDraft] = useState<string>("");
+  const [storeGroupDraft, setStoreGroupDraft] = useState<string>("");
+  const [storeTagDraft, setStoreTagDraft] = useState<string>("");
+  const [storePathKeyNameDraft, setStorePathKeyNameDraft] = useState<string>("");
+  const [storePathKeyPathDraft, setStorePathKeyPathDraft] = useState<string>("");
+  const [storeEncryptedKeyNameDraft, setStoreEncryptedKeyNameDraft] = useState<string>("");
+  const [storeEncryptedPrivateKeyDraft, setStoreEncryptedPrivateKeyDraft] = useState<string>("");
+  const [storeEncryptedPublicKeyDraft, setStoreEncryptedPublicKeyDraft] = useState<string>("");
+  const [storeSelectedHostForBinding, setStoreSelectedHostForBinding] = useState<string>("");
+  const [storeBindingDraft, setStoreBindingDraft] = useState<HostBinding>({
+    userId: undefined,
+    groupIds: [],
+    tagIds: [],
+    keyRefs: [],
+    proxyJump: "",
+    legacyUser: "",
+    legacyTags: [],
+    legacyIdentityFile: "",
+    legacyProxyJump: "",
+    legacyProxyCommand: "",
+  });
   const [error, setError] = useState<string>("");
   const [isAppSettingsOpen, setIsAppSettingsOpen] = useState<boolean>(false);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("general");
+  const [settingsOpenMode, setSettingsOpenMode] = useState<SettingsOpenMode>(() => {
+    if (typeof window === "undefined") {
+      return "modal";
+    }
+    const persisted = window.localStorage.getItem(SETTINGS_OPEN_MODE_STORAGE_KEY);
+    return persisted === "docked" || persisted === "modal" ? persisted : "modal";
+  });
+  const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
+  const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<HostStatusFilter>("all");
   const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
@@ -405,7 +622,12 @@ export function App() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
   const [isQuickAddMenuOpen, setIsQuickAddMenuOpen] = useState<boolean>(false);
   const [isAddHostModalOpen, setIsAddHostModalOpen] = useState<boolean>(false);
+  const [isQuickConnectModalOpen, setIsQuickConnectModalOpen] = useState<boolean>(false);
+  const [pendingQuickConnectPaneIndex, setPendingQuickConnectPaneIndex] = useState<number | null>(null);
   const [newHostDraft, setNewHostDraft] = useState<HostConfig>(emptyHost());
+  const [quickConnectDraft, setQuickConnectDraft] = useState<QuickConnectDraft>(() => createQuickConnectDraft());
+  const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
+  const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
   const [tagDraft, setTagDraft] = useState<string>("");
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
@@ -494,16 +716,68 @@ export function App() {
     }
     return Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(persisted)));
   });
+  const [uiFontPreset, setUiFontPreset] = useState<UiFontPreset>(() => {
+    if (typeof window === "undefined") {
+      return "inter";
+    }
+    const persisted = window.localStorage.getItem(UI_FONT_PRESET_STORAGE_KEY);
+    return persisted === "manrope" || persisted === "ibm-plex-sans" || persisted === "inter" ? persisted : "inter";
+  });
+  const [terminalFontPreset, setTerminalFontPreset] = useState<TerminalFontPreset>(() => {
+    if (typeof window === "undefined") {
+      return "jetbrains-mono";
+    }
+    const persisted = window.localStorage.getItem(TERMINAL_FONT_PRESET_STORAGE_KEY);
+    return persisted === "ibm-plex-mono" || persisted === "source-code-pro" || persisted === "jetbrains-mono"
+      ? persisted
+      : "jetbrains-mono";
+  });
+  const [quickConnectMode, setQuickConnectMode] = useState<QuickConnectMode>(() => {
+    if (typeof window === "undefined") {
+      return "smart";
+    }
+    const persisted = window.localStorage.getItem(QUICK_CONNECT_MODE_STORAGE_KEY);
+    return persisted === "wizard" || persisted === "command" || persisted === "smart" ? persisted : "smart";
+  });
+  const [quickConnectAutoTrust, setQuickConnectAutoTrust] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY) === "true";
+  });
+  const [splitRatioPreset, setSplitRatioPreset] = useState<SplitRatioPreset>(() => readSplitRatioPreset());
+  const [autoArrangeMode, setAutoArrangeMode] = useState<AutoArrangeMode>(() => {
+    if (typeof window === "undefined") {
+      return "c";
+    }
+    const persisted = window.localStorage.getItem(AUTO_ARRANGE_MODE_STORAGE_KEY);
+    return persisted === "off" || persisted === "c" ? persisted : "c";
+  });
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readLayoutMode());
+  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
+  const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<string, WorkspaceSnapshot>>({
+    [DEFAULT_WORKSPACE_ID]: createEmptyWorkspaceSnapshot(DEFAULT_WORKSPACE_ID, "Main"),
+  });
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
+  const [viewportStacked, setViewportStacked] = useState<boolean>(() =>
+    typeof window === "undefined" ? false : window.matchMedia(MOBILE_STACKED_MEDIA).matches,
+  );
+  const [mobileShellTab, setMobileShellTab] = useState<"hosts" | "terminal">("terminal");
   const [hoveredHostAlias, setHoveredHostAlias] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
     y: 0,
     paneIndex: null,
+    splitMode: "duplicate",
   });
   const sidebarDragStartXRef = useRef<number>(0);
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const settingsModalRef = useRef<HTMLElement | null>(null);
+  const settingsDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const mobilePagerRef = useRef<HTMLDivElement | null>(null);
+  const skipMobilePagerScrollRef = useRef(false);
   const nextSplitIdRef = useRef<number>(1);
   const nextPaneIndexRef = useRef<number>(1);
   const splitResizeLatestRatioRef = useRef<number | null>(null);
@@ -516,11 +790,41 @@ export function App() {
   const pendingProfileLoadSessionIdsRef = useRef<Set<string> | null>(null);
   const sessionsRef = useRef<SessionTab[]>([]);
   const metadataStoreRef = useRef<HostMetadataStore>(createDefaultMetadataStore());
+  const quickConnectAutoTrustRef = useRef<boolean>(false);
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
+  const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
+  const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
+  const shouldSplitAsEmpty = (
+    eventLike?:
+      | {
+          type?: string;
+          key?: string;
+          code?: string;
+          altKey?: boolean;
+          getModifierState?: (...args: any[]) => boolean;
+        }
+      | null,
+  ): boolean => {
+    if (!eventLike) {
+      return false;
+    }
+    const modifierKey =
+      eventLike.key === "Alt" ||
+      eventLike.key === "AltGraph" ||
+      eventLike.code === "AltLeft" ||
+      eventLike.code === "AltRight";
+    if (modifierKey && eventLike.type === "keydown") {
+      return true;
+    }
+    if (modifierKey && eventLike.type === "keyup") {
+      return false;
+    }
+    return Boolean(eventLike.altKey || eventLike.getModifierState?.("AltGraph"));
+  };
 
   const canSave = useMemo(
     () => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0,
@@ -531,6 +835,9 @@ export function App() {
     [newHostDraft],
   );
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
+  const sessionById = useMemo(() => {
+    return new Map(sessions.map((session) => [session.id, session]));
+  }, [sessions]);
   const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
   const visiblePaneSessionIds = useMemo(
     () => splitSlots.filter((slot): slot is string => Boolean(slot)),
@@ -541,14 +848,32 @@ export function App() {
     () => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null,
     [layoutProfiles, selectedLayoutProfileId],
   );
-  const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
+  const connectedHosts = useMemo(() => {
+    return new Set(
+      sessions
+        .filter((session): session is SavedSshSessionTab => session.kind === "sshSaved")
+        .map((session) => session.hostAlias),
+    );
+  }, [sessions]);
   const isSidebarOpen = isSidebarVisible;
   const terminalFontSize = useMemo(() => {
     const base = DENSITY_TERMINAL_BASE_FONT[densityProfile];
     const next = base + terminalFontOffset;
     return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, next));
   }, [densityProfile, terminalFontOffset]);
-
+  const terminalFontFamily = useMemo(
+    () => TERMINAL_FONT_FAMILY_BY_PRESET[terminalFontPreset],
+    [terminalFontPreset],
+  );
+  const splitRatioDefaultValue = SPLIT_RATIO_PRESET_VALUE[splitRatioPreset];
+  const workspaceTabs = useMemo(
+    () =>
+      workspaceOrder
+        .map((workspaceId) => workspaceSnapshots[workspaceId])
+        .filter((workspace): workspace is WorkspaceSnapshot => Boolean(workspace)),
+    [workspaceOrder, workspaceSnapshots],
+  );
+  const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
   const activeHostMetadata = useMemo(() => {
     if (!activeHost) {
@@ -684,28 +1009,59 @@ export function App() {
     ],
     [sortedViewProfiles],
   );
-  const hoveredHostPaneIndices = useMemo(() => {
-    if (!hoveredHostAlias) {
+  const highlightedHostAlias = useMemo(() => {
+    if (hoveredHostAlias) {
+      return hoveredHostAlias;
+    }
+    const normalized = activeHost.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [activeHost, hoveredHostAlias]);
+  const highlightedHostPaneIndices = useMemo(() => {
+    if (!highlightedHostAlias) {
       return new Set<number>();
     }
-    const hoveredSessions = new Set(
-      sessions.filter((session) => session.host === hoveredHostAlias).map((session) => session.id),
+    const highlightedSessions = new Set(
+      sessions
+        .filter((session): session is SavedSshSessionTab => session.kind === "sshSaved")
+        .filter((session) => session.hostAlias === highlightedHostAlias)
+        .map((session) => session.id),
     );
     const paneIndices = new Set<number>();
     splitSlots.forEach((slot, paneIndex) => {
-      if (slot && hoveredSessions.has(slot)) {
+      if (slot && highlightedSessions.has(slot)) {
         paneIndices.add(paneIndex);
       }
     });
     return paneIndices;
-  }, [hoveredHostAlias, sessions, splitSlots]);
-  const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
+  }, [highlightedHostAlias, sessions, splitSlots]);
+  const hasHighlightedHostTargets = highlightedHostAlias !== null && highlightedHostPaneIndices.size > 0;
+  const resolveSessionTitle = useCallback(
+    (session: SessionTab | null): string => {
+      if (!session) {
+        return "Drop it on me";
+      }
+      if (session.kind === "local") {
+        return session.label;
+      }
+      if (session.kind === "sshQuick") {
+        return session.label;
+      }
+      const paneHostConfig = hosts.find((host) => host.host === session.hostAlias) ?? null;
+      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
+      const paneHostName = paneHostConfig?.hostName.trim() || session.hostAlias;
+      return `${paneUser}@${paneHostName}`;
+    },
+    [hosts, metadataStore.defaultUser],
+  );
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
   useEffect(() => {
     metadataStoreRef.current = metadataStore;
   }, [metadataStore]);
+  useEffect(() => {
+    quickConnectAutoTrustRef.current = quickConnectAutoTrust;
+  }, [quickConnectAutoTrust]);
   useEffect(() => {
     if (!activeTrustPrompt) {
       return;
@@ -718,32 +1074,28 @@ export function App() {
       if (!paneSessionId) {
         return "Drop it on me";
       }
-      const paneSessionHost = sessions.find((session) => session.id === paneSessionId)?.host ?? null;
-      if (!paneSessionHost) {
-        return "Drop it on me";
-      }
-      const paneHostConfig = hosts.find((host) => host.host === paneSessionHost) ?? null;
-      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
-      const paneHostName = paneHostConfig?.hostName.trim() || paneSessionHost;
-      return `${paneUser}@${paneHostName}`;
+      const paneSession = sessionById.get(paneSessionId) ?? null;
+      return resolveSessionTitle(paneSession);
     },
-    [hosts, metadataStore.defaultUser, sessions, splitSlots],
+    [resolveSessionTitle, sessionById, splitSlots],
   );
   const toggleFooterLayoutPanel = useCallback(() => {
     setIsFooterLayoutPanelOpen((prev) => !prev);
   }, []);
 
   const load = async () => {
-    const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles] = await Promise.all([
+    const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles, loadedStore] = await Promise.all([
       listHosts(),
       listHostMetadata(),
       listLayoutProfiles(),
       listViewProfiles(),
+      listStoreObjects().catch(() => createDefaultEntityStore()),
     ]);
     setHosts(loadedHosts);
     setMetadataStore(loadedMetadata);
     setLayoutProfiles(loadedProfiles);
     setViewProfiles(loadedViewProfiles);
+    setEntityStore(loadedStore);
     setSelectedLayoutProfileId((prev) => {
       if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
         return prev;
@@ -754,6 +1106,7 @@ export function App() {
       setActiveHost(loadedHosts[0].host);
       setCurrentHost(loadedHosts[0]);
       setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
+      setStoreSelectedHostForBinding((prev) => prev || loadedHosts[0].host);
     }
     setSelectedViewProfileIdInSettings((prev) => {
       if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
@@ -766,6 +1119,274 @@ export function App() {
   useEffect(() => {
     void load().catch((e: unknown) => setError(String(e)));
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(WORKSPACES_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as {
+        order?: string[];
+        activeWorkspaceId?: string;
+        snapshots?: Record<string, WorkspaceSnapshot>;
+      };
+      const order = Array.isArray(parsed.order) ? parsed.order.filter((entry): entry is string => typeof entry === "string") : [];
+      const snapshots = parsed.snapshots ?? {};
+      if (order.length === 0) {
+        return;
+      }
+      const normalizedOrder = order.filter((workspaceId) => {
+        const snapshot = snapshots[workspaceId];
+        return Boolean(snapshot && Array.isArray(snapshot.splitSlots) && snapshot.splitTree);
+      });
+      if (normalizedOrder.length === 0) {
+        return;
+      }
+      const normalizedSnapshots = normalizedOrder.reduce<Record<string, WorkspaceSnapshot>>((acc, workspaceId) => {
+        const snapshot = snapshots[workspaceId];
+        if (!snapshot) {
+          return acc;
+        }
+        acc[workspaceId] = {
+          ...snapshot,
+          id: snapshot.id || workspaceId,
+          name: snapshot.name || workspaceId,
+          splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
+          paneLayouts: Array.isArray(snapshot.paneLayouts)
+            ? snapshot.paneLayouts.map((entry) => ({ ...entry }))
+            : createPaneLayoutsFromSlots(createInitialPaneState()),
+          splitTree: snapshot.splitTree ? cloneSplitTree(snapshot.splitTree) : createLeafNode(0),
+          activePaneIndex: Number.isInteger(snapshot.activePaneIndex) ? snapshot.activePaneIndex : 0,
+          activeSessionId: typeof snapshot.activeSessionId === "string" ? snapshot.activeSessionId : "",
+        };
+        return acc;
+      }, {});
+      const fallbackWorkspaceId = normalizedOrder[0] ?? DEFAULT_WORKSPACE_ID;
+      const nextActiveWorkspaceId =
+        typeof parsed.activeWorkspaceId === "string" && normalizedSnapshots[parsed.activeWorkspaceId]
+          ? parsed.activeWorkspaceId
+          : fallbackWorkspaceId;
+      const nextActiveSnapshot = normalizedSnapshots[nextActiveWorkspaceId];
+      if (!nextActiveSnapshot) {
+        return;
+      }
+      isApplyingWorkspaceSnapshotRef.current = true;
+      setWorkspaceOrder(normalizedOrder);
+      setWorkspaceSnapshots(normalizedSnapshots);
+      setActiveWorkspaceId(nextActiveWorkspaceId);
+      setSplitSlots([...nextActiveSnapshot.splitSlots]);
+      setPaneLayouts(clonePaneLayouts(nextActiveSnapshot.paneLayouts));
+      setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
+      setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
+      setActiveSession(nextActiveSnapshot.activeSessionId);
+      queueMicrotask(() => {
+        isApplyingWorkspaceSnapshotRef.current = false;
+      });
+    } catch {
+      // ignore broken persisted workspace data
+    }
+  }, []);
+
+  const storeUsers = useMemo<UserObject[]>(() => Object.values(entityStore.users), [entityStore.users]);
+  const storeGroups = useMemo<GroupObject[]>(() => Object.values(entityStore.groups), [entityStore.groups]);
+  const storeTags = useMemo<TagObject[]>(() => Object.values(entityStore.tags), [entityStore.tags]);
+  const storeKeys = useMemo<SshKeyObject[]>(() => Object.values(entityStore.keys), [entityStore.keys]);
+  const quickConnectUserOptions = useMemo<string[]>(
+    () => buildQuickConnectUserCandidates(metadataStore.defaultUser, storeUsers.map((entry) => entry.username || entry.name)),
+    [metadataStore.defaultUser, storeUsers],
+  );
+  useEffect(() => {
+    if (!storeSelectedHostForBinding) {
+      return;
+    }
+    const existing = entityStore.hostBindings[storeSelectedHostForBinding];
+    if (existing) {
+      setStoreBindingDraft(existing);
+      return;
+    }
+    const host = hosts.find((entry) => entry.host === storeSelectedHostForBinding);
+    setStoreBindingDraft({
+      userId: undefined,
+      groupIds: [],
+      tagIds: [],
+      keyRefs: [],
+      proxyJump: host?.proxyJump ?? "",
+      legacyUser: host?.user ?? "",
+      legacyTags: metadataStore.hosts[storeSelectedHostForBinding]?.tags ?? [],
+      legacyIdentityFile: host?.identityFile ?? "",
+      legacyProxyJump: host?.proxyJump ?? "",
+      legacyProxyCommand: host?.proxyCommand ?? "",
+    });
+  }, [entityStore.hostBindings, hosts, metadataStore.hosts, storeSelectedHostForBinding]);
+
+  const persistEntityStore = useCallback(async (next: EntityStore) => {
+    setEntityStore(next);
+    await saveStoreObjects(next);
+  }, []);
+
+  const addStoreUser = useCallback(async () => {
+    const username = storeUserDraft.trim();
+    if (!username) {
+      return;
+    }
+    const now = Date.now();
+    const id = `user-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      users: {
+        ...entityStore.users,
+        [id]: { id, name: username, username, createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreUserDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeUserDraft]);
+
+  const addStoreGroup = useCallback(async () => {
+    const name = storeGroupDraft.trim();
+    if (!name) {
+      return;
+    }
+    const now = Date.now();
+    const id = `group-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      groups: {
+        ...entityStore.groups,
+        [id]: { id, name, memberUserIds: [], createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreGroupDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeGroupDraft]);
+
+  const addStoreTag = useCallback(async () => {
+    const name = storeTagDraft.trim();
+    if (!name) {
+      return;
+    }
+    const now = Date.now();
+    const id = `tag-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      tags: {
+        ...entityStore.tags,
+        [id]: { id, name, createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreTagDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeTagDraft]);
+
+  const addStorePathKey = useCallback(async () => {
+    const name = storePathKeyNameDraft.trim();
+    const identityFilePath = storePathKeyPathDraft.trim();
+    if (!name || !identityFilePath) {
+      return;
+    }
+    const now = Date.now();
+    const id = `key-path-${createId()}`;
+    const key: SshKeyObject = {
+      type: "path",
+      id,
+      name,
+      identityFilePath,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next: EntityStore = {
+      ...entityStore,
+      keys: { ...entityStore.keys, [id]: key },
+      updatedAt: now,
+    };
+    setStorePathKeyNameDraft("");
+    setStorePathKeyPathDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storePathKeyNameDraft, storePathKeyPathDraft]);
+
+  const addStoreEncryptedKey = useCallback(async () => {
+    const name = storeEncryptedKeyNameDraft.trim();
+    const privateKeyPem = storeEncryptedPrivateKeyDraft.trim();
+    if (!name || !privateKeyPem) {
+      return;
+    }
+    const created = await createEncryptedKey(
+      name,
+      privateKeyPem,
+      storeEncryptedPublicKeyDraft.trim(),
+      storePassphrase.trim() || undefined,
+    );
+    const next: EntityStore = {
+      ...entityStore,
+      keys: {
+        ...entityStore.keys,
+        [created.id]: created,
+      },
+      updatedAt: Date.now(),
+    };
+    setStoreEncryptedKeyNameDraft("");
+    setStoreEncryptedPrivateKeyDraft("");
+    setStoreEncryptedPublicKeyDraft("");
+    await persistEntityStore(next);
+  }, [
+    entityStore,
+    persistEntityStore,
+    storeEncryptedKeyNameDraft,
+    storeEncryptedPrivateKeyDraft,
+    storeEncryptedPublicKeyDraft,
+    storePassphrase,
+  ]);
+
+  const removeStoreKey = useCallback(
+    async (keyId: string) => {
+      await deleteKeyById(keyId);
+      const nextKeys = { ...entityStore.keys };
+      delete nextKeys[keyId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, binding]) => [
+          alias,
+          { ...binding, keyRefs: binding.keyRefs.filter((entry) => entry.keyId !== keyId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        keys: nextKeys,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const unlockStoreKey = useCallback(
+    async (keyId: string) => {
+      await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+    },
+    [storePassphrase],
+  );
+
+  const saveHostBindingDraft = useCallback(async () => {
+    const hostAlias = storeSelectedHostForBinding.trim();
+    if (!hostAlias) {
+      return;
+    }
+    const nextBindings = {
+      ...entityStore.hostBindings,
+      [hostAlias]: storeBindingDraft,
+    };
+    const next: EntityStore = {
+      ...entityStore,
+      hostBindings: nextBindings,
+      updatedAt: Date.now(),
+    };
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
 
 
   useEffect(() => {
@@ -778,19 +1399,32 @@ export function App() {
         return;
       }
       const sessionId = event.payload.session_id;
-      const hostAlias = sessionsRef.current.find((session) => session.id === sessionId)?.host ?? "";
-      if (hostAlias) {
-        const metadata = metadataStoreRef.current.hosts[hostAlias] ?? null;
+      const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
+      if (session?.kind === "sshQuick" && quickConnectAutoTrustRef.current) {
+        void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
+        return;
+      }
+      const trustHostAlias = session?.kind === "sshSaved" ? session.hostAlias : "";
+      if (trustHostAlias) {
+        const metadata = metadataStoreRef.current.hosts[trustHostAlias] ?? null;
         if (metadata?.trustHostDefault) {
           void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
           return;
         }
       }
+      const promptHostLabel =
+        session?.kind === "sshSaved"
+          ? session.hostAlias
+          : session?.kind === "sshQuick"
+            ? session.label
+            : session?.kind === "local"
+              ? "local-shell"
+              : "unknown";
       setTrustPromptQueue((prev) => {
         if (prev.some((entry) => entry.sessionId === sessionId)) {
           return prev;
         }
-        return [...prev, { sessionId, hostAlias: hostAlias || "unknown" }];
+        return [...prev, { sessionId, hostAlias: promptHostLabel }];
       });
     }).then((fn) => {
       unlisten = fn;
@@ -830,7 +1464,11 @@ export function App() {
   }, [sessionIds]);
 
   useEffect(() => {
-    const assignedSessionIds = new Set(splitSlots.filter((slot): slot is string => Boolean(slot)));
+    const assignedSessionIds = new Set(
+      Object.values(workspaceSnapshots)
+        .flatMap((workspace) => workspace.splitSlots)
+        .filter((slot): slot is string => Boolean(slot)),
+    );
     const orphanSessionIds = sessions
       .map((session) => session.id)
       .filter((sessionId) => !assignedSessionIds.has(sessionId));
@@ -860,6 +1498,18 @@ export function App() {
           setSessions((prev) => prev.filter((session) => session.id !== sessionId));
           setActiveSession((prev) => (prev === sessionId ? "" : prev));
           setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+          setWorkspaceSnapshots((prev) =>
+            Object.fromEntries(
+              Object.entries(prev).map(([workspaceId, snapshot]) => [
+                workspaceId,
+                {
+                  ...snapshot,
+                  splitSlots: removeSessionFromSlots(snapshot.splitSlots, sessionId),
+                  activeSessionId: snapshot.activeSessionId === sessionId ? "" : snapshot.activeSessionId,
+                },
+              ]),
+            ),
+          );
           setBroadcastTargets((prev) => {
             const nextSet = new Set(prev);
             nextSet.delete(sessionId);
@@ -870,7 +1520,7 @@ export function App() {
           orphanClosingSessionIdsRef.current.delete(sessionId);
         });
     });
-  }, [sessions, splitSlots]);
+  }, [sessions, splitSlots, workspaceSnapshots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -903,6 +1553,69 @@ export function App() {
       return paneOrder[0] ?? 0;
     });
   }, [paneOrder]);
+  useEffect(() => {
+    if (isApplyingWorkspaceSnapshotRef.current) {
+      return;
+    }
+    setWorkspaceSnapshots((prev) => {
+      const current = prev[activeWorkspaceId];
+      if (!current) {
+        return prev;
+      }
+      const sameSlots =
+        current.splitSlots.length === splitSlots.length &&
+        current.splitSlots.every((slot, index) => slot === splitSlots[index]);
+      const sameLayouts =
+        current.paneLayouts.length === paneLayouts.length &&
+        current.paneLayouts.every(
+          (entry, index) =>
+            entry.id === paneLayouts[index]?.id &&
+            entry.width === paneLayouts[index]?.width &&
+            entry.height === paneLayouts[index]?.height,
+        );
+      const sameActive = current.activePaneIndex === activePaneIndex && current.activeSessionId === activeSession;
+      const sameTree = JSON.stringify(current.splitTree) === JSON.stringify(splitTree);
+      if (sameSlots && sameLayouts && sameActive && sameTree) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [activeWorkspaceId]: {
+          ...current,
+          splitSlots: [...splitSlots],
+          paneLayouts: clonePaneLayouts(paneLayouts),
+          splitTree: cloneSplitTree(splitTree),
+          activePaneIndex,
+          activeSessionId: activeSession,
+        },
+      };
+    });
+  }, [activePaneIndex, activeSession, activeWorkspaceId, paneLayouts, splitSlots, splitTree]);
+  useEffect(() => {
+    if (autoArrangeMode !== "c") {
+      return;
+    }
+    if (isAutoArrangeApplyingRef.current) {
+      return;
+    }
+    const nextSplitTree = rebalanceSplitTree(splitTree);
+    const nextSplitSlots = compactSplitSlotsByPaneOrder(splitSlots, paneOrder);
+    const splitTreeChanged = nextSplitTree !== splitTree;
+    const splitSlotsChanged = nextSplitSlots !== splitSlots;
+    if (!splitTreeChanged && !splitSlotsChanged) {
+      return;
+    }
+    isAutoArrangeApplyingRef.current = true;
+    if (splitTreeChanged) {
+      setSplitTree(nextSplitTree);
+    }
+    if (splitSlotsChanged) {
+      setSplitSlots(nextSplitSlots);
+    }
+    queueMicrotask(() => {
+      isAutoArrangeApplyingRef.current = false;
+    });
+  }, [autoArrangeMode, paneOrder, paneLayouts, splitSlots, splitTree]);
 
   useEffect(() => {
     if (!contextMenu.visible) {
@@ -914,6 +1627,29 @@ export function App() {
     window.addEventListener("click", hide);
     return () => {
       window.removeEventListener("click", hide);
+    };
+  }, [contextMenu.visible]);
+  useEffect(() => {
+    if (!contextMenu.visible) {
+      return;
+    }
+    const syncSplitModeFromModifier = (event: KeyboardEvent) => {
+      setContextMenu((prev) => {
+        if (!prev.visible) {
+          return prev;
+        }
+        const nextMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
+        if (prev.splitMode === nextMode) {
+          return prev;
+        }
+        return { ...prev, splitMode: nextMode };
+      });
+    };
+    window.addEventListener("keydown", syncSplitModeFromModifier);
+    window.addEventListener("keyup", syncSplitModeFromModifier);
+    return () => {
+      window.removeEventListener("keydown", syncSplitModeFromModifier);
+      window.removeEventListener("keyup", syncSplitModeFromModifier);
     };
   }, [contextMenu.visible]);
 
@@ -943,8 +1679,113 @@ export function App() {
     window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
   }, [terminalFontOffset]);
   useEffect(() => {
+    window.localStorage.setItem(UI_FONT_PRESET_STORAGE_KEY, uiFontPreset);
+  }, [uiFontPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(TERMINAL_FONT_PRESET_STORAGE_KEY, terminalFontPreset);
+  }, [terminalFontPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(QUICK_CONNECT_MODE_STORAGE_KEY, quickConnectMode);
+  }, [quickConnectMode]);
+  useEffect(() => {
+    window.localStorage.setItem(QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY, String(quickConnectAutoTrust));
+  }, [quickConnectAutoTrust]);
+  useEffect(() => {
+    window.localStorage.setItem(SPLIT_RATIO_PRESET_STORAGE_KEY, splitRatioPreset);
+  }, [splitRatioPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(AUTO_ARRANGE_MODE_STORAGE_KEY, autoArrangeMode);
+  }, [autoArrangeMode]);
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_OPEN_MODE_STORAGE_KEY, settingsOpenMode);
+  }, [settingsOpenMode]);
+  useEffect(() => {
     window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, selectedSidebarViewId);
   }, [selectedSidebarViewId]);
+  useEffect(() => {
+    window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
+  }, [layoutMode]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      WORKSPACES_STORAGE_KEY,
+      JSON.stringify({
+        order: workspaceOrder,
+        activeWorkspaceId,
+        snapshots: workspaceSnapshots,
+      }),
+    );
+  }, [activeWorkspaceId, workspaceOrder, workspaceSnapshots]);
+  useEffect(() => {
+    if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
+      return;
+    }
+    const modal = settingsModalRef.current;
+    const width = modal?.offsetWidth ?? 860;
+    const topMargin = 20;
+    const x = Math.max(8, Math.round((window.innerWidth - width) / 2));
+    const y = Math.max(topMargin, Math.round((window.innerHeight - Math.min(820, window.innerHeight - 40)) / 2));
+    setSettingsModalPosition({ x, y });
+  }, [isAppSettingsOpen, settingsModalPosition, settingsOpenMode]);
+  useEffect(() => {
+    if (!isSettingsDragging) {
+      return;
+    }
+    const onPointerMove = (event: PointerEvent) => {
+      const dragOffset = settingsDragOffsetRef.current;
+      const modal = settingsModalRef.current;
+      if (!dragOffset || !modal) {
+        return;
+      }
+      const modalWidth = modal.offsetWidth;
+      const modalHeight = modal.offsetHeight;
+      const nextX = Math.min(
+        Math.max(8, event.clientX - dragOffset.x),
+        Math.max(8, window.innerWidth - modalWidth - 8),
+      );
+      const nextY = Math.min(
+        Math.max(8, event.clientY - dragOffset.y),
+        Math.max(8, window.innerHeight - modalHeight - 8),
+      );
+      setSettingsModalPosition({ x: Math.round(nextX), y: Math.round(nextY) });
+    };
+    const onPointerUp = () => {
+      setIsSettingsDragging(false);
+      settingsDragOffsetRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [isSettingsDragging]);
+  useEffect(() => {
+    if (isAppSettingsOpen) {
+      return;
+    }
+    setIsSettingsDragging(false);
+    settingsDragOffsetRef.current = null;
+  }, [isAppSettingsOpen]);
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_STACKED_MEDIA);
+    const apply = () => {
+      setViewportStacked(mq.matches);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+    };
+  }, []);
+  useEffect(() => {
+    if (!isStackedShell || mobileShellTab !== "hosts") {
+      return;
+    }
+    setIsSidebarVisible(true);
+  }, [isStackedShell, mobileShellTab]);
   useEffect(() => {
     if (!selectedSidebarViewId.startsWith("custom:")) {
       return;
@@ -1078,6 +1919,17 @@ export function App() {
         return "";
       }
       setActiveHost(host.host);
+      setCurrentHost(host);
+      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+      return host.host;
+    });
+  };
+
+  const toggleHostSelection = (host: HostConfig) => {
+    setActiveHost((prev) => {
+      if (prev === host.host) {
+        return "";
+      }
       setCurrentHost(host);
       setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
       return host.host;
@@ -1395,6 +2247,53 @@ export function App() {
     setNewHostDraft(emptyHost());
   };
 
+  const openQuickConnectModal = (paneIndex: number | null = null) => {
+    const defaultUser = metadataStore.defaultUser.trim();
+    setQuickConnectDraft((prev) => ({
+      ...createQuickConnectDraft(defaultUser),
+      identityFile: prev.identityFile,
+      proxyJump: prev.proxyJump,
+      proxyCommand: prev.proxyCommand,
+    }));
+    setQuickConnectCommandInput(defaultUser ? `${defaultUser}@` : "");
+    setQuickConnectWizardStep(1);
+    setIsQuickAddMenuOpen(false);
+    setOpenHostMenuHostAlias("");
+    setPendingQuickConnectPaneIndex(paneIndex);
+    setIsQuickConnectModalOpen(true);
+  };
+
+  const closeQuickConnectModal = () => {
+    setIsQuickConnectModalOpen(false);
+    setQuickConnectDraft(createQuickConnectDraft());
+    setQuickConnectCommandInput("");
+    setQuickConnectWizardStep(1);
+    setPendingQuickConnectPaneIndex(null);
+  };
+
+  const handleSettingsHeaderPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (!isAppSettingsOpen || settingsOpenMode !== "modal") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("button")) {
+        return;
+      }
+      const modal = settingsModalRef.current;
+      if (!modal) {
+        return;
+      }
+      const modalRect = modal.getBoundingClientRect();
+      settingsDragOffsetRef.current = {
+        x: event.clientX - modalRect.left,
+        y: event.clientY - modalRect.top,
+      };
+      setIsSettingsDragging(true);
+    },
+    [isAppSettingsOpen, settingsOpenMode],
+  );
+
   const createHost = async () => {
     setError("");
     try {
@@ -1416,7 +2315,7 @@ export function App() {
     try {
       const started = await startSession(host);
       setSessions((prev) => {
-        return [...prev, { id: started.session_id, host: host.host }];
+        return [...prev, { id: started.session_id, kind: "sshSaved", hostAlias: host.host }];
       });
       setActiveSession(started.session_id);
       setActiveHost(host.host);
@@ -1440,17 +2339,225 @@ export function App() {
     }
   };
 
+  const placeSessionIntoNewOrFreePane = (sessionId: string) => {
+    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
+    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
+    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right");
+    setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
+    setActivePaneIndex(targetPaneIndex);
+    setActiveSession(sessionId);
+  };
+
   const connectToHostInNewPane = async (host: HostConfig): Promise<void> => {
     const startedSessionId = await connectToHost(host);
     if (!startedSessionId) {
       return;
     }
-    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
-    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right");
-    setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, startedSessionId));
-    setActivePaneIndex(targetPaneIndex);
-    setActiveSession(startedSessionId);
+    placeSessionIntoNewOrFreePane(startedSessionId);
+  };
+
+  const connectLocalShellInNewPane = async (): Promise<void> => {
+    setError("");
+    try {
+      const started = await startLocalSession();
+      setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: "Local terminal" }]);
+      placeSessionIntoNewOrFreePane(started.session_id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const connectLocalShellInPane = async (paneIndex: number): Promise<void> => {
+    setError("");
+    try {
+      const started = await startLocalSession();
+      setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: "Local terminal" }]);
+      setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, started.session_id));
+      setActivePaneIndex(paneIndex);
+      setActiveSession(started.session_id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const applyQuickConnectUser = (user: string) => {
+    setQuickConnectDraft((prev) => ({ ...prev, user }));
+  };
+
+  const shiftQuickConnectUserOption = (direction: 1 | -1) => {
+    if (quickConnectUserOptions.length === 0) {
+      return;
+    }
+    const currentUser = quickConnectDraft.user.trim();
+    const currentIndex = quickConnectUserOptions.findIndex((entry) => entry === currentUser);
+    const baseIndex = currentIndex >= 0 ? currentIndex : direction > 0 ? -1 : 0;
+    const nextRaw = baseIndex + direction;
+    const wrapped = (nextRaw + quickConnectUserOptions.length) % quickConnectUserOptions.length;
+    const user = quickConnectUserOptions[wrapped] ?? "";
+    if (!user) {
+      return;
+    }
+    applyQuickConnectUser(user);
+    if (quickConnectMode === "command") {
+      setQuickConnectCommandInput((current) => {
+        const trimmed = current.trim();
+        const atIndex = trimmed.lastIndexOf("@");
+        const hostPart = atIndex >= 0 ? trimmed.slice(atIndex + 1).trim() : trimmed;
+        return hostPart ? `${user}@${hostPart}` : `${user}@`;
+      });
+    }
+  };
+
+  const buildQuickSshRequestFromDraft = (): QuickSshSessionRequest | null => {
+    const defaultUser = metadataStore.defaultUser.trim();
+    let normalizedDraft: QuickConnectDraft = {
+      ...quickConnectDraft,
+      user: quickConnectDraft.user.trim() || defaultUser,
+      hostName: quickConnectDraft.hostName.trim(),
+      identityFile: quickConnectDraft.identityFile.trim(),
+      proxyJump: quickConnectDraft.proxyJump.trim(),
+      proxyCommand: quickConnectDraft.proxyCommand.trim(),
+    };
+    let parsedPort: number | undefined;
+    if (quickConnectMode === "command") {
+      const parsed = parseQuickConnectCommandInput(quickConnectCommandInput);
+      if (parsed.error) {
+        setError(parsed.error);
+        return null;
+      }
+      const nextHostName = parsed.hostName.trim();
+      if (!nextHostName) {
+        setError("HostName is required for quick connect.");
+        return null;
+      }
+      normalizedDraft = {
+        ...normalizedDraft,
+        hostName: nextHostName,
+        user: parsed.user.trim() || normalizedDraft.user,
+      };
+      parsedPort = parsed.port;
+    } else {
+      const parsed = parseHostPortInput(normalizedDraft.hostName);
+      if (parsed.error) {
+        setError(parsed.error);
+        return null;
+      }
+      if (!parsed.hostName.trim()) {
+        setError("HostName is required for quick connect.");
+        return null;
+      }
+      normalizedDraft = {
+        ...normalizedDraft,
+        hostName: parsed.hostName,
+      };
+      parsedPort = parsed.port;
+    }
+    setQuickConnectDraft(normalizedDraft);
+    return {
+      hostName: normalizedDraft.hostName,
+      user: normalizedDraft.user,
+      port: parsedPort,
+      identityFile: normalizedDraft.identityFile,
+      proxyJump: normalizedDraft.proxyJump,
+      proxyCommand: normalizedDraft.proxyCommand,
+    };
+  };
+
+  const proceedQuickConnectWizard = () => {
+    if (quickConnectWizardStep === 1) {
+      const parsed = parseHostPortInput(quickConnectDraft.hostName);
+      if (parsed.error) {
+        setError(parsed.error);
+        return;
+      }
+      if (!parsed.hostName.trim()) {
+        setError("HostName is required for quick connect.");
+        return;
+      }
+      setError("");
+      setQuickConnectDraft((prev) => ({
+        ...prev,
+        hostName: parsed.hostName,
+      }));
+      setQuickConnectWizardStep(2);
+      return;
+    }
+    void connectQuickSshInNewPane();
+  };
+
+  const handleQuickConnectUserInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (quickConnectMode === "wizard") {
+        proceedQuickConnectWizard();
+      } else {
+        void connectQuickSshInNewPane();
+      }
+    }
+  };
+
+  const handleQuickConnectModalKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeQuickConnectModal();
+    }
+  };
+  const handleQuickConnectCommandInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void connectQuickSshInNewPane();
+    }
+  };
+
+  const connectQuickSshInNewPane = async (): Promise<void> => {
+    setError("");
+    const request = buildQuickSshRequestFromDraft();
+    if (!request) {
+      return;
+    }
+    try {
+      const started = await startQuickSshSession(request);
+      const quickLabel = request.user ? `${request.user}@${request.hostName}` : request.hostName;
+      setSessions((prev) => [
+        ...prev,
+        { id: started.session_id, kind: "sshQuick", label: `Quick: ${quickLabel}`, request },
+      ]);
+      const requestedPaneIndex = pendingQuickConnectPaneIndex;
+      const canAttachToRequestedPane =
+        typeof requestedPaneIndex === "number" &&
+        requestedPaneIndex >= 0 &&
+        paneOrder.includes(requestedPaneIndex);
+      if (canAttachToRequestedPane) {
+        setSplitSlots((prev) => assignSessionToPane(prev, requestedPaneIndex, started.session_id));
+        setActivePaneIndex(requestedPaneIndex);
+        setActiveSession(started.session_id);
+      } else {
+        placeSessionIntoNewOrFreePane(started.session_id);
+      }
+      closeQuickConnectModal();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const ensureSessionForHost = async (hostAlias: string): Promise<string | null> => {
@@ -1468,6 +2575,30 @@ export function App() {
       return null;
     }
     return connectToHost(host);
+  };
+
+  const spawnSessionFromExistingSession = async (sourceSession: SessionTab): Promise<string | null> => {
+    if (sourceSession.kind === "sshSaved") {
+      return spawnSessionFromHostAlias(sourceSession.hostAlias);
+    }
+    if (sourceSession.kind === "local") {
+      try {
+        const started = await startLocalSession();
+        setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: sourceSession.label }]);
+        return started.session_id;
+      } catch (error) {
+        setError(String(error));
+        return null;
+      }
+    }
+    try {
+      const started = await startQuickSshSession(sourceSession.request);
+      setSessions((prev) => [...prev, { ...sourceSession, id: started.session_id }]);
+      return started.session_id;
+    } catch (error) {
+      setError(String(error));
+      return null;
+    }
   };
 
   const setDragPayload = (event: ReactDragEvent, payload: DragPayload) => {
@@ -1573,7 +2704,7 @@ export function App() {
       if (!sourceSession) {
         return;
       }
-      const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host);
+      const spawnedSessionId = await spawnSessionFromExistingSession(sourceSession);
       if (!spawnedSessionId) {
         return;
       }
@@ -1581,7 +2712,8 @@ export function App() {
       return;
     }
     if (sessionDropMode === "move") {
-      const existingSession = sessions.find((session) => session.host === payload.hostAlias) ?? null;
+      const existingSession =
+        sessions.find((session) => session.kind === "sshSaved" && session.hostAlias === payload.hostAlias) ?? null;
       if (existingSession) {
         placeSessionOnPane(existingSession.id);
         return;
@@ -1636,11 +2768,83 @@ export function App() {
     window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
   }, []);
 
+  const handleMobilePagerScroll = useCallback(() => {
+    if (skipMobilePagerScrollRef.current) {
+      return;
+    }
+    const el = mobilePagerRef.current;
+    if (!el || !isStackedShell || mobileShellTab !== "terminal") {
+      return;
+    }
+    const w = el.clientWidth;
+    if (w < 8) {
+      return;
+    }
+    const idx = Math.round(el.scrollLeft / w);
+    const clamped = Math.max(0, Math.min(paneOrder.length - 1, idx));
+    const pi = paneOrder[clamped];
+    if (pi === undefined || pi === activePaneIndex) {
+      return;
+    }
+    setActivePaneIndex(pi);
+    const sid = splitSlots[pi];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder, splitSlots, requestTerminalFocus]);
+
+  const nudgeMobilePager = useCallback((delta: number) => {
+    const el = mobilePagerRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollBy({ left: delta * el.clientWidth, behavior: "smooth" });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isStackedShell || mobileShellTab !== "terminal") {
+      return;
+    }
+    const el = mobilePagerRef.current;
+    if (!el) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    if (idx < 0) {
+      return;
+    }
+    const w = el.clientWidth;
+    if (w < 8) {
+      return;
+    }
+    const target = idx * w;
+    if (Math.abs(el.scrollLeft - target) < 3) {
+      return;
+    }
+    skipMobilePagerScrollRef.current = true;
+    el.scrollTo({ left: target, behavior: "auto" });
+    requestAnimationFrame(() => {
+      skipMobilePagerScrollRef.current = false;
+    });
+  }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder]);
+
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
     setSessions((prev) => prev.filter((session) => session.id !== sessionId));
     setActiveSession((prev) => (prev === sessionId ? "" : prev));
     setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+    setWorkspaceSnapshots((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([workspaceId, snapshot]) => [
+          workspaceId,
+          {
+            ...snapshot,
+            splitSlots: removeSessionFromSlots(snapshot.splitSlots, sessionId),
+            activeSessionId: snapshot.activeSessionId === sessionId ? "" : snapshot.activeSessionId,
+          },
+        ]),
+      ),
+    );
     setBroadcastTargets((prev) => {
       const nextSet = new Set(prev);
       nextSet.delete(sessionId);
@@ -1668,6 +2872,18 @@ export function App() {
     setSessions([]);
     setActiveSession("");
     setSplitSlots((prev) => prev.map(() => null));
+    setWorkspaceSnapshots((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([workspaceId, snapshot]) => [
+          workspaceId,
+          {
+            ...snapshot,
+            splitSlots: snapshot.splitSlots.map(() => null),
+            activeSessionId: "",
+          },
+        ]),
+      ),
+    );
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
     if (withLayoutReset) {
@@ -1694,8 +2910,9 @@ export function App() {
       return;
     }
     try {
-      if (saveTrustHostAsDefault && activeTrustPrompt.hostAlias !== "unknown") {
-        await upsertHostMetadata(activeTrustPrompt.hostAlias, (current) => ({
+      const promptSession = sessionsRef.current.find((session) => session.id === activeTrustPrompt.sessionId) ?? null;
+      if (saveTrustHostAsDefault && promptSession?.kind === "sshSaved") {
+        await upsertHostMetadata(promptSession.hostAlias, (current) => ({
           ...current,
           trustHostDefault: true,
         }));
@@ -1705,6 +2922,25 @@ export function App() {
     } catch (e) {
       setError(String(e));
     }
+  };
+  const handleTrustPromptKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!activeTrustPrompt) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissTrustPrompt(activeTrustPrompt.sessionId);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== "NumpadEnter") {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button")) {
+      return;
+    }
+    event.preventDefault();
+    void acceptTrustPrompt();
   };
   const closePaneAndSession = async (paneIndex: number) => {
     if (paneOrder.length <= 1 || !paneOrder.includes(paneIndex)) {
@@ -1770,10 +3006,152 @@ export function App() {
       setBroadcastTargets(new Set());
     }
   };
+  const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    isApplyingWorkspaceSnapshotRef.current = true;
+    setSplitSlots([...snapshot.splitSlots]);
+    setPaneLayouts(clonePaneLayouts(snapshot.paneLayouts));
+    setSplitTree(cloneSplitTree(snapshot.splitTree));
+    setActivePaneIndex(snapshot.activePaneIndex);
+    setActiveSession(snapshot.activeSessionId);
+    queueMicrotask(() => {
+      isApplyingWorkspaceSnapshotRef.current = false;
+    });
+  }, []);
+  const switchWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === activeWorkspaceId) {
+        return;
+      }
+      const currentSnapshot: WorkspaceSnapshot = {
+        id: activeWorkspaceId,
+        name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex,
+        activeSessionId: activeSession,
+      };
+      const nextSnapshot = workspaceSnapshots[workspaceId];
+      if (!nextSnapshot) {
+        return;
+      }
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [activeWorkspaceId]: currentSnapshot,
+      }));
+      setActiveWorkspaceId(workspaceId);
+      applyWorkspaceSnapshot(nextSnapshot);
+    },
+    [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree, workspaceSnapshots],
+  );
+  const createWorkspace = useCallback(() => {
+    const workspaceId = `workspace-${createId()}`;
+    const workspaceName = `Workspace ${workspaceOrder.length + 1}`;
+    const nextSnapshot = createEmptyWorkspaceSnapshot(workspaceId, workspaceName);
+    setWorkspaceSnapshots((prev) => ({
+      ...prev,
+      [workspaceId]: nextSnapshot,
+      [activeWorkspaceId]: {
+        ...(prev[activeWorkspaceId] ?? createEmptyWorkspaceSnapshot(activeWorkspaceId, "Main")),
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex,
+        activeSessionId: activeSession,
+      },
+    }));
+    setWorkspaceOrder((prev) => [...prev, workspaceId]);
+    setActiveWorkspaceId(workspaceId);
+    applyWorkspaceSnapshot(nextSnapshot);
+  }, [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree, workspaceOrder.length]);
+  const removeWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceOrder.length <= 1) {
+        setError("At least one workspace must remain.");
+        return;
+      }
+      if (!workspaceSnapshots[workspaceId]) {
+        return;
+      }
+      const nextOrder = workspaceOrder.filter((entry) => entry !== workspaceId);
+      const fallbackWorkspaceId = nextOrder[0] ?? DEFAULT_WORKSPACE_ID;
+      const nextActiveWorkspaceId = workspaceId === activeWorkspaceId ? fallbackWorkspaceId : activeWorkspaceId;
+      setWorkspaceOrder(nextOrder);
+      setWorkspaceSnapshots((prev) => {
+        const next = { ...prev };
+        delete next[workspaceId];
+        return next;
+      });
+      if (nextActiveWorkspaceId !== activeWorkspaceId) {
+        const nextSnapshot = workspaceSnapshots[nextActiveWorkspaceId];
+        if (nextSnapshot) {
+          setActiveWorkspaceId(nextActiveWorkspaceId);
+          applyWorkspaceSnapshot(nextSnapshot);
+        }
+      }
+    },
+    [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
+  );
+  const sendSessionToWorkspace = useCallback(
+    (sessionId: string, targetWorkspaceId: string) => {
+      if (!sessionId || !workspaceSnapshots[targetWorkspaceId]) {
+        return;
+      }
+      if (targetWorkspaceId === activeWorkspaceId) {
+        return;
+      }
+      const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
+      const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
+      const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
+      const normalizedTargetPaneIndex = typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : (targetPaneOrder[0] ?? 0);
+      const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, normalizedTargetPaneIndex, sessionId);
+      const nextTargetSnapshot: WorkspaceSnapshot = {
+        ...cloneWorkspaceSnapshot(targetSnapshot),
+        splitSlots: nextTargetSlots,
+        activePaneIndex: normalizedTargetPaneIndex,
+        activeSessionId: sessionId,
+      };
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [targetWorkspaceId]: nextTargetSnapshot,
+      }));
+      setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+      setBroadcastTargets((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      if (activeSession === sessionId) {
+        setActiveSession("");
+      }
+    },
+    [activeSession, activeWorkspaceId, workspaceSnapshots],
+  );
 
-  const handleContextAction = async (actionId: ContextActionId, paneIndex: number) => {
+  const handleContextAction = async (
+    actionId: ContextActionId,
+    paneIndex: number,
+    options?: {
+      preferredSplitMode?: SplitMode;
+      eventLike?: {
+        type?: string;
+        key?: string;
+        code?: string;
+        altKey?: boolean;
+        getModifierState?: (...args: any[]) => boolean;
+      } | null;
+    },
+  ) => {
     setActivePaneIndex(paneIndex);
+    const preferredSplitMode = options?.preferredSplitMode ?? "duplicate";
+    const splitMode: SplitMode = shouldSplitAsEmpty(options?.eventLike) ? "empty" : preferredSplitMode;
     switch (actionId) {
+      case "pane.newLocal":
+        await connectLocalShellInPane(paneIndex);
+        break;
+      case "pane.quickConnect":
+        openQuickConnectModal(paneIndex);
+        break;
       case "pane.clear":
         await closeSessionInPane(paneIndex);
         break;
@@ -1781,16 +3159,16 @@ export function App() {
         await closePaneAndSession(paneIndex);
         break;
       case "layout.split.left":
-        splitFocusedPane("left", paneIndex);
+        splitFocusedPane("left", paneIndex, splitMode);
         break;
       case "layout.split.right":
-        splitFocusedPane("right", paneIndex);
+        splitFocusedPane("right", paneIndex, splitMode);
         break;
       case "layout.split.top":
-        splitFocusedPane("top", paneIndex);
+        splitFocusedPane("top", paneIndex, splitMode);
         break;
       case "layout.split.bottom":
-        splitFocusedPane("bottom", paneIndex);
+        splitFocusedPane("bottom", paneIndex, splitMode);
         break;
       case "broadcast.clearTargets":
         setBroadcastTargets(new Set());
@@ -1856,8 +3234,13 @@ export function App() {
     }, SIDEBAR_AUTO_HIDE_DELAY_MS);
   };
 
-  const splitFocusedPane = (direction: "left" | "right" | "top" | "bottom", paneIndex = activePaneIndex) => {
+  const splitFocusedPane = (
+    direction: "left" | "right" | "top" | "bottom",
+    paneIndex = activePaneIndex,
+    splitMode: SplitMode = "duplicate",
+  ) => {
     const targetPane = paneOrder.includes(paneIndex) ? paneIndex : (paneOrder[0] ?? 0);
+    const sourceSessionId = splitSlots[targetPane] ?? null;
     const newPaneIndex = nextPaneIndexRef.current;
     nextPaneIndexRef.current += 1;
     const splitId = `split-${nextSplitIdRef.current}`;
@@ -1884,7 +3267,7 @@ export function App() {
             id: splitId,
             type: "split",
             axis: "horizontal",
-            ratio: DEFAULT_SPLIT_RATIO,
+            ratio: splitRatioDefaultValue,
             first: insertedLeaf,
             second: leaf,
           };
@@ -1894,7 +3277,7 @@ export function App() {
             id: splitId,
             type: "split",
             axis: "horizontal",
-            ratio: DEFAULT_SPLIT_RATIO,
+            ratio: splitRatioDefaultValue,
             first: leaf,
             second: insertedLeaf,
           };
@@ -1904,7 +3287,7 @@ export function App() {
             id: splitId,
             type: "split",
             axis: "vertical",
-            ratio: DEFAULT_SPLIT_RATIO,
+            ratio: splitRatioDefaultValue,
             first: insertedLeaf,
             second: leaf,
           };
@@ -1913,13 +3296,25 @@ export function App() {
           id: splitId,
           type: "split",
           axis: "vertical",
-          ratio: DEFAULT_SPLIT_RATIO,
+          ratio: splitRatioDefaultValue,
           first: leaf,
           second: insertedLeaf,
         };
       }),
     );
     setActivePaneIndex(newPaneIndex);
+    if (splitMode === "duplicate" && sourceSessionId) {
+      const sourceSession = sessions.find((session) => session.id === sourceSessionId) ?? null;
+      if (sourceSession) {
+        void spawnSessionFromExistingSession(sourceSession).then((spawnedSessionId) => {
+          if (!spawnedSessionId) {
+            return;
+          }
+          setSplitSlots((prev) => assignSessionToPane(prev, newPaneIndex, spawnedSessionId));
+          setActiveSession(spawnedSessionId);
+        });
+      }
+    }
     return newPaneIndex;
   };
 
@@ -1953,7 +3348,8 @@ export function App() {
       panes: paneOrder.map((paneIndex) => {
         const pane = paneLayouts[paneIndex] ?? createPaneLayoutItem();
         const sessionId = splitSlots[paneIndex] ?? null;
-        const hostAlias = sessionId ? sessions.find((session) => session.id === sessionId)?.host ?? null : null;
+        const paneSession = sessionId ? sessionById.get(sessionId) ?? null : null;
+        const hostAlias = paneSession?.kind === "sshSaved" ? paneSession.hostAlias : null;
         return {
           width: pane.width,
           height: pane.height,
@@ -1989,7 +3385,8 @@ export function App() {
       let sessionId: string | null = null;
       if (selectedLayoutProfile.withHosts && pane.hostAlias) {
         const existingSession = sessions.find(
-          (session) => session.host === pane.hostAlias && !consumedSessionIds.has(session.id),
+          (session) =>
+            session.kind === "sshSaved" && session.hostAlias === pane.hostAlias && !consumedSessionIds.has(session.id),
         );
         if (existingSession) {
           sessionId = existingSession.id;
@@ -2053,8 +3450,8 @@ export function App() {
       const paneIndex = node.paneIndex;
       const paneSessionId = splitSlots[paneIndex] ?? null;
       const paneIdentity = resolvePaneIdentity(paneIndex);
-      const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
-      const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
+      const isHoverTarget = highlightedHostPaneIndices.has(paneIndex);
+      const isHoverDimmed = hasHighlightedHostTargets && !isHoverTarget;
       const isDropOverlayVisible =
         (draggingKind === "machine" || draggingKind === "session") &&
         dragOverPaneIndex === paneIndex &&
@@ -2075,9 +3472,7 @@ export function App() {
             dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
           } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
             isHoverDimmed ? "is-host-hover-dimmed" : ""
-          } ${
-            hoveredHostAlias ? "is-host-hovering" : ""
-          }`}
+          } ${highlightedHostAlias ? "is-host-hovering" : ""}`}
           draggable={false}
           onClick={() => {
             setActivePaneIndex(paneIndex);
@@ -2086,7 +3481,7 @@ export function App() {
               requestTerminalFocus(paneSessionId);
             }
           }}
-          onDragOver={(event) => {
+          onDragOverCapture={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = resolveDropEffect(event);
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -2094,7 +3489,7 @@ export function App() {
             setActiveDropZonePaneIndex(paneIndex);
             setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
           }}
-          onDragEnter={(event) => {
+          onDragEnterCapture={(event) => {
             event.preventDefault();
             setDragOverPaneIndex(paneIndex);
             const bounds = event.currentTarget.getBoundingClientRect();
@@ -2109,16 +3504,20 @@ export function App() {
             setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
             setActiveDropZone(null);
           }}
-          onDrop={(event) => {
+          onDropCapture={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
             void handlePaneDrop(event, paneIndex);
           }}
           onContextMenu={(event) => {
             event.preventDefault();
+            const initialSplitMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
             setContextMenu({
               visible: true,
               x: event.clientX,
               y: event.clientY,
               paneIndex,
+              splitMode: initialSplitMode,
             });
           }}
         >
@@ -2145,6 +3544,22 @@ export function App() {
             className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${
               isToolbarExpanded ? "is-toolbar-expanded" : ""
             }`}
+            draggable={Boolean(paneSessionId)}
+            onDragStart={(event) => {
+              if (!paneSessionId) {
+                return;
+              }
+              setDragPayload(event, { type: "session", sessionId: paneSessionId });
+              setDraggingKind("session");
+              missingDragPayloadLoggedRef.current = false;
+            }}
+            onDragEnd={() => {
+              setDraggingKind(null);
+              setDragOverPaneIndex(null);
+              setActiveDropZonePaneIndex(null);
+              setActiveDropZone(null);
+              missingDragPayloadLoggedRef.current = false;
+            }}
           >
             <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
               <span className="split-pane-label-title" title={paneIdentity}>
@@ -2182,7 +3597,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.left", paneIndex);
+                  void handleContextAction("layout.split.left", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-vertical split-icon-vertical-normal" aria-hidden="true" />
@@ -2194,7 +3609,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.right", paneIndex);
+                  void handleContextAction("layout.split.right", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-vertical split-icon-vertical-inverse" aria-hidden="true" />
@@ -2206,7 +3621,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.top", paneIndex);
+                  void handleContextAction("layout.split.top", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-normal" aria-hidden="true" />
@@ -2218,7 +3633,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.bottom", paneIndex);
+                  void handleContextAction("layout.split.bottom", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
@@ -2319,11 +3734,29 @@ export function App() {
             </div>
           </div>
           {paneSessionId ? (
-            <TerminalPane sessionId={paneSessionId} onUserInput={handleTerminalInput} fontSize={terminalFontSize} />
+            <TerminalPane
+              sessionId={paneSessionId}
+              onUserInput={handleTerminalInput}
+              fontSize={terminalFontSize}
+              fontFamily={terminalFontFamily}
+            />
           ) : (
             <div className="empty-pane split-empty-pane">
-              <img src={logoTransparent} alt="NoSuckShell drop hint" className="split-empty-pane-image" />
-              <p>Come on, drop that button right here - I'm waiting</p>
+              <p className="split-empty-pane-copy">One click and we both get what we want</p>
+              <button
+                type="button"
+                className="split-empty-pane-logo-btn"
+                title="Open local terminal in this pane"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void connectLocalShellInPane(paneIndex);
+                }}
+              >
+                <img src={logoTransparent} alt="Open local terminal in this pane" className="split-empty-pane-image" />
+              </button>
+              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
+                Or drop that host right here - I&apos;m waiting
+              </p>
               {draggingKind === "session" && (
                 <span className={`split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`}>
                   <strong>Mode:</strong> {getSessionModifierModeText()}
@@ -2365,50 +3798,73 @@ export function App() {
 
   const renderHostRow = (row: HostRowViewModel, key: string) => (
     <div key={key} className="host-row">
-      <button
-        className={`host-favorite-btn host-favorite-btn-inline ${row.metadata.favorite ? "is-active" : ""}`}
-        aria-label={`Toggle favorite for ${row.host.host}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          void toggleFavoriteForHost(row.host.host);
-        }}
+      <div
+        className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
+          activeHost === row.host.host ? "is-active" : ""
+        } ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`}
       >
-        ★
-      </button>
-      <button
-        className={`host-item ${row.connected ? "is-connected" : "is-disconnected"}`}
-        onMouseEnter={() => setHoveredHostAlias(row.host.host)}
-        onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
-        onDoubleClick={() => {
-          void connectToHostInNewPane(row.host);
-        }}
-        draggable
-        onDragStart={(event) => {
-          setDragPayload(event, { type: "machine", hostAlias: row.host.host });
-          setDraggingKind("machine");
-          missingDragPayloadLoggedRef.current = false;
-        }}
-        onDragEnd={() => {
-          setDraggingKind(null);
-          setDragOverPaneIndex(null);
-          missingDragPayloadLoggedRef.current = false;
-        }}
-      >
-        <span className="host-item-main">{row.host.host}</span>
-        <span className="host-user-badge">{row.displayUser}</span>
-      </button>
-      <div className="host-row-actions">
         <button
-          className={`host-gear-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
-          aria-label={`Open host settings for ${row.host.host}`}
-          title={`Open host settings for ${row.host.host}`}
+          className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
+            row.metadata.favorite ? "is-active" : ""
+          }`}
+          aria-label={`Toggle favorite for ${row.host.host}`}
           onClick={(event) => {
             event.stopPropagation();
-            toggleHostMenu(row.host);
+            void toggleFavoriteForHost(row.host.host);
           }}
         >
-          ⋯
+          ★
         </button>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`SSH host ${row.host.host}`}
+          className="host-item"
+          onClick={() => {
+            toggleHostSelection(row.host);
+          }}
+          onMouseEnter={() => setHoveredHostAlias(row.host.host)}
+          onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
+          onDoubleClick={() => {
+            void connectToHostInNewPane(row.host);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (activeHost !== row.host.host) {
+                setActiveHost(row.host.host);
+              }
+              void connectToHostInNewPane(row.host);
+            }
+          }}
+          draggable
+          onDragStart={(event) => {
+            setDragPayload(event, { type: "machine", hostAlias: row.host.host });
+            setDraggingKind("machine");
+            missingDragPayloadLoggedRef.current = false;
+          }}
+          onDragEnd={() => {
+            setDraggingKind(null);
+            setDragOverPaneIndex(null);
+            missingDragPayloadLoggedRef.current = false;
+          }}
+        >
+          <span className="host-item-main">{row.host.host}</span>
+          <span className="host-user-badge">{row.displayUser}</span>
+        </div>
+        <div className="host-row-actions">
+          <button
+            className={`host-settings-inline-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
+            aria-label={`Open host settings for ${row.host.host}`}
+            title={`Open host settings for ${row.host.host}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleHostMenu(row.host);
+            }}
+          >
+            ⋮
+          </button>
+        </div>
       </div>
       <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
         {openHostMenuHostAlias === row.host.host && (
@@ -2487,15 +3943,28 @@ export function App() {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
   } as CSSProperties;
+  const contextMenuPaneSessionId =
+    contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
+  const workspaceSendTargets =
+    contextMenuPaneSessionId && workspaceTabs.length > 1
+      ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
+      : [];
 
   return (
     <main
       className={`app-shell ${isSidebarResizing ? "is-resizing" : ""} ${
         isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"
-      } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`}
+      } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}${
+        layoutMode === "wide" ? " app-shell--layout-wide" : ""
+      }${layoutMode === "compact" ? " app-shell--layout-compact" : ""}${
+        isStackedShell ? " app-shell--stacked-mobile" : ""
+      }${isStackedShell && mobileShellTab === "hosts" ? " app-shell--mobile-panel-hosts" : ""}${
+        isStackedShell && mobileShellTab === "terminal" ? " app-shell--mobile-panel-terminal" : ""
+      }`}
       data-density={densityProfile}
       data-list-tone={listTonePreset}
       data-frame-mode={frameModePreset}
+      data-ui-font={uiFontPreset}
       style={appShellStyle}
     >
       <button
@@ -2569,6 +4038,12 @@ export function App() {
               </button>
               {isQuickAddMenuOpen && (
                 <div className="quick-add-menu" role="menu">
+                  <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane()}>
+                    New local terminal
+                  </button>
+                  <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
+                    Quick connect terminal
+                  </button>
                   <button className="quick-add-menu-item" onClick={openAddHostModal}>
                     Add host
                   </button>
@@ -2690,6 +4165,44 @@ export function App() {
       />
 
       <section className="right-dock panel">
+        <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
+          {workspaceTabs.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              role="tab"
+              aria-selected={workspace.id === activeWorkspaceId}
+              className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
+              onClick={() => switchWorkspace(workspace.id)}
+              onDragOver={(event) => {
+                const payload = parseDragPayload(event);
+                if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                  return;
+                }
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                const payload = parseDragPayload(event);
+                if (!payload || payload.type !== "session" || workspace.id === activeWorkspaceId) {
+                  return;
+                }
+                event.preventDefault();
+                sendSessionToWorkspace(payload.sessionId, workspace.id);
+              }}
+            >
+              {workspace.name}
+            </button>
+          ))}
+          <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
+            + Workspace
+          </button>
+          {workspaceTabs.length > 1 && (
+            <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
+              Remove current
+            </button>
+          )}
+        </div>
         <div className="sessions-workspace">
           <div className="sessions-zone">
             {draggingKind === "machine" && (
@@ -2703,9 +4216,53 @@ export function App() {
 
             <div className="session-pane-canvas">
               <div
-                className={`terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`}
+                className={`terminal-grid ${splitResizeState ? `is-pane-resizing is-pane-resizing-${splitResizeState.axis}` : ""}${
+                  isStackedShell && mobileShellTab === "terminal" ? " is-mobile-terminal-pager" : ""
+                }`}
               >
-                {renderSplitNode(splitTree)}
+                {isStackedShell && mobileShellTab === "terminal" ? (
+                  <div className="mobile-terminal-pager">
+                    {paneOrder.length > 1 ? (
+                      <div className="mobile-terminal-pager-controls" role="toolbar" aria-label="Terminal pager">
+                        <button
+                          type="button"
+                          className="btn mobile-terminal-pager-nav"
+                          onClick={() => nudgeMobilePager(-1)}
+                          aria-label="Previous terminal"
+                        >
+                          ‹
+                        </button>
+                        <span className="mobile-terminal-pager-status" aria-live="polite">
+                          {(() => {
+                            const pos = paneOrder.indexOf(activePaneIndex);
+                            return `${pos >= 0 ? pos + 1 : 1} / ${paneOrder.length}`;
+                          })()}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn mobile-terminal-pager-nav"
+                          onClick={() => nudgeMobilePager(1)}
+                          aria-label="Next terminal"
+                        >
+                          ›
+                        </button>
+                      </div>
+                    ) : null}
+                    <div
+                      ref={mobilePagerRef}
+                      className="mobile-terminal-pager-viewport"
+                      onScroll={handleMobilePagerScroll}
+                    >
+                      {paneOrder.map((paneIndex) => (
+                        <div key={paneIndex} className="mobile-terminal-slide">
+                          {renderSplitNode(createLeafNode(paneIndex))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  renderSplitNode(splitTree)
+                )}
               </div>
             </div>
             <div className="sessions-footer" role="status">
@@ -2865,13 +4422,48 @@ export function App() {
         </div>
       </section>
       {isAppSettingsOpen && (
-        <div className="app-settings-overlay" onClick={() => setIsAppSettingsOpen(false)}>
-          <section className="app-settings-modal panel" onClick={(event) => event.stopPropagation()}>
-            <header className="panel-header">
+        <div
+          className={`app-settings-overlay ${settingsOpenMode === "docked" ? "is-docked" : ""}`}
+          onClick={settingsOpenMode === "modal" ? () => setIsAppSettingsOpen(false) : undefined}
+        >
+          <section
+            ref={(node) => {
+              settingsModalRef.current = node;
+            }}
+            className={`app-settings-modal panel ${settingsOpenMode === "docked" ? "app-settings-modal-docked" : ""}${
+              isSettingsDragging ? " is-dragging" : ""
+            }`}
+            style={
+              settingsOpenMode === "modal" && settingsModalPosition
+                ? ({ left: `${settingsModalPosition.x}px`, top: `${settingsModalPosition.y}px` } as CSSProperties)
+                : undefined
+            }
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header
+              className={`panel-header app-settings-header ${settingsOpenMode === "modal" ? "is-draggable" : ""}`}
+              onPointerDown={handleSettingsHeaderPointerDown}
+            >
               <h2>App settings</h2>
-              <button className="btn" onClick={() => setIsAppSettingsOpen(false)}>
-                Close
-              </button>
+              <div className="app-settings-header-actions">
+                <div className="app-settings-mode-switch" role="group" aria-label="Settings display mode">
+                  <button
+                    className={`btn ${settingsOpenMode === "modal" ? "btn-primary" : ""}`}
+                    onClick={() => setSettingsOpenMode("modal")}
+                  >
+                    Window
+                  </button>
+                  <button
+                    className={`btn ${settingsOpenMode === "docked" ? "btn-primary" : ""}`}
+                    onClick={() => setSettingsOpenMode("docked")}
+                  >
+                    Docked
+                  </button>
+                </div>
+                <button className="btn" onClick={() => setIsAppSettingsOpen(false)}>
+                  Close
+                </button>
+              </div>
             </header>
             <div className="app-settings-tabs">
               {appSettingsTabs.map((tab) => (
@@ -2885,92 +4477,218 @@ export function App() {
               ))}
             </div>
             <div className="app-settings-content">
-              {activeAppSettingsTab === "general" && (
-                <div className="host-form-grid">
-                  <label className="field field-span-2">
-                    <span className="field-label">Default login user</span>
-                    <input
-                      className="input"
-                      value={metadataStore.defaultUser}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
-                      }}
-                      onBlur={(event) => {
-                        void applyDefaultUser(event.target.value).catch((e: unknown) => setError(String(e)));
-                      }}
-                      placeholder="ubuntu"
-                    />
-                    <span className="field-help">Used when a host does not define a user.</span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Density profile</span>
-                    <select
-                      className="input density-profile-select"
-                      value={densityProfile}
-                      onChange={(event) => setDensityProfile(event.target.value as DensityProfile)}
-                    >
-                      <option value="aggressive">Aggressive compact</option>
-                      <option value="balanced">Balanced compact</option>
-                      <option value="safe">Safe compact</option>
-                    </select>
-                    <span className="field-help">Controls spacing and font density across the entire app.</span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Terminal font offset</span>
-                    <input
-                      className="input"
-                      type="number"
-                      value={terminalFontOffset}
-                      min={TERMINAL_FONT_OFFSET_MIN}
-                      max={TERMINAL_FONT_OFFSET_MAX}
-                      onChange={(event) => {
-                        const parsed = Number(event.target.value);
-                        if (!Number.isFinite(parsed)) {
-                          return;
-                        }
-                        setTerminalFontOffset(
-                          Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
-                        );
-                      }}
-                    />
-                    <span className="field-help">
-                      Final terminal size: {terminalFontSize}px (profile base + offset, saved separately).
-                    </span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">List tone intensity</span>
-                    <select
-                      className="input density-profile-select"
-                      value={listTonePreset}
-                      onChange={(event) => setListTonePreset(event.target.value as ListTonePreset)}
-                    >
-                      <option value="subtle">Subtle</option>
-                      <option value="strong">Strong</option>
-                    </select>
-                    <span className="field-help">
-                      Controls color intensity for hosts, sessions, chips and context pills.
-                    </span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Frame mode</span>
-                    <select
-                      className="input density-profile-select"
-                      value={frameModePreset}
-                      onChange={(event) => setFrameModePreset(event.target.value as FrameModePreset)}
-                    >
-                      <option value="cleaner">Cleaner (lighter hover frames)</option>
-                      <option value="balanced">Balanced</option>
-                      <option value="clearer">Clearer (stronger focus/drag frames)</option>
-                    </select>
-                    <span className="field-help">
-                      Controls how strongly frames appear in hover, focus and drag states.
-                    </span>
-                  </label>
+              {activeAppSettingsTab === "appearance" && (
+                <div className="settings-stack">
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>Visual style</h3>
+                      <p className="muted-copy">Tune typography, density and contrast for your workspace.</p>
+                    </header>
+                    <div className="host-form-grid">
+                      <label className="field">
+                        <span className="field-label">Density profile</span>
+                        <select
+                          className="input density-profile-select"
+                          value={densityProfile}
+                          onChange={(event) => setDensityProfile(event.target.value as DensityProfile)}
+                        >
+                          <option value="aggressive">Aggressive compact</option>
+                          <option value="balanced">Balanced compact</option>
+                          <option value="safe">Safe compact</option>
+                        </select>
+                        <span className="field-help">Controls spacing and font density across the app.</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">GUI font</span>
+                        <select
+                          className="input density-profile-select"
+                          value={uiFontPreset}
+                          onChange={(event) => setUiFontPreset(event.target.value as UiFontPreset)}
+                        >
+                          <option value="inter">Inter (balanced, neutral)</option>
+                          <option value="manrope">Manrope (modern, tighter)</option>
+                          <option value="ibm-plex-sans">IBM Plex Sans (technical, clear)</option>
+                        </select>
+                        <span className="field-help">Sets typography for labels, forms and controls.</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Terminal font preset</span>
+                        <select
+                          className="input density-profile-select"
+                          value={terminalFontPreset}
+                          onChange={(event) => setTerminalFontPreset(event.target.value as TerminalFontPreset)}
+                        >
+                          <option value="jetbrains-mono">JetBrains Mono</option>
+                          <option value="ibm-plex-mono">IBM Plex Mono</option>
+                          <option value="source-code-pro">Source Code Pro</option>
+                        </select>
+                        <span className="field-help">Nerd font fallbacks remain active for symbols.</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Terminal font offset</span>
+                        <input
+                          className="input"
+                          type="number"
+                          value={terminalFontOffset}
+                          min={TERMINAL_FONT_OFFSET_MIN}
+                          max={TERMINAL_FONT_OFFSET_MAX}
+                          onChange={(event) => {
+                            const parsed = Number(event.target.value);
+                            if (!Number.isFinite(parsed)) {
+                              return;
+                            }
+                            setTerminalFontOffset(
+                              Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
+                            );
+                          }}
+                        />
+                        <span className="field-help">Current terminal size: {terminalFontSize}px.</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">List tone intensity</span>
+                        <select
+                          className="input density-profile-select"
+                          value={listTonePreset}
+                          onChange={(event) => setListTonePreset(event.target.value as ListTonePreset)}
+                        >
+                          <option value="subtle">Subtle</option>
+                          <option value="strong">Strong</option>
+                        </select>
+                        <span className="field-help">Controls host/session/chip color intensity.</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Frame mode</span>
+                        <select
+                          className="input density-profile-select"
+                          value={frameModePreset}
+                          onChange={(event) => setFrameModePreset(event.target.value as FrameModePreset)}
+                        >
+                          <option value="cleaner">Cleaner</option>
+                          <option value="balanced">Balanced</option>
+                          <option value="clearer">Clearer</option>
+                        </select>
+                        <span className="field-help">Hover/focus frame strength.</span>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+              )}
+              {activeAppSettingsTab === "layout" && (
+                <div className="settings-stack">
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>Window behavior</h3>
+                      <p className="muted-copy">Define how hosts and terminals are arranged across screen sizes.</p>
+                    </header>
+                    <div className="host-form-grid">
+                      <label className="field field-span-2">
+                        <span className="field-label">Window layout</span>
+                        <select
+                          className="input density-profile-select"
+                          value={layoutMode}
+                          onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
+                        >
+                          <option value="auto">Auto — stack below 900px</option>
+                          <option value="wide">Wide — always side-by-side</option>
+                          <option value="compact">Compact — always stacked</option>
+                        </select>
+                        <span className="field-help">
+                          Auto uses mobile shell on narrow screens. Wide keeps desktop grid. Compact stays stacked.
+                        </span>
+                      </label>
+                      <label className="field field-span-2">
+                        <span className="field-label">Default split ratio preset</span>
+                        <select
+                          className="input density-profile-select"
+                          value={splitRatioPreset}
+                          onChange={(event) => setSplitRatioPreset(event.target.value as SplitRatioPreset)}
+                        >
+                          <option value="50-50">50/50</option>
+                          <option value="60-40">60/40</option>
+                          <option value="70-30">70/30</option>
+                        </select>
+                        <span className="field-help">Applies only to newly created pane splits.</span>
+                      </label>
+                      <label className="field field-span-2">
+                        <span className="field-label">Auto arrange mode</span>
+                        <select
+                          className="input density-profile-select"
+                          value={autoArrangeMode}
+                          onChange={(event) => setAutoArrangeMode(event.target.value as AutoArrangeMode)}
+                        >
+                          <option value="c">Mode C (open/close + layout changes)</option>
+                          <option value="off">Off</option>
+                        </select>
+                        <span className="field-help">Mode C keeps open pane sessions compact and split ratios balanced.</span>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+              )}
+              {activeAppSettingsTab === "connections" && (
+                <div className="settings-stack">
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>Defaults</h3>
+                      <p className="muted-copy">Connection defaults applied before manual overrides.</p>
+                    </header>
+                    <div className="host-form-grid">
+                      <label className="field field-span-2">
+                        <span className="field-label">Default login user</span>
+                        <input
+                          className="input"
+                          value={metadataStore.defaultUser}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
+                          }}
+                          onBlur={(event) => {
+                            void applyDefaultUser(event.target.value).catch((e: unknown) => setError(String(e)));
+                          }}
+                          placeholder="ubuntu"
+                        />
+                        <span className="field-help">Used when a host has no explicit user.</span>
+                      </label>
+                    </div>
+                  </section>
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>Quick connect</h3>
+                      <p className="muted-copy">Choose interaction style and trust behavior for ad-hoc connections.</p>
+                    </header>
+                    <div className="host-form-grid">
+                      <label className="field">
+                        <span className="field-label">Quick connect mode</span>
+                        <select
+                          className="input density-profile-select"
+                          value={quickConnectMode}
+                          onChange={(event) => setQuickConnectMode(event.target.value as QuickConnectMode)}
+                        >
+                          <option value="wizard">Wizard (step-by-step)</option>
+                          <option value="smart">Smart form (single screen)</option>
+                          <option value="command">Command palette</option>
+                        </select>
+                        <span className="field-help">Defines how host/user input is collected.</span>
+                      </label>
+                      <label className="field checkbox-field">
+                        <input
+                          className="checkbox-input"
+                          type="checkbox"
+                          checked={quickConnectAutoTrust}
+                          onChange={(event) => setQuickConnectAutoTrust(event.target.checked)}
+                        />
+                        <span className="field-label">Auto trust host keys for quick connect</span>
+                      </label>
+                      <p className="field-help field-span-2">
+                        Default is off. When enabled, quick-connect sessions auto-accept host key prompts.
+                      </p>
+                    </div>
+                  </section>
                 </div>
               )}
               {activeAppSettingsTab === "views" && (
-                <section className="backup-panel view-manager-panel">
+                <div className="settings-stack">
+                  <section className="settings-card backup-panel view-manager-panel">
                   <div className="field">
                     <span className="field-label">Saved custom views</span>
                     <div className="view-manager-list">
@@ -3166,10 +4884,12 @@ export function App() {
                   <p className="muted-copy">
                     Built-in views are fixed (`Alle`, `Favoriten`). Custom views are persisted and shown as sidebar tabs.
                   </p>
-                </section>
+                  </section>
+                </div>
               )}
-              {activeAppSettingsTab === "backup" && (
-                <div className="backup-panel">
+              {activeAppSettingsTab === "data" && (
+                <div className="settings-stack">
+                  <section className="settings-card backup-panel">
                   <label className="field">
                     <span className="field-label">Export path</span>
                     <input
@@ -3217,11 +4937,238 @@ export function App() {
                     Import backup
                   </button>
                   <p className="muted-copy">Backups are always encrypted. Passwords are never stored.</p>
-                  {backupMessage && <p className="muted-copy">{backupMessage}</p>}
+                    {backupMessage && <p className="muted-copy">{backupMessage}</p>}
+                  </section>
                 </div>
               )}
-              {activeAppSettingsTab === "extras" && <p className="muted-copy">Extras settings placeholder.</p>}
-              {activeAppSettingsTab === "help" && <p className="muted-copy">Help settings placeholder.</p>}
+              {activeAppSettingsTab === "store" && (
+                <div className="settings-stack">
+                  <div className="settings-card store-panel">
+                  <p className="muted-copy">
+                    Hybrid store: Host-Felder bleiben kompatibel, zusaetzlich koennen User/Gruppen/Tags/Keys als Objekte
+                    verknuepft werden.
+                  </p>
+                  <label className="field field-span-2">
+                    <span className="field-label">Master passphrase (Keychain fallback)</span>
+                    <input
+                      className="input"
+                      type="password"
+                      value={storePassphrase}
+                      onChange={(event) => setStorePassphrase(event.target.value)}
+                      placeholder="Optional, fuer encrypted keys"
+                    />
+                  </label>
+
+                  <div className="store-grid">
+                    <section className="store-card">
+                      <h4>Users</h4>
+                      <div className="store-list">
+                        {storeUsers.map((user) => (
+                          <div key={user.id} className="store-list-row">
+                            <span>{user.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="store-inline">
+                        <input
+                          className="input"
+                          value={storeUserDraft}
+                          onChange={(event) => setStoreUserDraft(event.target.value)}
+                          placeholder="neuer user"
+                        />
+                        <button className="btn" onClick={() => void addStoreUser()}>
+                          Add
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="store-card">
+                      <h4>Groups</h4>
+                      <div className="store-list">
+                        {storeGroups.map((group) => (
+                          <div key={group.id} className="store-list-row">
+                            <span>{group.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="store-inline">
+                        <input
+                          className="input"
+                          value={storeGroupDraft}
+                          onChange={(event) => setStoreGroupDraft(event.target.value)}
+                          placeholder="neue gruppe"
+                        />
+                        <button className="btn" onClick={() => void addStoreGroup()}>
+                          Add
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="store-card">
+                      <h4>Tags</h4>
+                      <div className="store-list">
+                        {storeTags.map((tag) => (
+                          <div key={tag.id} className="store-list-row">
+                            <span>{tag.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="store-inline">
+                        <input
+                          className="input"
+                          value={storeTagDraft}
+                          onChange={(event) => setStoreTagDraft(event.target.value)}
+                          placeholder="neuer tag"
+                        />
+                        <button className="btn" onClick={() => void addStoreTag()}>
+                          Add
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+
+                  <section className="store-card store-card-wide">
+                    <h4>SSH Keys</h4>
+                    <div className="store-key-grid">
+                      <div className="store-inline">
+                        <input
+                          className="input"
+                          value={storePathKeyNameDraft}
+                          onChange={(event) => setStorePathKeyNameDraft(event.target.value)}
+                          placeholder="Pfad-Key Name"
+                        />
+                        <input
+                          className="input"
+                          value={storePathKeyPathDraft}
+                          onChange={(event) => setStorePathKeyPathDraft(event.target.value)}
+                          placeholder="~/.ssh/id_ed25519"
+                        />
+                        <button className="btn" onClick={() => void addStorePathKey()}>
+                          Add path key
+                        </button>
+                      </div>
+                      <div className="store-inline">
+                        <input
+                          className="input"
+                          value={storeEncryptedKeyNameDraft}
+                          onChange={(event) => setStoreEncryptedKeyNameDraft(event.target.value)}
+                          placeholder="Encrypted key name"
+                        />
+                        <input
+                          className="input"
+                          value={storeEncryptedPublicKeyDraft}
+                          onChange={(event) => setStoreEncryptedPublicKeyDraft(event.target.value)}
+                          placeholder="optional public key"
+                        />
+                      </div>
+                      <textarea
+                        className="input store-textarea"
+                        value={storeEncryptedPrivateKeyDraft}
+                        onChange={(event) => setStoreEncryptedPrivateKeyDraft(event.target.value)}
+                        placeholder="-----BEGIN PRIVATE KEY-----"
+                      />
+                      <div className="store-inline">
+                        <button className="btn" onClick={() => void addStoreEncryptedKey()}>
+                          Add encrypted key
+                        </button>
+                      </div>
+                    </div>
+                    <div className="store-list">
+                      {storeKeys.map((key) => (
+                        <div key={key.id} className="store-list-row">
+                          <span>
+                            {key.name} ({key.type})
+                          </span>
+                          <div className="store-inline">
+                            <button className="btn" onClick={() => void unlockStoreKey(key.id)}>
+                              Unlock
+                            </button>
+                            <button className="btn btn-danger" onClick={() => void removeStoreKey(key.id)}>
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="store-card store-card-wide">
+                    <h4>Host binding</h4>
+                    <div className="store-inline">
+                      <select
+                        className="input"
+                        value={storeSelectedHostForBinding}
+                        onChange={(event) => setStoreSelectedHostForBinding(event.target.value)}
+                      >
+                        <option value="">Host waehlen</option>
+                        {hosts.map((host) => (
+                          <option key={host.host} value={host.host}>
+                            {host.host}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        value={storeBindingDraft.userId ?? ""}
+                        onChange={(event) =>
+                          setStoreBindingDraft((prev) => ({
+                            ...prev,
+                            userId: event.target.value || undefined,
+                          }))
+                        }
+                      >
+                        <option value="">User (optional)</option>
+                        {storeUsers.map((user) => (
+                          <option key={user.id} value={user.id}>
+                            {user.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        value={storeBindingDraft.keyRefs[0]?.keyId ?? ""}
+                        onChange={(event) =>
+                          setStoreBindingDraft((prev) => ({
+                            ...prev,
+                            keyRefs: event.target.value
+                              ? [{ keyId: event.target.value, usage: "primary" }]
+                              : [],
+                          }))
+                        }
+                      >
+                        <option value="">Primary key (optional)</option>
+                        {storeKeys.map((key) => (
+                          <option key={key.id} value={key.id}>
+                            {key.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="store-inline">
+                      <input
+                        className="input"
+                        value={storeBindingDraft.proxyJump}
+                        onChange={(event) =>
+                          setStoreBindingDraft((prev) => ({
+                            ...prev,
+                            proxyJump: event.target.value,
+                          }))
+                        }
+                        placeholder="ProxyJump override"
+                      />
+                      <button className="btn btn-primary" onClick={() => void saveHostBindingDraft()}>
+                        Save host binding
+                      </button>
+                    </div>
+                    <p className="muted-copy">
+                      Gruppen/Tags bleiben im Hybrid-Modell zusaetzlich in Legacy-Hostdaten nutzbar und koennen spaeter
+                      voll migriert werden.
+                    </p>
+                  </section>
+                  </div>
+                </div>
+              )}
+              {activeAppSettingsTab === "help" && <HelpPanel />}
               {activeAppSettingsTab === "about" && (
                 <section className="about-hero">
                   <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
@@ -3256,9 +5203,230 @@ export function App() {
           </section>
         </div>
       )}
+      {isQuickConnectModalOpen && (
+        <div className="app-settings-overlay" onClick={closeQuickConnectModal}>
+          <section
+            className="app-settings-modal panel add-host-modal"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={handleQuickConnectModalKeyDown}
+          >
+            <header className="panel-header">
+              <h2>Quick connect</h2>
+              <button className="btn" onClick={closeQuickConnectModal}>
+                Cancel
+              </button>
+            </header>
+            <div className="app-settings-content">
+              <p className="muted-copy quick-connect-shortcuts">
+                Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users.
+              </p>
+              {quickConnectMode === "wizard" && (
+                <div className="quick-connect-mode-wrap">
+                  <p className="field-help">
+                    Step {quickConnectWizardStep}/2 -{" "}
+                    {quickConnectWizardStep === 1 ? "Provide host target" : "Choose or type user"}
+                  </p>
+                  {quickConnectWizardStep === 1 && (
+                    <label className="field">
+                      <span className="field-label">Host</span>
+                      <input
+                        className="input"
+                        value={quickConnectDraft.hostName}
+                        onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            proceedQuickConnectWizard();
+                          }
+                        }}
+                        placeholder="server.local:2222 or [2001:db8::1]:2200"
+                        autoFocus
+                      />
+                    </label>
+                  )}
+                  {quickConnectWizardStep === 2 && (
+                    <>
+                      <label className="field">
+                        <span className="field-label">User</span>
+                        <input
+                          className="input"
+                          value={quickConnectDraft.user}
+                          onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
+                          onKeyDown={handleQuickConnectUserInputKeyDown}
+                          placeholder="Default or custom user"
+                          autoFocus
+                        />
+                      </label>
+                      {quickConnectUserOptions.length > 0 && (
+                        <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                          {quickConnectUserOptions.map((user) => (
+                            <button
+                              key={user}
+                              type="button"
+                              className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
+                              onClick={() => {
+                                applyQuickConnectUser(user);
+                              }}
+                            >
+                              {user}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {quickConnectMode === "smart" && (
+                <div className="quick-connect-mode-wrap">
+                  <label className="field">
+                    <span className="field-label">Host</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.hostName}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void connectQuickSshInNewPane();
+                        }
+                      }}
+                      placeholder="example.com or 10.0.0.8:2222"
+                      autoFocus
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">User</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.user}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
+                      onKeyDown={handleQuickConnectUserInputKeyDown}
+                      placeholder="Default or custom user"
+                    />
+                  </label>
+                  {quickConnectUserOptions.length > 0 && (
+                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                      {quickConnectUserOptions.map((user) => (
+                        <button
+                          key={user}
+                          type="button"
+                          className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
+                          onClick={() => {
+                            applyQuickConnectUser(user);
+                          }}
+                        >
+                          {user}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {quickConnectMode === "command" && (
+                <div className="quick-connect-mode-wrap">
+                  <label className="field">
+                    <span className="field-label">Target command</span>
+                    <input
+                      className="input"
+                      value={quickConnectCommandInput}
+                      onChange={(event) => setQuickConnectCommandInput(event.target.value)}
+                      onKeyDown={handleQuickConnectCommandInputKeyDown}
+                      placeholder="user@host:22"
+                      autoFocus
+                    />
+                  </label>
+                  {quickConnectUserOptions.length > 0 && (
+                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                      {quickConnectUserOptions.map((user) => (
+                        <button
+                          key={user}
+                          type="button"
+                          className={`btn ${quickConnectCommandInput.trim().startsWith(`${user}@`) ? "btn-primary" : ""}`}
+                          onClick={() => {
+                            const targetPart = quickConnectCommandInput.includes("@")
+                              ? quickConnectCommandInput.slice(quickConnectCommandInput.indexOf("@"))
+                              : "@";
+                            setQuickConnectCommandInput(`${user}${targetPart}`);
+                          }}
+                        >
+                          {user}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="field-help">
+                    Supports `user@host`, `user@host:port`, and `user@[2001:db8::1]:2200`.
+                  </p>
+                </div>
+              )}
+              {(quickConnectMode !== "wizard" || quickConnectWizardStep === 2) && (
+                <>
+                  <label className="field">
+                    <span className="field-label">Identity file</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.identityFile}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, identityFile: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Proxy jump</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.proxyJump}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyJump: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Proxy command</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.proxyCommand}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyCommand: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </>
+              )}
+              <div className="action-row">
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
+                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
+                    Back
+                  </button>
+                )}
+                <button className="btn" onClick={closeQuickConnectModal}>
+                  Cancel
+                </button>
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 1 ? (
+                  <button className="btn btn-primary" onClick={proceedQuickConnectWizard}>
+                    Next
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => void connectQuickSshInNewPane()}>
+                    Connect
+                  </button>
+                )}
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
+                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
+                    Back
+                  </button>
+                )}
+              </div>
+              {error && <p className="error-text">{error}</p>}
+            </div>
+          </section>
+        </div>
+      )}
       {activeTrustPrompt && (
         <div className="app-settings-overlay" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-          <section className="app-settings-modal panel trust-host-modal" onClick={(event) => event.stopPropagation()}>
+          <section
+            className="app-settings-modal panel trust-host-modal"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={handleTrustPromptKeyDown}
+          >
             <header className="panel-header">
               <h2>Trust host key</h2>
               <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
@@ -3283,7 +5451,7 @@ export function App() {
                 <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
                   Dismiss
                 </button>
-                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()}>
+                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()} autoFocus>
                   Trust host
                 </button>
               </div>
@@ -3298,17 +5466,58 @@ export function App() {
             canClosePane: paneOrder.length > 1,
             broadcastModeEnabled: isBroadcastModeEnabled,
             broadcastCount: broadcastTargets.size,
+            splitMode: contextMenu.splitMode,
           }).map((action) => (
             <button
               key={action.id}
               className={`context-menu-item ${action.separatorAbove ? "separator-above" : ""}`}
               disabled={action.disabled}
-              onClick={() => void handleContextAction(action.id, contextMenu.paneIndex ?? 0)}
+              onClick={(event) =>
+                void handleContextAction(action.id, contextMenu.paneIndex ?? 0, {
+                  preferredSplitMode: contextMenu.splitMode,
+                  eventLike: event,
+                })
+              }
             >
               {action.label}
             </button>
           ))}
+          {workspaceSendTargets.map((workspace, index) => (
+            <button
+              key={`send-${workspace.id}`}
+              className={`context-menu-item ${index === 0 ? "separator-above" : ""}`}
+              onClick={() => {
+                if (!contextMenuPaneSessionId) {
+                  return;
+                }
+                sendSessionToWorkspace(contextMenuPaneSessionId, workspace.id);
+                setContextMenu((prev) => ({ ...prev, visible: false }));
+              }}
+            >
+              Send to {workspace.name}
+            </button>
+          ))}
         </div>
+      )}
+      {isStackedShell && (
+        <nav className="mobile-shell-tabbar" aria-label="Mobile workspace">
+          <button
+            type="button"
+            className={`mobile-shell-tabbar-btn ${mobileShellTab === "hosts" ? "is-active" : ""}`}
+            aria-current={mobileShellTab === "hosts" ? "page" : undefined}
+            onClick={() => setMobileShellTab("hosts")}
+          >
+            Hosts
+          </button>
+          <button
+            type="button"
+            className={`mobile-shell-tabbar-btn ${mobileShellTab === "terminal" ? "is-active" : ""}`}
+            aria-current={mobileShellTab === "terminal" ? "page" : undefined}
+            onClick={() => setMobileShellTab("terminal")}
+          >
+            Terminal
+          </button>
+        </nav>
       )}
     </main>
   );
