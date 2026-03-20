@@ -61,6 +61,7 @@ import type {
   ViewSortField,
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
+import logoTransparent from "../../../img/logo_tranparent.png";
 import logoTerminal from "../../../img/logo_terminal.png";
 
 const emptyHost = (): HostConfig => ({
@@ -417,6 +418,7 @@ export function App() {
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
+  const [expandedPaneToolbarIndices, setExpandedPaneToolbarIndices] = useState<Set<number>>(new Set());
   const [isBroadcastModeEnabled, setIsBroadcastModeEnabled] = useState<boolean>(false);
   const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set());
   const [layoutProfiles, setLayoutProfiles] = useState<LayoutProfile[]>([]);
@@ -516,6 +518,7 @@ export function App() {
   const metadataStoreRef = useRef<HostMetadataStore>(createDefaultMetadataStore());
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
+  const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
 
@@ -713,15 +716,16 @@ export function App() {
     (paneIndex: number): string => {
       const paneSessionId = splitSlots[paneIndex] ?? null;
       if (!paneSessionId) {
-        return "empty";
+        return "Drop it on me";
       }
       const paneSessionHost = sessions.find((session) => session.id === paneSessionId)?.host ?? null;
       if (!paneSessionHost) {
-        return "empty";
+        return "Drop it on me";
       }
       const paneHostConfig = hosts.find((host) => host.host === paneSessionHost) ?? null;
-      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim();
-      return paneUser ? `${paneUser}@${paneSessionHost}` : paneSessionHost;
+      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
+      const paneHostName = paneHostConfig?.hostName.trim() || paneSessionHost;
+      return `${paneUser}@${paneHostName}`;
     },
     [hosts, metadataStore.defaultUser, sessions, splitSlots],
   );
@@ -1471,12 +1475,15 @@ export function App() {
     event.dataTransfer.effectAllowed = payload.type === "session" ? "copyMove" : "copy";
     event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
     event.dataTransfer.setData("text/plain", serialized);
+    lastInternalDragPayloadRef.current = payload;
   };
 
   const parseDragPayload = (event: ReactDragEvent): DragPayload | null => {
-    const encoded = event.dataTransfer.getData(DND_PAYLOAD_MIME) || event.dataTransfer.getData("text/plain");
+    const customPayload = event.dataTransfer.getData(DND_PAYLOAD_MIME);
+    const plainPayload = event.dataTransfer.getData("text/plain");
+    const encoded = customPayload || plainPayload;
     if (!encoded) {
-      return null;
+      return lastInternalDragPayloadRef.current;
     }
     try {
       const parsed = JSON.parse(encoded) as Partial<DragPayload>;
@@ -1486,9 +1493,9 @@ export function App() {
           : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
             ? ({ type: "machine", hostAlias: parsed.hostAlias } as DragPayload)
             : null;
-      return result;
+      return result ?? lastInternalDragPayloadRef.current;
     } catch {
-      return null;
+      return lastInternalDragPayloadRef.current;
     }
   };
 
@@ -1540,6 +1547,7 @@ export function App() {
       : null;
     const payload = parseDragPayload(event);
     if (!payload) {
+      lastInternalDragPayloadRef.current = null;
       return;
     }
     const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
@@ -1583,6 +1591,7 @@ export function App() {
     if (sessionId) {
       placeSessionOnPane(sessionId);
     }
+    lastInternalDragPayloadRef.current = null;
   };
 
   const resolveDropEffect = (event: ReactDragEvent): DataTransfer["dropEffect"] => {
@@ -1606,14 +1615,6 @@ export function App() {
     return "copy";
   };
 
-  const getEmptyPaneDropHint = (): string => {
-    if (draggingKind === "machine") {
-      return sessionDropMode === "move"
-        ? "Drop host to move an existing session."
-        : "Drop host to open a new session.";
-    }
-    return "Drag a host here.";
-  };
   const getSessionModifierModeText = (): string =>
     sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
 
@@ -2061,6 +2062,7 @@ export function App() {
       const hasPaneSession = Boolean(paneSessionId);
       const canClosePane = paneOrder.length > 1;
       const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
+      const isToolbarExpanded = expandedPaneToolbarIndices.has(paneIndex);
       const allVisibleAlreadyTargeted =
         isBroadcastModeEnabled &&
         visiblePaneSessionIds.length > 0 &&
@@ -2127,7 +2129,7 @@ export function App() {
               <div
                 className={`pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`}
               >
-                Center
+                Replace
               </div>
               <div className={`pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`}>
                 Right
@@ -2139,11 +2141,38 @@ export function App() {
               </div>
             </div>
           )}
-          <div className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""}`}>
+          <div
+            className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${
+              isToolbarExpanded ? "is-toolbar-expanded" : ""
+            }`}
+          >
             <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
               <span className="split-pane-label-title" title={paneIdentity}>
                 {paneIdentity}
               </span>
+              <button
+                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
+                  isToolbarExpanded ? "is-expanded" : ""
+                }`}
+                title={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
+                aria-label={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
+                aria-pressed={isToolbarExpanded}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setExpandedPaneToolbarIndices((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(paneIndex)) {
+                      next.delete(paneIndex);
+                    } else {
+                      next.add(paneIndex);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <span aria-hidden="true">{isToolbarExpanded ? "▾" : "▸"}</span>
+              </button>
             </div>
             <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
               <button
@@ -2207,7 +2236,13 @@ export function App() {
                   setBroadcastMode(!isBroadcastModeEnabled);
                 }}
               >
-                <span aria-hidden="true">@</span>
+                <svg className="pane-toolbar-svg pane-toolbar-svg-broadcast" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="2.2" />
+                  <path d="M8.6 8.8a4.8 4.8 0 0 0 0 6.4" />
+                  <path d="M15.4 8.8a4.8 4.8 0 0 1 0 6.4" />
+                  <path d="M6.2 6.3a8.3 8.3 0 0 0 0 11.4" />
+                  <path d="M17.8 6.3a8.3 8.3 0 0 1 0 11.4" />
+                </svg>
               </button>
               <button
                 className={`btn action-icon-btn pane-toolbar-btn ${
@@ -2222,7 +2257,10 @@ export function App() {
                   void handleContextAction("broadcast.togglePaneTarget", paneIndex);
                 }}
               >
-                <span aria-hidden="true">◉</span>
+                <svg className="pane-toolbar-svg pane-toolbar-svg-target" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="6.4" />
+                  <circle cx="12" cy="12" r="2.3" />
+                </svg>
               </button>
               <button
                 className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${
@@ -2237,9 +2275,12 @@ export function App() {
                   void handleContextAction("broadcast.selectAllVisible", paneIndex);
                 }}
               >
-                <span className="pane-toolbar-broadcast-all-icon" aria-hidden="true">
-                  ⌁
-                </span>
+                <svg className="pane-toolbar-svg pane-toolbar-svg-all" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="6.2" cy="12.4" r="2.1" />
+                  <circle cx="12" cy="7.1" r="2.1" />
+                  <circle cx="17.8" cy="12.4" r="2.1" />
+                  <path d="M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" />
+                </svg>
               </button>
             </div>
             <span className="pane-toolbar-separator" aria-hidden="true" />
@@ -2255,7 +2296,10 @@ export function App() {
                   void handleContextAction("pane.clear", paneIndex);
                 }}
               >
-                <span aria-hidden="true">⌫</span>
+                <svg className="pane-toolbar-svg pane-toolbar-svg-close-session" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5.2" y="6.2" width="13.6" height="11.6" rx="2.2" />
+                  <path d="M9.5 10l5 5M14.5 10l-5 5" />
+                </svg>
               </button>
               <button
                 className="btn action-icon-btn action-icon-btn-danger pane-toolbar-btn"
@@ -2268,7 +2312,9 @@ export function App() {
                   void handleContextAction("pane.close", paneIndex);
                 }}
               >
-                <span aria-hidden="true">×</span>
+                <svg className="pane-toolbar-svg pane-toolbar-svg-close-pane" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" />
+                </svg>
               </button>
             </div>
           </div>
@@ -2276,8 +2322,8 @@ export function App() {
             <TerminalPane sessionId={paneSessionId} onUserInput={handleTerminalInput} fontSize={terminalFontSize} />
           ) : (
             <div className="empty-pane split-empty-pane">
-              <p>Empty pane.</p>
-              <span>{getEmptyPaneDropHint()}</span>
+              <img src={logoTransparent} alt="NoSuckShell drop hint" className="split-empty-pane-image" />
+              <p>Come on, drop that button right here - I'm waiting</p>
               {draggingKind === "session" && (
                 <span className={`split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`}>
                   <strong>Mode:</strong> {getSessionModifierModeText()}

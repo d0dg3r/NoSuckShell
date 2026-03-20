@@ -6,6 +6,8 @@ import { listen } from "@tauri-apps/api/event";
 import { resizeSession } from "../tauri-api";
 const sessionBuffers = new Map();
 const MAX_BUFFER_CHARS = 250_000;
+const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
+const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
 const hasTauriTransformCallback = () => {
     if (typeof window === "undefined") {
         return false;
@@ -16,12 +18,17 @@ const hasTauriTransformCallback = () => {
 };
 export function TerminalPane({ sessionId, onUserInput, fontSize }) {
     const rootRef = useRef(null);
+    const terminalHostRef = useRef(null);
     const terminalRef = useRef(null);
     const fitAddonRef = useRef(null);
     const onUserInputRef = useRef(onUserInput);
     const fitFrameRef = useRef(null);
     const fitDebounceRef = useRef(null);
     const lastResizeRef = useRef(null);
+    const enterKeyIsDownRef = useRef(false);
+    const lastEnterKeyupAtRef = useRef(null);
+    const lastManualEnterSendAtRef = useRef(null);
+    const lastRepeatKeydownAtByKeyRef = useRef(new Map());
     useEffect(() => {
         onUserInputRef.current = onUserInput;
     }, [onUserInput]);
@@ -42,8 +49,8 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
         terminal.loadAddon(fitAddon);
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
-        if (rootRef.current) {
-            terminal.open(rootRef.current);
+        if (terminalHostRef.current) {
+            terminal.open(terminalHostRef.current);
             fitAddon.fit();
         }
         const buffered = sessionBuffers.get(sessionId) ?? "";
@@ -54,7 +61,51 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
             terminal.writeln("Connecting...");
         }
         terminal.onData((data) => {
+            if (data === "\r") {
+                return;
+            }
             onUserInputRef.current(sessionId, data);
+        });
+        const onWindowKeyup = (event) => {
+            if (event.key !== "Enter") {
+                return;
+            }
+            enterKeyIsDownRef.current = false;
+            lastEnterKeyupAtRef.current = Date.now();
+        };
+        window.addEventListener("keyup", onWindowKeyup);
+        terminal.attachCustomKeyEventHandler((event) => {
+            if (event.type === "keydown" && event.repeat && event.key !== "Enter") {
+                const keyId = `${event.code}:${event.key}`;
+                const now = Date.now();
+                const lastAt = lastRepeatKeydownAtByKeyRef.current.get(keyId) ?? null;
+                if (lastAt !== null && now - lastAt < GENERIC_REPEAT_MIN_INTERVAL_MS) {
+                    return false;
+                }
+                lastRepeatKeydownAtByKeyRef.current.set(keyId, now);
+            }
+            if (event.key === "Enter" && event.type === "keydown") {
+                const now = Date.now();
+                const previousManualSendAt = lastManualEnterSendAtRef.current;
+                const sincePreviousManualSend = previousManualSendAt === null ? null : now - previousManualSendAt;
+                const isThrottledRepeat = event.repeat && sincePreviousManualSend !== null && sincePreviousManualSend < ENTER_REPEAT_MIN_INTERVAL_MS;
+                if (isThrottledRepeat) {
+                    return false;
+                }
+                enterKeyIsDownRef.current = true;
+                lastManualEnterSendAtRef.current = now;
+                onUserInputRef.current(sessionId, "\r");
+                return false;
+            }
+            if (event.key === "Enter" && event.type === "keypress") {
+                return false;
+            }
+            if (event.key === "Enter" && event.type === "keyup") {
+                enterKeyIsDownRef.current = false;
+                lastEnterKeyupAtRef.current = Date.now();
+                return false;
+            }
+            return true;
         });
         let unlisten = null;
         if (hasTauriTransformCallback()) {
@@ -82,8 +133,20 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
         }
         const fitAndResize = () => {
             const root = rootRef.current;
-            if (!root) {
+            const terminalHost = terminalHostRef.current;
+            if (!root || !terminalHost) {
                 return;
+            }
+            const pane = root.closest(".split-pane");
+            const label = pane?.querySelector(".split-pane-label");
+            if (pane && label) {
+                const paneTop = pane.getBoundingClientRect().top;
+                const labelBottom = label.getBoundingClientRect().bottom;
+                const requiredTopInset = Math.ceil(Math.max(0, labelBottom - paneTop) + 2);
+                root.style.setProperty("--pane-terminal-top-inset", `${requiredTopInset}px`);
+            }
+            else {
+                root.style.removeProperty("--pane-terminal-top-inset");
             }
             fitAddon.fit();
             const didSizeChange = !lastResizeRef.current ||
@@ -109,11 +172,11 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
             }, 40);
         };
         let resizeObserver = null;
-        if (rootRef.current) {
+        if (terminalHostRef.current) {
             resizeObserver = new ResizeObserver(() => {
                 scheduleFitAndResize();
             });
-            resizeObserver.observe(rootRef.current);
+            resizeObserver.observe(terminalHostRef.current);
         }
         const onExternalFitRequest = () => {
             scheduleFitAndResize();
@@ -135,6 +198,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
             if (resizeObserver) {
                 resizeObserver.disconnect();
             }
+            window.removeEventListener("keyup", onWindowKeyup);
             window.removeEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
             window.removeEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
             if (fitDebounceRef.current !== null) {
@@ -149,5 +213,5 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }) {
             terminal.dispose();
         };
     }, [fontSize, sessionId]);
-    return _jsx("div", { ref: rootRef, className: "terminal-root" });
+    return (_jsx("div", { ref: rootRef, className: "terminal-root", children: _jsx("div", { ref: terminalHostRef, className: "terminal-host" }) }));
 }

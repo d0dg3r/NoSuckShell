@@ -7,6 +7,7 @@ import { TerminalPane } from "./components/TerminalPane";
 import { buildPaneContextActions } from "./features/context-actions";
 import { assignSessionToPane, clearPaneAtIndex, createPaneLayoutItem, createPaneLayoutsFromSlots, createInitialPaneState, MIN_PANE_HEIGHT, MIN_PANE_WIDTH, reconcilePaneLayouts, removeSessionFromSlots, resolveInputTargets, sanitizeBroadcastTargets, } from "./features/split";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
+import logoTransparent from "../../../img/logo_tranparent.png";
 import logoTerminal from "../../../img/logo_terminal.png";
 const emptyHost = () => ({
     host: "",
@@ -305,6 +306,7 @@ export function App() {
     const [paneLayouts, setPaneLayouts] = useState(() => createPaneLayoutsFromSlots(createInitialPaneState()));
     const [splitTree, setSplitTree] = useState(() => createLeafNode(0));
     const [activePaneIndex, setActivePaneIndex] = useState(0);
+    const [expandedPaneToolbarIndices, setExpandedPaneToolbarIndices] = useState(new Set());
     const [isBroadcastModeEnabled, setIsBroadcastModeEnabled] = useState(false);
     const [broadcastTargets, setBroadcastTargets] = useState(new Set());
     const [layoutProfiles, setLayoutProfiles] = useState([]);
@@ -404,6 +406,7 @@ export function App() {
     const metadataStoreRef = useRef(createDefaultMetadataStore());
     const orphanSeenSessionIdsRef = useRef(new Set());
     const orphanClosingSessionIdsRef = useRef(new Set());
+    const lastInternalDragPayloadRef = useRef(null);
     const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState(null);
     const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState(null);
     const canSave = useMemo(() => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0, [currentHost]);
@@ -574,15 +577,16 @@ export function App() {
     const resolvePaneIdentity = useCallback((paneIndex) => {
         const paneSessionId = splitSlots[paneIndex] ?? null;
         if (!paneSessionId) {
-            return "empty";
+            return "Drop it on me";
         }
         const paneSessionHost = sessions.find((session) => session.id === paneSessionId)?.host ?? null;
         if (!paneSessionHost) {
-            return "empty";
+            return "Drop it on me";
         }
         const paneHostConfig = hosts.find((host) => host.host === paneSessionHost) ?? null;
-        const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim();
-        return paneUser ? `${paneUser}@${paneSessionHost}` : paneSessionHost;
+        const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
+        const paneHostName = paneHostConfig?.hostName.trim() || paneSessionHost;
+        return `${paneUser}@${paneHostName}`;
     }, [hosts, metadataStore.defaultUser, sessions, splitSlots]);
     const toggleFooterLayoutPanel = useCallback(() => {
         setIsFooterLayoutPanelOpen((prev) => !prev);
@@ -1282,11 +1286,14 @@ export function App() {
         event.dataTransfer.effectAllowed = payload.type === "session" ? "copyMove" : "copy";
         event.dataTransfer.setData(DND_PAYLOAD_MIME, serialized);
         event.dataTransfer.setData("text/plain", serialized);
+        lastInternalDragPayloadRef.current = payload;
     };
     const parseDragPayload = (event) => {
-        const encoded = event.dataTransfer.getData(DND_PAYLOAD_MIME) || event.dataTransfer.getData("text/plain");
+        const customPayload = event.dataTransfer.getData(DND_PAYLOAD_MIME);
+        const plainPayload = event.dataTransfer.getData("text/plain");
+        const encoded = customPayload || plainPayload;
         if (!encoded) {
-            return null;
+            return lastInternalDragPayloadRef.current;
         }
         try {
             const parsed = JSON.parse(encoded);
@@ -1295,10 +1302,10 @@ export function App() {
                 : parsed.type === "machine" && typeof parsed.hostAlias === "string" && parsed.hostAlias.length > 0
                     ? { type: "machine", hostAlias: parsed.hostAlias }
                     : null;
-            return result;
+            return result ?? lastInternalDragPayloadRef.current;
         }
         catch {
-            return null;
+            return lastInternalDragPayloadRef.current;
         }
     };
     const resolvePaneDropZone = (clientX, clientY, bounds) => {
@@ -1342,6 +1349,7 @@ export function App() {
             : null;
         const payload = parseDragPayload(event);
         if (!payload) {
+            lastInternalDragPayloadRef.current = null;
             return;
         }
         const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
@@ -1385,6 +1393,7 @@ export function App() {
         if (sessionId) {
             placeSessionOnPane(sessionId);
         }
+        lastInternalDragPayloadRef.current = null;
     };
     const resolveDropEffect = (event) => {
         const payload = parseDragPayload(event);
@@ -1405,14 +1414,6 @@ export function App() {
             return sessionDropMode === "move" ? "move" : "copy";
         }
         return "copy";
-    };
-    const getEmptyPaneDropHint = () => {
-        if (draggingKind === "machine") {
-            return sessionDropMode === "move"
-                ? "Drop host to move an existing session."
-                : "Drop host to open a new session.";
-        }
-        return "Drag a host here.";
     };
     const getSessionModifierModeText = () => sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
     const toggleBroadcastTarget = (sessionId) => {
@@ -1835,6 +1836,7 @@ export function App() {
             const hasPaneSession = Boolean(paneSessionId);
             const canClosePane = paneOrder.length > 1;
             const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
+            const isToolbarExpanded = expandedPaneToolbarIndices.has(paneIndex);
             const allVisibleAlreadyTargeted = isBroadcastModeEnabled &&
                 visiblePaneSessionIds.length > 0 &&
                 visiblePaneSessionIds.every((sessionId) => broadcastTargets.has(sessionId));
@@ -1874,7 +1876,19 @@ export function App() {
                         y: event.clientY,
                         paneIndex,
                     });
-                }, children: [isDropOverlayVisible && (_jsxs("div", { className: "pane-drop-zones", "aria-hidden": "true", children: [_jsx("div", { className: `pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`, children: "Top" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`, children: "Left" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`, children: "Center" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`, children: "Right" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`, children: "Bottom" })] })), _jsxs("div", { className: `split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""}`, children: [_jsx("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-nav", children: _jsx("span", { className: "split-pane-label-title", title: paneIdentity, children: paneIdentity }) }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-layout", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane left", "aria-label": `Split pane ${paneIndex + 1} left`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                }, children: [isDropOverlayVisible && (_jsxs("div", { className: "pane-drop-zones", "aria-hidden": "true", children: [_jsx("div", { className: `pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`, children: "Top" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`, children: "Left" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`, children: "Replace" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`, children: "Right" }), _jsx("div", { className: `pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`, children: "Bottom" })] })), _jsxs("div", { className: `split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${isToolbarExpanded ? "is-toolbar-expanded" : ""}`, children: [_jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-nav", children: [_jsx("span", { className: "split-pane-label-title", title: paneIdentity, children: paneIdentity }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${isToolbarExpanded ? "is-expanded" : ""}`, title: isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions", "aria-label": isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions", "aria-pressed": isToolbarExpanded, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                            event.stopPropagation();
+                                            setExpandedPaneToolbarIndices((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(paneIndex)) {
+                                                    next.delete(paneIndex);
+                                                }
+                                                else {
+                                                    next.add(paneIndex);
+                                                }
+                                                return next;
+                                            });
+                                        }, children: _jsx("span", { "aria-hidden": "true", children: isToolbarExpanded ? "▾" : "▸" }) })] }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-layout", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane left", "aria-label": `Split pane ${paneIndex + 1} left`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("layout.split.left", paneIndex);
                                         }, children: _jsx("span", { className: "split-icon split-icon-vertical split-icon-vertical-normal", "aria-hidden": "true" }) }), _jsx("button", { className: "btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split", title: "Split pane right", "aria-label": `Split pane ${paneIndex + 1} right`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
@@ -1889,19 +1903,19 @@ export function App() {
                                         }, children: _jsx("span", { className: "split-icon split-icon-horizontal split-icon-horizontal-inverse", "aria-hidden": "true" }) })] }), _jsx("span", { className: "pane-toolbar-separator", "aria-hidden": "true" }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-broadcast", children: [_jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`, title: `Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`, "aria-label": `Broadcast ${isBroadcastModeEnabled ? "on" : "off"}`, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             setBroadcastMode(!isBroadcastModeEnabled);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "@" }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""}`, title: "Toggle pane target", "aria-label": `Toggle pane ${paneIndex + 1} broadcast target`, disabled: !isBroadcastModeEnabled || !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsxs("svg", { className: "pane-toolbar-svg pane-toolbar-svg-broadcast", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "2.2" }), _jsx("path", { d: "M8.6 8.8a4.8 4.8 0 0 0 0 6.4" }), _jsx("path", { d: "M15.4 8.8a4.8 4.8 0 0 1 0 6.4" }), _jsx("path", { d: "M6.2 6.3a8.3 8.3 0 0 0 0 11.4" }), _jsx("path", { d: "M17.8 6.3a8.3 8.3 0 0 1 0 11.4" })] }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""}`, title: "Toggle pane target", "aria-label": `Toggle pane ${paneIndex + 1} broadcast target`, disabled: !isBroadcastModeEnabled || !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("broadcast.togglePaneTarget", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u25C9" }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${allVisibleAlreadyTargeted ? "is-broadcast-active" : ""}`, title: "Target all visible panes", "aria-label": "Target all visible panes", disabled: !isBroadcastModeEnabled, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsxs("svg", { className: "pane-toolbar-svg pane-toolbar-svg-target", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "12", cy: "12", r: "6.4" }), _jsx("circle", { cx: "12", cy: "12", r: "2.3" })] }) }), _jsx("button", { className: `btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${allVisibleAlreadyTargeted ? "is-broadcast-active" : ""}`, title: "Target all visible panes", "aria-label": "Target all visible panes", disabled: !isBroadcastModeEnabled, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("broadcast.selectAllVisible", paneIndex);
-                                        }, children: _jsx("span", { className: "pane-toolbar-broadcast-all-icon", "aria-hidden": "true", children: "\u2301" }) })] }), _jsx("span", { className: "pane-toolbar-separator", "aria-hidden": "true" }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-close", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn", title: "Close session in pane", "aria-label": `Close session in pane ${paneIndex + 1}`, disabled: !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsxs("svg", { className: "pane-toolbar-svg pane-toolbar-svg-all", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("circle", { cx: "6.2", cy: "12.4", r: "2.1" }), _jsx("circle", { cx: "12", cy: "7.1", r: "2.1" }), _jsx("circle", { cx: "17.8", cy: "12.4", r: "2.1" }), _jsx("path", { d: "M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" })] }) })] }), _jsx("span", { className: "pane-toolbar-separator", "aria-hidden": "true" }), _jsxs("div", { className: "split-pane-toolbar-group split-pane-toolbar-group-close", children: [_jsx("button", { className: "btn action-icon-btn pane-toolbar-btn", title: "Close session in pane", "aria-label": `Close session in pane ${paneIndex + 1}`, disabled: !hasPaneSession, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("pane.clear", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u232B" }) }), _jsx("button", { className: "btn action-icon-btn action-icon-btn-danger pane-toolbar-btn", title: "Close pane and session", "aria-label": `Close pane ${paneIndex + 1} and its session`, disabled: !canClosePane, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
+                                        }, children: _jsxs("svg", { className: "pane-toolbar-svg pane-toolbar-svg-close-session", viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("rect", { x: "5.2", y: "6.2", width: "13.6", height: "11.6", rx: "2.2" }), _jsx("path", { d: "M9.5 10l5 5M14.5 10l-5 5" })] }) }), _jsx("button", { className: "btn action-icon-btn action-icon-btn-danger pane-toolbar-btn", title: "Close pane and session", "aria-label": `Close pane ${paneIndex + 1} and its session`, disabled: !canClosePane, onPointerDown: (event) => event.stopPropagation(), onClick: (event) => {
                                             event.stopPropagation();
                                             void handleContextAction("pane.close", paneIndex);
-                                        }, children: _jsx("span", { "aria-hidden": "true", children: "\u00D7" }) })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput, fontSize: terminalFontSize })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("p", { children: "Empty pane." }), _jsx("span", { children: getEmptyPaneDropHint() }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
+                                        }, children: _jsx("svg", { className: "pane-toolbar-svg pane-toolbar-svg-close-pane", viewBox: "0 0 24 24", "aria-hidden": "true", children: _jsx("path", { d: "M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" }) }) })] })] }), paneSessionId ? (_jsx(TerminalPane, { sessionId: paneSessionId, onUserInput: handleTerminalInput, fontSize: terminalFontSize })) : (_jsxs("div", { className: "empty-pane split-empty-pane", children: [_jsx("img", { src: logoTransparent, alt: "NoSuckShell drop hint", className: "split-empty-pane-image" }), _jsx("p", { children: "Come on, drop that button right here - I'm waiting" }), draggingKind === "session" && (_jsxs("span", { className: `split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`, children: [_jsx("strong", { children: "Mode:" }), " ", getSessionModifierModeText()] }))] }))] }, `pane-${paneIndex}`));
         }
         const firstRatio = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, node.ratio));
         const secondRatio = 1 - firstRatio;

@@ -13,6 +13,8 @@ type Props = {
 
 const sessionBuffers = new Map<string, string>();
 const MAX_BUFFER_CHARS = 250_000;
+const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
+const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
 const hasTauriTransformCallback = (): boolean => {
   if (typeof window === "undefined") {
     return false;
@@ -24,12 +26,17 @@ const hasTauriTransformCallback = (): boolean => {
 
 export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const onUserInputRef = useRef(onUserInput);
   const fitFrameRef = useRef<number | null>(null);
   const fitDebounceRef = useRef<number | null>(null);
   const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const enterKeyIsDownRef = useRef(false);
+  const lastEnterKeyupAtRef = useRef<number | null>(null);
+  const lastManualEnterSendAtRef = useRef<number | null>(null);
+  const lastRepeatKeydownAtByKeyRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     onUserInputRef.current = onUserInput;
@@ -53,8 +60,8 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    if (rootRef.current) {
-      terminal.open(rootRef.current);
+    if (terminalHostRef.current) {
+      terminal.open(terminalHostRef.current);
       fitAddon.fit();
     }
 
@@ -65,7 +72,52 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       terminal.writeln("Connecting...");
     }
     terminal.onData((data) => {
+      if (data === "\r") {
+        return;
+      }
       onUserInputRef.current(sessionId, data);
+    });
+    const onWindowKeyup = (event: KeyboardEvent) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      enterKeyIsDownRef.current = false;
+      lastEnterKeyupAtRef.current = Date.now();
+    };
+    window.addEventListener("keyup", onWindowKeyup);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && event.repeat && event.key !== "Enter") {
+        const keyId = `${event.code}:${event.key}`;
+        const now = Date.now();
+        const lastAt = lastRepeatKeydownAtByKeyRef.current.get(keyId) ?? null;
+        if (lastAt !== null && now - lastAt < GENERIC_REPEAT_MIN_INTERVAL_MS) {
+          return false;
+        }
+        lastRepeatKeydownAtByKeyRef.current.set(keyId, now);
+      }
+      if (event.key === "Enter" && event.type === "keydown") {
+        const now = Date.now();
+        const previousManualSendAt = lastManualEnterSendAtRef.current;
+        const sincePreviousManualSend = previousManualSendAt === null ? null : now - previousManualSendAt;
+        const isThrottledRepeat =
+          event.repeat && sincePreviousManualSend !== null && sincePreviousManualSend < ENTER_REPEAT_MIN_INTERVAL_MS;
+        if (isThrottledRepeat) {
+          return false;
+        }
+        enterKeyIsDownRef.current = true;
+        lastManualEnterSendAtRef.current = now;
+        onUserInputRef.current(sessionId, "\r");
+        return false;
+      }
+      if (event.key === "Enter" && event.type === "keypress") {
+        return false;
+      }
+      if (event.key === "Enter" && event.type === "keyup") {
+        enterKeyIsDownRef.current = false;
+        lastEnterKeyupAtRef.current = Date.now();
+        return false;
+      }
+      return true;
     });
 
     let unlisten: UnlistenFn | null = null;
@@ -95,8 +147,19 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
 
     const fitAndResize = () => {
       const root = rootRef.current;
-      if (!root) {
+      const terminalHost = terminalHostRef.current;
+      if (!root || !terminalHost) {
         return;
+      }
+      const pane = root.closest(".split-pane") as HTMLElement | null;
+      const label = pane?.querySelector(".split-pane-label") as HTMLElement | null;
+      if (pane && label) {
+        const paneTop = pane.getBoundingClientRect().top;
+        const labelBottom = label.getBoundingClientRect().bottom;
+        const requiredTopInset = Math.ceil(Math.max(0, labelBottom - paneTop) + 2);
+        root.style.setProperty("--pane-terminal-top-inset", `${requiredTopInset}px`);
+      } else {
+        root.style.removeProperty("--pane-terminal-top-inset");
       }
       fitAddon.fit();
       const didSizeChange =
@@ -125,11 +188,11 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     };
 
     let resizeObserver: ResizeObserver | null = null;
-    if (rootRef.current) {
+    if (terminalHostRef.current) {
       resizeObserver = new ResizeObserver(() => {
         scheduleFitAndResize();
       });
-      resizeObserver.observe(rootRef.current);
+      resizeObserver.observe(terminalHostRef.current);
     }
     const onExternalFitRequest = () => {
       scheduleFitAndResize();
@@ -152,6 +215,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       if (resizeObserver) {
         resizeObserver.disconnect();
       }
+      window.removeEventListener("keyup", onWindowKeyup);
       window.removeEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
       window.removeEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
       if (fitDebounceRef.current !== null) {
@@ -167,5 +231,9 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     };
   }, [fontSize, sessionId]);
 
-  return <div ref={rootRef} className="terminal-root" />;
+  return (
+    <div ref={rootRef} className="terminal-root">
+      <div ref={terminalHostRef} className="terminal-host" />
+    </div>
+  );
 }
