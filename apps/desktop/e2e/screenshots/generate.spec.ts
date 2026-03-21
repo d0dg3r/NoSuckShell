@@ -90,7 +90,7 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
   await shot(page, "05-backup");
   await page.locator(".app-settings-header").getByRole("button", { name: "Close" }).click();
 
-  await page.getByRole("tab", { name: "Favoriten" }).click();
+  await page.getByRole("tab", { name: "Favorites" }).click();
   await shot(page, "06-organization");
 
   const pane0 = page.locator('.split-pane[data-pane-index="0"]');

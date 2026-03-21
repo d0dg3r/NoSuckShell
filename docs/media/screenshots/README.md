@@ -75,7 +75,11 @@ On **GitHub Releases** (tag `v*`), the [Release workflow](../../../.github/workf
 Helper script (requires `xdotool`, `gnome-screenshot`; X11/Wayland behavior varies):
 
 ```bash
-./scripts/capture-store-screenshots.sh
+# Capture a single shot (e.g. 01-main for Flathub):
+./scripts/capture-store-screenshots.sh flathub 01-main
+
+# Interactive mode — prompts you to prepare each scene in turn:
+./scripts/capture-store-screenshots.sh interactive flathub
 ```
 
 The script focuses the NoSuckShell window and saves PNGs; you still arrange each **scene** (split, backup screen, etc.) manually between delay windows, or run it once per prepared state.
