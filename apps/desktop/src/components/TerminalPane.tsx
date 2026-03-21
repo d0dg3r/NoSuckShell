@@ -17,6 +17,9 @@ const MAX_BUFFER_CHARS = 250_000;
 const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
 const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
 const hasTauriTransformCallback = (): boolean => {
+  if (import.meta.env.VITE_E2E === "true") {
+    return true;
+  }
   if (typeof window === "undefined") {
     return false;
   }

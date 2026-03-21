@@ -74,6 +74,7 @@ pub enum SshKeyObject {
 }
 
 impl SshKeyObject {
+    #[allow(dead_code)]
     pub fn id(&self) -> &str {
         match self {
             SshKeyObject::Path { id, .. } | SshKeyObject::Encrypted { id, .. } => id,

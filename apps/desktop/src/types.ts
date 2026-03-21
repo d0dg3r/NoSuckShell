@@ -130,10 +130,16 @@ export type PaneLayoutItem = {
   height: number;
 };
 
+export type LayoutPaneSessionKind = "sshSaved" | "local" | "sshQuick";
+
 export type LayoutPaneSnapshot = {
   width: number;
   height: number;
   hostAlias: string | null;
+  /** Present in saved layouts v2; omitted in older files (infer from hostAlias). */
+  sessionKind?: LayoutPaneSessionKind | null;
+  /** Required when sessionKind is sshQuick. */
+  quickSsh?: QuickSshSessionRequest | null;
 };
 
 export type LayoutSplitTreeNode =

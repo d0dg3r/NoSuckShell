@@ -3,12 +3,32 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuickSshSnapshot {
+    #[serde(rename = "hostName")]
+    pub host_name: String,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(rename = "identityFile", default)]
+    pub identity_file: String,
+    #[serde(rename = "proxyJump", default)]
+    pub proxy_jump: String,
+    #[serde(rename = "proxyCommand", default)]
+    pub proxy_command: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LayoutPaneSnapshot {
     pub width: i64,
     pub height: i64,
     #[serde(rename = "hostAlias", default)]
     pub host_alias: Option<String>,
+    #[serde(rename = "sessionKind", default)]
+    pub session_kind: Option<String>,
+    #[serde(rename = "quickSsh", default)]
+    pub quick_ssh: Option<QuickSshSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

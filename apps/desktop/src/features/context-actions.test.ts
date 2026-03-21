@@ -35,10 +35,10 @@ describe("buildPaneContextActions", () => {
       broadcastCount: 0,
     });
 
-    expect(actions.find((item) => item.id === "layout.split.top")?.label).toBe("Split top (copy)");
-    expect(actions.find((item) => item.id === "layout.split.left")?.label).toBe("Split left (copy)");
-    expect(actions.find((item) => item.id === "layout.split.right")?.label).toBe("Split right (copy)");
-    expect(actions.find((item) => item.id === "layout.split.bottom")?.label).toBe("Split bottom (copy)");
+    expect(actions.find((item) => item.id === "layout.split.top")?.label).toBe("Split top (duplicate session)");
+    expect(actions.find((item) => item.id === "layout.split.left")?.label).toBe("Split left (duplicate session)");
+    expect(actions.find((item) => item.id === "layout.split.right")?.label).toBe("Split right (duplicate session)");
+    expect(actions.find((item) => item.id === "layout.split.bottom")?.label).toBe("Split bottom (duplicate session)");
   });
 
   it("exposes split labels in empty-pane mode", () => {
@@ -49,10 +49,10 @@ describe("buildPaneContextActions", () => {
       splitMode: "empty",
     });
 
-    expect(actions.find((item) => item.id === "layout.split.top")?.label).toBe("Split top (new)");
-    expect(actions.find((item) => item.id === "layout.split.left")?.label).toBe("Split left (new)");
-    expect(actions.find((item) => item.id === "layout.split.right")?.label).toBe("Split right (new)");
-    expect(actions.find((item) => item.id === "layout.split.bottom")?.label).toBe("Split bottom (new)");
+    expect(actions.find((item) => item.id === "layout.split.top")?.label).toBe("Split top (empty pane)");
+    expect(actions.find((item) => item.id === "layout.split.left")?.label).toBe("Split left (empty pane)");
+    expect(actions.find((item) => item.id === "layout.split.right")?.label).toBe("Split right (empty pane)");
+    expect(actions.find((item) => item.id === "layout.split.bottom")?.label).toBe("Split bottom (empty pane)");
   });
 
   it("shows only one broadcast switch action", () => {
@@ -61,7 +61,9 @@ describe("buildPaneContextActions", () => {
       broadcastModeEnabled: false,
       broadcastCount: 0,
     });
-    expect(onActions.find((item) => item.id === "broadcast.mode.enable")?.label).toBe("Broadcast on");
+    expect(onActions.find((item) => item.id === "broadcast.mode.enable")?.label).toBe(
+      "Broadcast keyboard input to multiple panes",
+    );
     expect(onActions.find((item) => item.id === "broadcast.mode.disable")).toBeUndefined();
 
     const offActions = buildPaneContextActions({
@@ -69,8 +71,34 @@ describe("buildPaneContextActions", () => {
       broadcastModeEnabled: true,
       broadcastCount: 2,
     });
-    expect(offActions.find((item) => item.id === "broadcast.mode.disable")?.label).toBe("Broadcast off");
+    expect(offActions.find((item) => item.id === "broadcast.mode.disable")?.label).toBe(
+      "Stop broadcasting keyboard to multiple panes",
+    );
     expect(offActions.find((item) => item.id === "broadcast.mode.enable")).toBeUndefined();
+  });
+
+  it("shows only one free move switch action", () => {
+    const offActions = buildPaneContextActions({
+      paneSessionId: "pane-1",
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+      freeMoveEnabled: false,
+    });
+    expect(offActions.find((item) => item.id === "layout.freeMove.enable")?.label).toBe(
+      "Pause auto-arrange (manual layout only)",
+    );
+    expect(offActions.find((item) => item.id === "layout.freeMove.disable")).toBeUndefined();
+
+    const onActions = buildPaneContextActions({
+      paneSessionId: "pane-1",
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+      freeMoveEnabled: true,
+    });
+    expect(onActions.find((item) => item.id === "layout.freeMove.disable")?.label).toBe(
+      "Resume auto-arrange for layout",
+    );
+    expect(onActions.find((item) => item.id === "layout.freeMove.enable")).toBeUndefined();
   });
 
   it("keeps context menu grouping and split order stable", () => {
@@ -86,6 +114,7 @@ describe("buildPaneContextActions", () => {
       "layout.split.left",
       "layout.split.right",
       "layout.split.bottom",
+      "layout.freeMove.enable",
       "broadcast.mode.enable",
       "broadcast.togglePaneTarget",
       "pane.clear",

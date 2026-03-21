@@ -25,6 +25,12 @@ Trigger:
 
 - Push tag matching `v*`
 
+Pipeline order:
+
+1. **Validate tag** — SemVer format and prerelease flag.
+2. **Test (Ubuntu only)** — `npm test` (Vitest) and `cargo test` in `apps/desktop/src-tauri`. If this job fails, **no** platform builds or GitHub release are produced.
+3. **Build matrix** — only runs after tests pass.
+
 Build matrix:
 
 - `ubuntu-latest`
