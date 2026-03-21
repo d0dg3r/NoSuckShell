@@ -138,7 +138,7 @@ jobs:
           (cd "$out" && zip -r -q ../marketing-screenshots.zip .)
 
       - name: Upload marketing screenshots
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: marketing-screenshots
           if-no-files-found: error
@@ -268,7 +268,7 @@ jobs:
         run: npm run tauri:build
 
       - name: Upload platform bundles
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.artifact_name }}
           if-no-files-found: error
