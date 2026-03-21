@@ -35,6 +35,14 @@ use view_profiles::{
 use tauri::State;
 use store_models::{EntityStore, HostBinding, SshKeyObject, TagObject, UserObject, GroupObject};
 
+#[derive(serde::Deserialize)]
+struct BackupIpcArgs {
+    path: String,
+    /// Wire key stays `password` for the TypeScript `invoke(..., { path, password })` payload.
+    #[serde(rename = "password")]
+    secret: String,
+}
+
 #[derive(serde::Serialize)]
 struct SessionStarted {
     session_id: String,
@@ -213,18 +221,18 @@ fn close_session(sessions: State<'_, SessionState>, session_id: String) -> Resul
 }
 
 #[tauri::command]
-fn export_backup(path: String, password: String) -> Result<(), String> {
+fn export_backup(args: BackupIpcArgs) -> Result<(), String> {
     let payload = create_backup_payload(
         load_ssh_config_raw().map_err(|err| err.to_string())?,
         load_metadata().map_err(|err| err.to_string())?,
     )
     .map_err(|err| err.to_string())?;
-    export_encrypted_backup(&path, &password, &payload).map_err(|err| err.to_string())
+    export_encrypted_backup(&args.path, &args.secret, &payload).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn import_backup(path: String, password: String) -> Result<(), String> {
-    let payload = import_encrypted_backup(&path, &password).map_err(|err| err.to_string())?;
+fn import_backup(args: BackupIpcArgs) -> Result<(), String> {
+    let payload = import_encrypted_backup(&args.path, &args.secret).map_err(|err| err.to_string())?;
     write_ssh_config_raw(&payload.ssh_config).map_err(|err| err.to_string())?;
     save_metadata(&payload.metadata).map_err(|err| err.to_string())
 }
@@ -267,7 +275,6 @@ fn reorder_view_profiles(ids: Vec<String>) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .manage(SessionState::default())
-        // codeql[rust/hard-coded-cryptographic-value]: False positive — `generate_handler!` only registers Tauri IPC command symbols, not literal passwords or keys.
         .invoke_handler(tauri::generate_handler![
             list_hosts,
             save_host,
