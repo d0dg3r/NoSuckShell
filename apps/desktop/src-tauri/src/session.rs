@@ -341,6 +341,24 @@ mod tests {
         let cmd = build_local_shell_command(Some("/usr/bin/fish"));
         let rendered = format!("{cmd:?}");
         assert!(rendered.contains("/usr/bin/fish"));
+        // `-l` (login shell) is only passed on POSIX-like platforms.
+        #[cfg(not(target_os = "windows"))]
         assert!(rendered.contains("-l"));
+        #[cfg(target_os = "windows")]
+        assert!(!rendered.contains("-l"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn builds_local_shell_command_default_uses_windows_shell() {
+        let cmd = build_local_shell_command(None);
+        let rendered = format!("{cmd:?}").to_lowercase();
+        // On Windows the default must resolve to PowerShell or cmd.exe, never Unix paths.
+        assert!(
+            rendered.contains("powershell") || rendered.contains("cmd"),
+            "expected PowerShell or cmd.exe as default shell on Windows, got: {rendered}"
+        );
+        // Login flag must not be passed to Windows shells.
+        assert!(!rendered.contains("-l"));
     }
 }
