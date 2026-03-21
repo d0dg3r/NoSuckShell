@@ -291,14 +291,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: bundle-*
           merge-multiple: true
           path: release-artifacts
 
       - name: Download marketing screenshots
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: marketing-screenshots
           path: marketing-screenshots-artifact
