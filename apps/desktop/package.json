@@ -7,7 +7,7 @@
     "build": "tsc && vite build",
     "build:e2e": "tsc && vite build --mode e2e",
     "preview": "vite preview",
-    "preview:e2e": "vite preview --mode e2e --host 127.0.0.1 --port 4173",
+    "preview:e2e": "vite preview --mode e2e --host 127.0.0.1 --port 4180",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest run",

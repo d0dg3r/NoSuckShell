@@ -269,6 +269,34 @@ const hasTauriTransformCallback = (): boolean => {
   return typeof tauriInternals?.transformCallback === "function";
 };
 
+/** Block WebKit/Electron default context menu app-wide except in real text fields. */
+const allowNativeBrowserContextMenu = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  if (target.closest("textarea, select, [contenteditable='true'], [contenteditable='']")) {
+    return true;
+  }
+  const input = target.closest("input");
+  if (!input) {
+    return false;
+  }
+  const type = (input as HTMLInputElement).type;
+  return (
+    type === "text" ||
+    type === "search" ||
+    type === "password" ||
+    type === "email" ||
+    type === "url" ||
+    type === "tel" ||
+    type === "number" ||
+    type === "date" ||
+    type === "time" ||
+    type === "datetime-local" ||
+    type === ""
+  );
+};
+
 const clampSidebarWidth = (value: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
 const readLayoutMode = (): LayoutMode => {
   if (typeof window === "undefined") {
@@ -437,6 +465,45 @@ const createEmptyWorkspaceSnapshot = (id: string, name: string): WorkspaceSnapsh
 };
 const collectPaneOrder = (node: SplitTreeNode): number[] =>
   node.type === "leaf" ? [node.paneIndex] : [...collectPaneOrder(node.first), ...collectPaneOrder(node.second)];
+
+/** Places a new session into a workspace snapshot (free pane or new split). Used for host connect → chosen workspace. */
+const appendSessionToWorkspaceSnapshot = (
+  targetSnapshot: WorkspaceSnapshot,
+  sessionId: string,
+  splitRatioDefaultValue: number,
+): WorkspaceSnapshot => {
+  const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
+  const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
+  const nextTargetPaneIndex =
+    typeof firstFreePaneIndex === "number"
+      ? firstFreePaneIndex
+      : Math.max(-1, ...targetPaneOrder) + 1;
+  const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
+  const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
+  if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
+    nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+  }
+  const nextTargetSplitTree: SplitTreeNode =
+    typeof firstFreePaneIndex === "number"
+      ? cloneSplitTree(targetSnapshot.splitTree)
+      : {
+          id: `split-workspace-${createId()}`,
+          type: "split",
+          axis: "vertical",
+          ratio: splitRatioDefaultValue,
+          first: cloneSplitTree(targetSnapshot.splitTree),
+          second: createLeafNode(nextTargetPaneIndex),
+        };
+  return {
+    ...cloneWorkspaceSnapshot(targetSnapshot),
+    splitSlots: nextTargetSlots,
+    paneLayouts: nextTargetPaneLayouts,
+    splitTree: nextTargetSplitTree,
+    activePaneIndex: nextTargetPaneIndex,
+    activeSessionId: sessionId,
+  };
+};
+
 const replacePaneInTree = (
   node: SplitTreeNode,
   targetPaneIndex: number,
@@ -747,6 +814,11 @@ export function App() {
     paneIndex: null,
     splitMode: "duplicate",
   });
+  const [hostContextMenu, setHostContextMenu] = useState<{
+    x: number;
+    y: number;
+    host: HostConfig;
+  } | null>(null);
   const sidebarDragStartXRef = useRef<number>(0);
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -985,8 +1057,8 @@ export function App() {
   );
   const sidebarViews = useMemo(
     () => [
-      { id: "builtin:all" as SidebarViewId, label: "Alle" },
-      { id: "builtin:favorites" as SidebarViewId, label: "Favoriten" },
+      { id: "builtin:all" as SidebarViewId, label: "All" },
+      { id: "builtin:favorites" as SidebarViewId, label: "Favorites" },
       ...sortedViewProfiles.map((profile) => ({
         id: `custom:${profile.id}` as SidebarViewId,
         label: profile.name,
@@ -1606,17 +1678,39 @@ export function App() {
   }, [autoArrangeMode, paneOrder, splitSlots, splitTree]);
 
   useEffect(() => {
-    if (!contextMenu.visible) {
+    if (!contextMenu.visible && !hostContextMenu) {
       return;
     }
     const hide = () => {
       setContextMenu((prev) => ({ ...prev, visible: false }));
+      setHostContextMenu(null);
     };
     window.addEventListener("click", hide);
     return () => {
       window.removeEventListener("click", hide);
     };
-  }, [contextMenu.visible]);
+  }, [contextMenu.visible, hostContextMenu]);
+
+  useEffect(() => {
+    const paneMenuOpen = contextMenu.visible && contextMenu.paneIndex !== null;
+    if (!paneMenuOpen && !hostContextMenu) {
+      return;
+    }
+    const blockNativeMenuOutsideOverlay = (e: Event) => {
+      const ev = e as MouseEvent;
+      const t = ev.target;
+      if (!(t instanceof Element)) {
+        return;
+      }
+      if (t.closest(".context-menu")) {
+        return;
+      }
+      ev.preventDefault();
+    };
+    document.addEventListener("contextmenu", blockNativeMenuOutsideOverlay, true);
+    return () => document.removeEventListener("contextmenu", blockNativeMenuOutsideOverlay, true);
+  }, [contextMenu.visible, contextMenu.paneIndex, hostContextMenu]);
+
   useEffect(() => {
     if (!contextMenu.visible) {
       return;
@@ -1911,6 +2005,13 @@ export function App() {
       setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
       return host.host;
     });
+  };
+
+  const openHostMenuForHost = (host: HostConfig) => {
+    setActiveHost(host.host);
+    setCurrentHost(host);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setOpenHostMenuHostAlias(host.host);
   };
 
   const toggleHostSelection = (host: HostConfig) => {
@@ -3217,6 +3318,57 @@ export function App() {
     [activeSession, activeWorkspaceId, paneOrder, splitRatioDefaultValue, splitSlots, workspaceSnapshots],
   );
 
+  const connectToHostInWorkspace = useCallback(
+    async (host: HostConfig, targetWorkspaceId: string): Promise<void> => {
+      const priorActiveSession = activeSession;
+      const priorActivePaneIndex = activePaneIndex;
+      const startedSessionId = await connectToHost(host);
+      if (!startedSessionId) {
+        return;
+      }
+      if (targetWorkspaceId === activeWorkspaceId) {
+        placeSessionIntoNewOrFreePane(startedSessionId, priorActivePaneIndex);
+        return;
+      }
+      const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
+      if (!targetSnapshot) {
+        return;
+      }
+      const nextTargetSnapshot = appendSessionToWorkspaceSnapshot(
+        targetSnapshot,
+        startedSessionId,
+        splitRatioDefaultValue,
+      );
+      const persistedCurrentSnapshot: WorkspaceSnapshot = {
+        id: activeWorkspaceId,
+        name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex: priorActivePaneIndex,
+        activeSessionId: priorActiveSession,
+      };
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [activeWorkspaceId]: persistedCurrentSnapshot,
+        [targetWorkspaceId]: nextTargetSnapshot,
+      }));
+      setActiveWorkspaceId(targetWorkspaceId);
+      applyWorkspaceSnapshot(nextTargetSnapshot);
+    },
+    [
+      activePaneIndex,
+      activeSession,
+      activeWorkspaceId,
+      applyWorkspaceSnapshot,
+      paneLayouts,
+      splitRatioDefaultValue,
+      splitSlots,
+      splitTree,
+      workspaceSnapshots,
+    ],
+  );
+
   const handleContextAction = async (
     actionId: ContextActionId,
     paneIndex: number,
@@ -3279,6 +3431,9 @@ export function App() {
         break;
       case "layout.freeMove.disable":
         setAutoArrangeMode(lastAutoArrangeBeforeFreeRef.current);
+        break;
+      case "app.openSettings":
+        setIsAppSettingsOpen(true);
         break;
       default:
         break;
@@ -3708,6 +3863,7 @@ export function App() {
           }}
           onContextMenu={(event) => {
             event.preventDefault();
+            setHostContextMenu(null);
             const initialSplitMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
             setContextMenu({
               visible: true,
@@ -4010,7 +4166,19 @@ export function App() {
   };
 
   const renderHostRow = (row: HostRowViewModel, key: string) => (
-    <div key={key} className="host-row">
+    <div
+      key={key}
+      className="host-row"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+        setHostContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          host: row.host,
+        });
+      }}
+    >
       <div
         className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
           activeHost === row.host.host ? "is-active" : ""
@@ -4044,7 +4212,7 @@ export function App() {
             toggleHostSelection(row.host);
           }}
           onMouseEnter={() => {
-            // Nur Hover-Verhalten für verbundene Hosts aktivieren, um Flackern zu vermeiden
+            // Only enable hover affordances for connected hosts to avoid flicker on disconnected rows
             if (row.connected) {
               setHoveredHostAlias(row.host.host);
             }
@@ -4179,6 +4347,8 @@ export function App() {
     contextMenuPaneSessionId && workspaceTabs.length > 1
       ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
       : [];
+  const workspaceSendPlaceholder =
+    Boolean(contextMenuPaneSessionId) && workspaceTabs.length === 1;
 
   return (
     <main
@@ -4196,6 +4366,12 @@ export function App() {
       data-frame-mode={frameModePreset}
       data-ui-font={uiFontPreset}
       style={appShellStyle}
+      onContextMenuCapture={(event) => {
+        if (allowNativeBrowserContextMenu(event.target)) {
+          return;
+        }
+        event.preventDefault();
+      }}
     >
       <button
         type="button"
@@ -4216,79 +4392,49 @@ export function App() {
         onMouseLeave={maybeHideSidebar}
       >
         <header className="brand">
-          <div className="brand-logo-card">
-            <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
-          </div>
-          <div className="brand-utility-stack">
-            <div className="brand-utility-row">
-              <button
-                className={`btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`}
-                aria-pressed={isSidebarPinned}
-                aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
-                title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
-                onClick={toggleSidebarPinned}
-              >
-                <svg className={`header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`} viewBox="0 0 24 24" aria-hidden="true">
-                  {isSidebarPinned ? (
-                    <>
-                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
-                      <path d="M12 14.4v7.1" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
-                      <path d="M12 14.4v7.1" />
-                      <path d="M4.3 4.3l15.4 15.4" />
-                    </>
-                  )}
-                </svg>
-              </button>
-              <button
-                className="app-gear-btn sidebar-header-icon-btn mono-header-btn"
-                aria-label="Open app settings"
-                title="Open app settings"
-                onClick={() => setIsAppSettingsOpen((prev) => !prev)}
-              >
-                <svg className="header-icon-svg settings-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3.2" />
-                  <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" />
-                </svg>
-              </button>
+          <div
+            className={`brand-bar${isQuickAddMenuOpen ? " is-quick-add-open" : ""}`}
+            ref={quickAddMenuRef}
+          >
+            <div className="brand-logo-area">
+              <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
             </div>
-            <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap" ref={quickAddMenuRef}>
-              <button
-                className="btn host-plus-btn"
-                aria-label="Open add menu"
-                title="Add host"
-                onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
-              >
-                <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 6v12M6 12h12" />
-                </svg>
-              </button>
-              {isQuickAddMenuOpen && (
-                <div className="quick-add-menu" role="menu">
-                  <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane(activePaneIndex)}>
-                    New local terminal
-                  </button>
-                  <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
-                    Quick connect terminal
-                  </button>
-                  <button className="quick-add-menu-item" onClick={openAddHostModal}>
-                    Add host
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add group
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add user
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add key
-                  </button>
-                </div>
-              )}
+            <div className="brand-add-column">
+              <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap">
+                <button
+                  className="btn host-plus-btn"
+                  aria-label="Open add menu"
+                  title="Add host"
+                  onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
+                >
+                  <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 6v12M6 12h12" />
+                  </svg>
+                </button>
+              </div>
             </div>
+            {isQuickAddMenuOpen && (
+              <div className="quick-add-menu" role="menu">
+                <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane(activePaneIndex)}>
+                  New local terminal
+                </button>
+                <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
+                  Quick connect terminal
+                </button>
+                <button className="quick-add-menu-item" onClick={openAddHostModal}>
+                  Add host
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add group
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add user
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add key
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -4543,6 +4689,8 @@ export function App() {
           setAutoArrangeMode={setAutoArrangeMode}
           isBroadcastModeEnabled={isBroadcastModeEnabled}
           setBroadcastMode={setBroadcastMode}
+          isSidebarPinned={isSidebarPinned}
+          setSidebarPinned={setIsSidebarPinned}
           metadataStore={metadataStore}
           setMetadataStore={setMetadataStore}
           applyDefaultUser={applyDefaultUser}
@@ -4930,7 +5078,14 @@ export function App() {
         </div>
       )}
       {contextMenu.visible && contextMenu.paneIndex !== null && (
-        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          role="menu"
+          onContextMenuCapture={(event) => {
+            event.preventDefault();
+          }}
+        >
           {buildPaneContextActions({
             paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
             canClosePane: paneOrder.length > 1,
@@ -4968,6 +5123,45 @@ export function App() {
               Send to {workspace.name}
             </button>
           ))}
+          {workspaceSendPlaceholder && (
+            <button type="button" className="context-menu-item separator-above" disabled>
+              Send to other workspace (add another workspace tab)
+            </button>
+          )}
+        </div>
+      )}
+      {hostContextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: hostContextMenu.x, top: hostContextMenu.y }}
+          role="menu"
+          onContextMenuCapture={(event) => {
+            event.preventDefault();
+          }}
+        >
+          {workspaceTabs.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                void connectToHostInWorkspace(hostContextMenu.host, workspace.id);
+                setHostContextMenu(null);
+              }}
+            >
+              Connect in {workspace.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="context-menu-item separator-above"
+            onClick={() => {
+              openHostMenuForHost(hostContextMenu.host);
+              setHostContextMenu(null);
+            }}
+          >
+            Edit host
+          </button>
         </div>
       )}
       {isStackedShell && (

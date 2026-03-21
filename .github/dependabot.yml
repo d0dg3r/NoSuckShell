@@ -1,9 +1,9 @@
-# Dependabot-Konfiguration für NoSuckShell
+# Dependabot configuration for NoSuckShell
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
 updates:
-  # npm-Dependencies (apps/desktop)
+  # npm dependencies (apps/desktop)
   - package-ecosystem: "npm"
     directory: "/apps/desktop"
     schedule:
@@ -16,7 +16,7 @@ updates:
       - "dependencies"
       - "npm"
 
-  # Rust/Cargo-Dependencies (Tauri-Backend)
+  # Rust/Cargo dependencies (Tauri backend)
   - package-ecosystem: "cargo"
     directory: "/apps/desktop/src-tauri"
     schedule:

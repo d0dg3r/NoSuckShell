@@ -93,6 +93,8 @@ export type AppSettingsPanelProps = {
   setAutoArrangeMode: (value: AutoArrangeMode) => void;
   isBroadcastModeEnabled: boolean;
   setBroadcastMode: (enabled: boolean) => void;
+  isSidebarPinned: boolean;
+  setSidebarPinned: (value: boolean) => void;
   metadataStore: HostMetadataStore;
   setMetadataStore: React.Dispatch<React.SetStateAction<HostMetadataStore>>;
   applyDefaultUser: (value: string) => Promise<void>;
@@ -192,6 +194,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setAutoArrangeMode,
     isBroadcastModeEnabled,
     setBroadcastMode,
+    isSidebarPinned,
+    setSidebarPinned,
     metadataStore,
     setMetadataStore,
     applyDefaultUser,
@@ -417,6 +421,20 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       <p className="muted-copy">Define how hosts and terminals are arranged across screen sizes.</p>
                     </header>
                     <div className="host-form-grid">
+                      <label className="field field-span-2 checkbox-field">
+                        <input
+                          id="settings-sidebar-pinned"
+                          type="checkbox"
+                          className="checkbox-input"
+                          checked={isSidebarPinned}
+                          onChange={(event) => setSidebarPinned(event.target.checked)}
+                        />
+                        <span className="field-label">Host sidebar always visible (pinned)</span>
+                      </label>
+                      <p className="muted-copy field-span-2">
+                        When off, the sidebar can auto-hide; hover the left edge or use the slim handle to show it. You
+                        can still toggle pin from that edge handle.
+                      </p>
                       <label className="field field-span-2">
                         <span className="field-label">Window layout</span>
                         <select
@@ -477,8 +495,9 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         <span className="field-label">Broadcast keyboard to multiple terminals</span>
                       </label>
                       <p className="muted-copy field-span-2">
-                        When enabled, add target panes from the toolbar or context menu, then your typing is sent to every
-                        targeted session. Turn off here or from any pane&apos;s broadcast button.
+                        When enabled, add targets from each pane&apos;s toolbar (target / all visible), the pane context
+                        menu, or this checkbox. The session footer shows state and how many panes are targeted. Turn off
+                        from the toolbar, here, or the context menu.
                       </p>
                     </div>
                   </section>
@@ -1020,8 +1039,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       </button>
                     </div>
                     <p className="muted-copy">
-                      Gruppen/Tags bleiben im Hybrid-Modell zusaetzlich in Legacy-Hostdaten nutzbar und koennen spaeter
-                      voll migriert werden.
+                      Groups and tags also remain available on legacy host records in the hybrid model and can be fully
+                      migrated later.
                     </p>
                   </section>
                   </div>

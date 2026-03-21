@@ -2,8 +2,9 @@
 <!--
   Copy the <screenshots> block into your AppStream metainfo (e.g. Flatpak).
   Adjust image URLs to your Flathub repo raw paths or relative install paths.
-  For German-only screenshots, add xml:lang="de" on each <screenshot> and
-  translate captions; still provide at least one English screenshot for Flathub curation.
+  Default assets assume English UI and English captions. For another locale, add
+  xml:lang on those <screenshot> nodes and translated captions; keep at least
+  one English screenshot for Flathub curation where required.
 -->
 <screenshots>
   <screenshot type="default">

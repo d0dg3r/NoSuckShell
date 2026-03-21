@@ -13,7 +13,8 @@ export type ContextActionId =
   | "broadcast.mode.disable"
   | "broadcast.selectAllVisible"
   | "broadcast.clearTargets"
-  | "broadcast.togglePaneTarget";
+  | "broadcast.togglePaneTarget"
+  | "app.openSettings";
 
 export type ContextAction = {
   id: ContextActionId;
@@ -118,6 +119,11 @@ export const buildPaneContextActions = ({
       id: "pane.close",
       label: "Close pane",
       disabled: !canClosePane,
+    },
+    {
+      id: "app.openSettings",
+      label: "Open app settings",
+      separatorAbove: true,
     },
   ];
 };

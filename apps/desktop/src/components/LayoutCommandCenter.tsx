@@ -227,7 +227,7 @@ export function LayoutCommandCenter({
           </div>
 
           <div className="layout-command-center-column layout-command-center-column-sessions">
-            <h3 className="layout-command-center-section-title">Sessions aufräumen</h3>
+            <h3 className="layout-command-center-section-title">Clean up sessions</h3>
             <p className="muted-copy layout-command-center-hint">
               Destructive actions need a second click to confirm (same as before).
             </p>

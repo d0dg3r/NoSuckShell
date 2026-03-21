@@ -119,6 +119,7 @@ describe("buildPaneContextActions", () => {
       "broadcast.togglePaneTarget",
       "pane.clear",
       "pane.close",
+      "app.openSettings",
     ]);
   });
 });

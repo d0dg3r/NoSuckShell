@@ -38,14 +38,11 @@ One short sentence per image, **no trailing period**, for `<caption>` in metainf
 | `06-organization.png` | Favorites, tags, and custom views in the sidebar |
 | `07-broadcast.png` | Broadcast input to multiple sessions when enabled |
 
-German UI shots: tag screenshots with `xml:lang="de"` in metainfo and use German captions (same meaning).
+**Localized store listings:** If you ship screenshots where the on-screen UI is not English, set `xml:lang` on those `<screenshot>` elements in AppStream metainfo to match the locale and translate captions. Flathub curation still expects at least one screenshot whose visible chrome and caption are English.
 
-## Language policy (Flathub)
+## Language policy (screenshots & stores)
 
-**Current committed assets** come from the automated run above: the UI is **mixed English and German** (e.g. sidebar **Favoriten**, settings tabs in English). For Flathub **quality / featuring**, plan either:
-
-- at least **one** screenshot whose visible chrome is **English-first**, or  
-- tag German-heavy shots with `xml:lang="de"` in metainfo **and** add a separate English image.
+**Target:** README and store screenshots should show **English UI** with the English captions above (aligned with in-app copy). Regenerate or re-capture after UI string changes so assets stay consistent. The Playwright screenshot pipeline renders the same React UI as the desktop build.
 
 See [metainfo-captions.xml](metainfo-captions.xml) for a copy-paste snippet.
 

@@ -1,8 +1,8 @@
-# Refactoring: Schmerzpunkte & Roadmap (`App.tsx`)
+# Refactoring: pain points & roadmap (`App.tsx`)
 
 This document records **when** a larger frontend refactor pays off, a **lightweight map** of [`apps/desktop/src/App.tsx`](../apps/desktop/src/App.tsx), and **three incremental extraction candidates**. It implements the team decision from the refactor plan: prefer small PRs aligned with [`architecture.md`](architecture.md) (`components/`, `features/`).
 
-## 1. Schmerzpunkte festlegen (Refactor nur bei Bedarf)
+## 1. When to refactor (pain points)
 
 Treat refactoring as a **tool**, not a goal. Start or schedule work when **at least one** of these is true:
 
@@ -17,11 +17,11 @@ If none of these apply and releases are stable, **defer** large splits; use the 
 
 **Already in good shape:** Rust modules in `src-tauri`, shared helpers under `features/`, and IPC in `tauri-api.ts` — no parallel backend refactor is required for frontend cleanup.
 
-## 2. Mini-Audit: Struktur von `App.tsx`
+## 2. Mini-audit: `App.tsx` structure
 
 Line ranges are approximate (file size changes over time). Use them as **navigation hints**, not rigid contracts.
 
-| Region (lines) | Inhalt |
+| Region (lines) | Content |
 | --- | --- |
 | **~1–661** | Imports; module-level **types** (`SessionTab`, `WorkspaceSnapshot`, `SplitTreeNode`, …); **constants** (storage keys, layout presets, `MOBILE_STACKED_MEDIA`); **pure helpers** (split-tree clone/rebalance, pane drop overlay math, …). View filters: [`features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts). |
 | **~662–~3750** | `export function App()`: **state** (hosts, sessions, entity store, workspaces, layout profiles, UI chrome, modals); **refs**; **effects** (persistence, listeners, focus); **handlers** (connect, save host, backup, layout apply, …). |
@@ -30,7 +30,7 @@ Line ranges are approximate (file size changes over time). Use them as **navigat
 
 **Effect / listener clusters:** search within `App()` for `useEffect` and `listen(` — most side effects live in the middle third of the component; extracting UI without moving the owning effect first tends to create stale closures or duplicate subscriptions.
 
-## 3. Drei inkrementelle Extraktionen (Reihenfolge: risikoarm → größer)
+## 3. Three incremental extractions (order: low risk → larger)
 
 Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/desktop`) green before merge.
 
@@ -44,7 +44,7 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 **Risk:** Low — no React; easy to unit test beside existing `features/*.test.ts`.
 
-**Benefit:** Lesbarkeit + Testbarkeit; shrinks `App.tsx` without prop drilling.
+**Benefit:** Readability + testability; shrinks `App.tsx` without prop drilling.
 
 ### B) App settings panel body → `components/`
 
@@ -64,8 +64,8 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 **Risk:** Medium–high — DnD (`setDragPayload`, hover highlights) and host slide-menu tie into global state; extract in slices (list-only first, then drag).
 
-**Benefit:** Parallele Entwicklung (Hosts vs Terminal-Bereich); klarere Grenze für zukünftige Features.
+**Benefit:** Parallel development (hosts vs terminal area); clearer boundary for future features.
 
-## 4. TypeScript-Ausgabe (`noEmit`)
+## 4. TypeScript output (`noEmit`)
 
 Compiler output next to sources (duplicate `.js` files) is avoided by `"noEmit": true` in [`apps/desktop/tsconfig.json`](../apps/desktop/tsconfig.json). `npm run build` remains `tsc && vite build`: **typecheck only** from `tsc`, bundling from Vite.

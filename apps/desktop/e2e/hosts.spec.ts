@@ -1,10 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-/**
- * Requires a working `invoke` in the preview bundle (e2e shims). Until then:
- * `PW_E2E_HOSTS=1 npx playwright test e2e/hosts.spec.ts` when debugging locally.
- */
-(process.env.PW_E2E_HOSTS ? test.describe : test.describe.skip)("hosts", () => {
+test.describe("hosts", () => {
   test("add saved host and open SSH session with mock output", async ({ page }) => {
     await page.goto("/");
 
