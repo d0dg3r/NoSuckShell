@@ -19,14 +19,14 @@ If none of these apply and releases are stable, **defer** large splits; use the 
 
 ## 2. Mini-audit: `App.tsx` structure
 
-Line ranges are approximate (~**4055** lines as of the terminal-dock extraction). Use them as **navigation hints**, not rigid contracts.
+Line ranges are approximate (~**4048** lines in `App.tsx` after sidebar bridge + settings split). Use them as **navigation hints**, not rigid contracts.
 
 | Region (lines) | Content |
 | --- | --- |
 | **~1–~220** | Imports; lazy `LayoutCommandCenter`; re-exports from [`features/`](../apps/desktop/src/features/) (split-tree, workspace snapshot, pane DnD, preferences, session model, bootstrap, …). |
-| **~220–~3650** | `export function App()`: **state**, **refs**, **effects** (many persisted in `hooks/` — workspace bootstrap/persist, ref sync, session-output trust listener), **handlers** (connect, backup, layout, DnD, …). |
-| **~3650–~3850** | `createSplitPaneRenderer` bridge; host list rows render inside [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) via [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) + `hostListRowBridge`. |
-| **~3750–end** | **Root JSX**: `app-shell`, [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx), [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx) (workspace tabs + DnD, terminal grid / mobile pager, footer), context menus, settings, modals ([`AddHostModal`](../apps/desktop/src/components/AddHostModal.tsx), [`QuickConnectModal`](../apps/desktop/src/components/QuickConnectModal.tsx), [`TrustHostModal`](../apps/desktop/src/components/TrustHostModal.tsx)), mobile shell. Split panes still use `renderSplitNode` from [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx). |
+| **~220–~3610** | `export function App()`: **state**, **refs**, **effects** (many persisted in `hooks/` — workspace bootstrap/persist, ref sync, session-output trust listener), **handlers** (connect, backup, layout, DnD, …). |
+| **~3610–~3668** | `createSplitPaneRenderer` → `renderSplitNode` bridge; host list rows live in [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) via [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) + `hostListRowBridge`. |
+| **~3669–end** | **Root JSX**: `app-shell`, [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx), [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx) (workspace tabs + DnD, terminal grid / mobile pager, footer), context menus, settings, modals ([`AddHostModal`](../apps/desktop/src/components/AddHostModal.tsx), [`QuickConnectModal`](../apps/desktop/src/components/QuickConnectModal.tsx), [`TrustHostModal`](../apps/desktop/src/components/TrustHostModal.tsx)), mobile shell. Split panes use `renderSplitNode` from [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx). |
 
 **Pure logic (no React)** now also lives in: [`split-tree.ts`](../apps/desktop/src/features/split-tree.ts), [`workspace-snapshot.ts`](../apps/desktop/src/features/workspace-snapshot.ts), [`pane-dnd.ts`](../apps/desktop/src/features/pane-dnd.ts), [`app-preferences.ts`](../apps/desktop/src/features/app-preferences.ts), [`app-bootstrap.ts`](../apps/desktop/src/features/app-bootstrap.ts), [`session-model.ts`](../apps/desktop/src/features/session-model.ts), [`app-id.ts`](../apps/desktop/src/features/app-id.ts), [`tauri-runtime.ts`](../apps/desktop/src/features/tauri-runtime.ts) (with Vitest where noted in repo).
 
@@ -56,6 +56,7 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 ## 4. Optional next steps (not required)
 
+- **Component smoke tests:** [`HostListRow.test.tsx`](../apps/desktop/src/components/HostListRow.test.tsx) covers render, favorite / selection clicks, and open slide + `HostForm` (bridge props via `noopBridge()` helper).
 - **`useReducer` / context** for workspace or split state: defer until interaction bugs or review pain justify a single owner for that subgraph; current hooks + props remain easier to follow for most changes.
 - **Further shrink `App`:** [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) renders [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) via a typed `hostListRowBridge` (no `renderHostRow` callback in `App`). Right-dock workspace UI lives in [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx).
 
