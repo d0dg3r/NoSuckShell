@@ -28,8 +28,7 @@ fn now_unix() -> u64 {
 }
 
 fn home_ssh_dir() -> Result<PathBuf> {
-    let home = home::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
-    Ok(home.join(".ssh"))
+    crate::ssh_home::effective_ssh_dir()
 }
 
 fn store_path() -> Result<PathBuf> {
@@ -141,6 +140,7 @@ pub fn create_encrypted_key(
         nonce,
         fingerprint: format!("fp-{}", &id[4..12]),
         public_key,
+        tag_ids: vec![],
         created_at: ts,
         updated_at: ts,
     };
@@ -190,12 +190,44 @@ pub fn delete_key(key_id: &str) -> Result<()> {
     for binding in store.host_bindings.values_mut() {
         binding.key_refs.retain(|entry| entry.key_id != key_id);
     }
+    for user in store.users.values_mut() {
+        user.key_refs.retain(|entry| entry.key_id != key_id);
+    }
     store.updated_at = now_unix();
     write_store(&store)?;
     if let Ok(mut cache) = unlocked_key_cache().lock() {
         cache.remove(key_id);
     }
     Ok(())
+}
+
+fn resolved_identity_file_for_key_id(store: &EntityStore, key_id: &str) -> Result<Option<String>> {
+    let Some(key_obj) = store.keys.get(key_id) else {
+        return Ok(None);
+    };
+    match key_obj {
+        SshKeyObject::Path {
+            identity_file_path, ..
+        } => {
+            if identity_file_path.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(identity_file_path.clone()))
+            }
+        }
+        SshKeyObject::Encrypted { id, .. } => {
+            let maybe_unlocked = unlocked_key_cache()
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(id).cloned());
+            if let Some(private_key) = maybe_unlocked {
+                let runtime_path = write_runtime_private_key(id, &private_key)?;
+                Ok(Some(runtime_path.to_string_lossy().to_string()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
 }
 
 pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> {
@@ -223,33 +255,31 @@ pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> 
         resolved.proxy_command = binding.legacy_proxy_command.clone();
     }
 
+    let mut identity_from_keys: Option<String> = None;
     if let Some(primary_ref) = binding
         .key_refs
         .iter()
         .find(|entry| entry.usage == "primary")
         .or_else(|| binding.key_refs.first())
     {
-        if let Some(key_obj) = store.keys.get(&primary_ref.key_id) {
-            match key_obj {
-                SshKeyObject::Path {
-                    identity_file_path, ..
-                } => {
-                    if !identity_file_path.trim().is_empty() {
-                        resolved.identity_file = identity_file_path.clone();
-                    }
-                }
-                SshKeyObject::Encrypted { id, .. } => {
-                    let maybe_unlocked = unlocked_key_cache()
-                        .lock()
-                        .ok()
-                        .and_then(|cache| cache.get(id).cloned());
-                    if let Some(private_key) = maybe_unlocked {
-                        let runtime_path = write_runtime_private_key(id, &private_key)?;
-                        resolved.identity_file = runtime_path.to_string_lossy().to_string();
-                    }
+        identity_from_keys = resolved_identity_file_for_key_id(&store, &primary_ref.key_id)?;
+    }
+    if identity_from_keys.is_none() {
+        if let Some(user_id) = &binding.user_id {
+            if let Some(user) = store.users.get(user_id) {
+                if let Some(uk) = user
+                    .key_refs
+                    .iter()
+                    .find(|entry| entry.usage == "primary")
+                    .or_else(|| user.key_refs.first())
+                {
+                    identity_from_keys = resolved_identity_file_for_key_id(&store, &uk.key_id)?;
                 }
             }
         }
+    }
+    if let Some(path) = identity_from_keys {
+        resolved.identity_file = path;
     } else if !binding.legacy_identity_file.trim().is_empty() {
         resolved.identity_file = binding.legacy_identity_file.clone();
     }
@@ -278,6 +308,11 @@ fn load_or_migrate_store() -> Result<EntityStore> {
         let mut parsed: EntityStore = serde_json::from_str(&raw)?;
         if parsed.schema_version == 0 {
             parsed.schema_version = ENTITY_STORE_SCHEMA_VERSION;
+        }
+        if parsed.schema_version < ENTITY_STORE_SCHEMA_VERSION {
+            parsed.schema_version = ENTITY_STORE_SCHEMA_VERSION;
+            parsed.updated_at = now_unix();
+            write_store(&parsed)?;
         }
         return Ok(parsed);
     }
@@ -335,6 +370,8 @@ fn migrate_from_legacy_sources() -> Result<EntityStore> {
                 id: user_id,
                 name: host.user.clone(),
                 username: host.user.clone(),
+                key_refs: vec![],
+                tag_ids: vec![],
                 created_at: ts,
                 updated_at: ts,
             });
@@ -348,6 +385,7 @@ fn migrate_from_legacy_sources() -> Result<EntityStore> {
                     id: key_id.clone(),
                     name: format!("Path key ({})", host.host),
                     identity_file_path: host.identity_file.clone(),
+                    tag_ids: vec![],
                     created_at: ts,
                     updated_at: ts,
                 });

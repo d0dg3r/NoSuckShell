@@ -2,15 +2,18 @@ import type React from "react";
 import {
   Suspense,
   lazy,
+  useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from "react";
+import { mergeManagedHostStarBlock } from "../features/ssh-config-managed-block";
 import type {
   HostBinding,
   HostConfig,
   HostMetadataStore,
   GroupObject,
+  HostKeyRef,
   SshKeyObject,
   TagObject,
   UserObject,
@@ -19,6 +22,7 @@ import type {
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
+  SshDirInfo,
 } from "../types";
 import logoTerminal from "../../../../img/logo_terminal.png";
 
@@ -32,10 +36,13 @@ export type AppSettingsTab =
   | "layout"
   | "connections"
   | "data"
-  | "store"
+  | "ssh"
   | "views"
+  | "store"
   | "help"
   | "about";
+
+export type IdentityStoreSubTab = "overview" | "users" | "groups" | "tags" | "keys" | "hosts";
 
 export type DensityProfile = "aggressive" | "balanced" | "safe";
 export type ListTonePreset = "subtle" | "strong";
@@ -48,15 +55,27 @@ export type LayoutMode = "auto" | "wide" | "compact";
 export type SplitRatioPreset = "50-50" | "60-40" | "70-30";
 export type AutoArrangeMode = "off" | "a" | "b" | "c" | "free";
 
+/** Order: look & workspace → how you connect & filter → identities → advanced SSH → data safety → meta. */
 const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "appearance", label: "Appearance" },
   { id: "layout", label: "Layout & Navigation" },
   { id: "connections", label: "Connections" },
-  { id: "data", label: "Data & Backup" },
   { id: "views", label: "Views" },
   { id: "store", label: "Identity Store" },
+  { id: "ssh", label: "SSH" },
+  { id: "data", label: "Data & Backup" },
   { id: "help", label: "Help" },
   { id: "about", label: "About" },
+];
+
+/** Overview first; then people → credentials → taxonomy → host bindings. */
+const IDENTITY_STORE_SUBTABS: Array<{ id: IdentityStoreSubTab; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "users", label: "Users" },
+  { id: "keys", label: "SSH keys" },
+  { id: "groups", label: "Groups" },
+  { id: "tags", label: "Tags" },
+  { id: "hosts", label: "Hosts" },
 ];
 
 const TERMINAL_FONT_OFFSET_MIN = -3;
@@ -141,6 +160,22 @@ export type AppSettingsPanelProps = {
   storeTagDraft: string;
   setStoreTagDraft: (value: string) => void;
   addStoreTag: () => Promise<void>;
+  importStoreUsersFromHosts: () => Promise<void>;
+  updateStoreUser: (
+    userId: string,
+    patch: Partial<Pick<UserObject, "name" | "username" | "keyRefs" | "tagIds">>,
+  ) => Promise<void>;
+  deleteStoreUser: (userId: string) => Promise<void>;
+  setStoreUserGroupMembership: (userId: string, groupIds: string[]) => Promise<void>;
+  updateStoreGroup: (
+    groupId: string,
+    patch: Partial<Pick<GroupObject, "name" | "memberUserIds" | "tagIds">>,
+  ) => Promise<void>;
+  deleteStoreGroup: (groupId: string) => Promise<void>;
+  updateStoreTag: (tagId: string, name: string) => Promise<void>;
+  deleteStoreTag: (tagId: string) => Promise<void>;
+  patchStoreKey: (keyId: string, patch: { tagIds: string[] }) => Promise<void>;
+  reorderUserStoreKeys: (userId: string, index: number, direction: "up" | "down") => Promise<void>;
   storePathKeyNameDraft: string;
   setStorePathKeyNameDraft: (value: string) => void;
   storePathKeyPathDraft: string;
@@ -160,6 +195,14 @@ export type AppSettingsPanelProps = {
   storeBindingDraft: HostBinding;
   setStoreBindingDraft: React.Dispatch<React.SetStateAction<HostBinding>>;
   saveHostBindingDraft: () => Promise<void>;
+  sshConfigRaw: string;
+  setSshConfigRaw: React.Dispatch<React.SetStateAction<string>>;
+  onSaveSshConfig: () => Promise<void>;
+  sshDirInfo: SshDirInfo | null;
+  sshDirOverrideDraft: string;
+  setSshDirOverrideDraft: (value: string) => void;
+  onApplySshDirOverride: () => Promise<void>;
+  onResetSshDirOverride: () => Promise<void>;
 };
 
 export function AppSettingsPanel(props: AppSettingsPanelProps) {
@@ -242,6 +285,16 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     storeTagDraft,
     setStoreTagDraft,
     addStoreTag,
+    importStoreUsersFromHosts,
+    updateStoreUser,
+    deleteStoreUser,
+    setStoreUserGroupMembership,
+    updateStoreGroup,
+    deleteStoreGroup,
+    updateStoreTag,
+    deleteStoreTag,
+    patchStoreKey,
+    reorderUserStoreKeys,
     storePathKeyNameDraft,
     setStorePathKeyNameDraft,
     storePathKeyPathDraft,
@@ -261,7 +314,114 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     storeBindingDraft,
     setStoreBindingDraft,
     saveHostBindingDraft,
+    sshConfigRaw,
+    setSshConfigRaw,
+    onSaveSshConfig,
+    sshDirInfo,
+    sshDirOverrideDraft,
+    setSshDirOverrideDraft,
+    onApplySshDirOverride,
+    onResetSshDirOverride,
   } = props;
+
+  const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
+  const [expandedStoreUserId, setExpandedStoreUserId] = useState<string | null>(null);
+  const [sshHostStarServerAliveInterval, setSshHostStarServerAliveInterval] = useState("");
+  const [sshHostStarServerAliveCountMax, setSshHostStarServerAliveCountMax] = useState("");
+  const [sshHostStarTcpKeepAlive, setSshHostStarTcpKeepAlive] = useState<"" | "yes" | "no">("");
+  const [sshHostStarIdentityFile, setSshHostStarIdentityFile] = useState("");
+  const [sshHostStarUser, setSshHostStarUser] = useState("");
+
+  const applyHostStarBlockToBuffer = () => {
+    const lines: string[] = [];
+    if (sshHostStarServerAliveInterval.trim()) {
+      lines.push(`ServerAliveInterval ${sshHostStarServerAliveInterval.trim()}`);
+    }
+    if (sshHostStarServerAliveCountMax.trim()) {
+      lines.push(`ServerAliveCountMax ${sshHostStarServerAliveCountMax.trim()}`);
+    }
+    if (sshHostStarTcpKeepAlive === "yes" || sshHostStarTcpKeepAlive === "no") {
+      lines.push(`TCPKeepAlive ${sshHostStarTcpKeepAlive}`);
+    }
+    if (sshHostStarIdentityFile.trim()) {
+      lines.push(`IdentityFile ${sshHostStarIdentityFile.trim()}`);
+    }
+    if (sshHostStarUser.trim()) {
+      lines.push(`User ${sshHostStarUser.trim()}`);
+    }
+    if (lines.length === 0) {
+      setError("Add at least one directive, or edit the raw config.");
+      return;
+    }
+    setError("");
+    setSshConfigRaw((prev) => mergeManagedHostStarBlock(prev, lines));
+  };
+
+  const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
+    refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
+
+  const toggleUserKey = (userId: string, user: UserObject, keyId: string, checked: boolean) => {
+    let next = user.keyRefs.filter((r) => r.keyId !== keyId);
+    if (checked) {
+      next = [...next, { keyId, usage: "additional" }];
+    }
+    void updateStoreUser(userId, { keyRefs: normalizeKeyRefs(next) });
+  };
+
+  const toggleUserTag = (userId: string, user: UserObject, tagId: string, checked: boolean) => {
+    const nextIds = checked
+      ? [...user.tagIds, tagId]
+      : user.tagIds.filter((id) => id !== tagId);
+    void updateStoreUser(userId, { tagIds: nextIds });
+  };
+
+  const toggleUserInGroup = (userId: string, groupId: string, checked: boolean) => {
+    const memberGroupIds = storeGroups.filter((g) => g.memberUserIds.includes(userId)).map((g) => g.id);
+    const next = checked
+      ? [...new Set([...memberGroupIds, groupId])]
+      : memberGroupIds.filter((id) => id !== groupId);
+    void setStoreUserGroupMembership(userId, next);
+  };
+
+  const toggleHostBindingKey = (keyId: string, checked: boolean) => {
+    setStoreBindingDraft((prev) => {
+      let next = prev.keyRefs.filter((r) => r.keyId !== keyId);
+      if (checked) {
+        next = [...next, { keyId, usage: "additional" }];
+      }
+      return { ...prev, keyRefs: normalizeKeyRefs(next) };
+    });
+  };
+
+  const toggleHostBindingTag = (tagId: string, checked: boolean) => {
+    setStoreBindingDraft((prev) => ({
+      ...prev,
+      tagIds: checked
+        ? [...prev.tagIds, tagId]
+        : prev.tagIds.filter((id) => id !== tagId),
+    }));
+  };
+
+  const toggleHostBindingGroup = (groupId: string, checked: boolean) => {
+    setStoreBindingDraft((prev) => ({
+      ...prev,
+      groupIds: checked
+        ? [...prev.groupIds, groupId]
+        : prev.groupIds.filter((id) => id !== groupId),
+    }));
+  };
+
+  const toggleGroupTag = (groupId: string, group: GroupObject, tagId: string, checked: boolean) => {
+    const cur = group.tagIds ?? [];
+    const nextIds = checked ? [...cur, tagId] : cur.filter((id) => id !== tagId);
+    void updateStoreGroup(groupId, { tagIds: nextIds });
+  };
+
+  const toggleKeyTag = (keyId: string, key: SshKeyObject, tagId: string, checked: boolean) => {
+    const cur = key.tagIds ?? [];
+    const nextIds = checked ? [...cur, tagId] : cur.filter((id) => id !== tagId);
+    void patchStoreKey(keyId, { tagIds: nextIds });
+  };
 
   return (
         <div
@@ -305,17 +465,41 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                 </button>
               </div>
             </header>
-            <div className="app-settings-tabs">
+            <div className="app-settings-tabs" role="tablist" aria-label="Settings sections">
               {APP_SETTINGS_TABS.map((tab) => (
                 <button
                   key={tab.id}
-                  className={`tab-pill ${activeAppSettingsTab === tab.id ? "is-active" : ""}`}
-                  onClick={() => setActiveAppSettingsTab(tab.id)}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeAppSettingsTab === tab.id}
+                  className={`settings-tab ${activeAppSettingsTab === tab.id ? "is-active" : ""}`}
+                  onClick={() => {
+                    setActiveAppSettingsTab(tab.id);
+                    if (tab.id !== "store") {
+                      setIdentityStoreSubTab("overview");
+                    }
+                  }}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
+            {activeAppSettingsTab === "store" && (
+              <div className="app-settings-subtabs" role="tablist" aria-label="Identity store sections">
+                {IDENTITY_STORE_SUBTABS.map((sub) => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={identityStoreSubTab === sub.id}
+                    className={`settings-tab settings-subtab ${identityStoreSubTab === sub.id ? "is-active" : ""}`}
+                    onClick={() => setIdentityStoreSubTab(sub.id)}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="app-settings-content">
               {activeAppSettingsTab === "appearance" && (
                 <div className="settings-stack">
@@ -819,230 +1003,692 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                   </section>
                 </div>
               )}
-              {activeAppSettingsTab === "store" && (
+              {activeAppSettingsTab === "ssh" && (
                 <div className="settings-stack">
-                  <div className="settings-card store-panel">
-                  <p className="muted-copy">
-                    Hybrid store: Host-Felder bleiben kompatibel, zusaetzlich koennen User/Gruppen/Tags/Keys als Objekte
-                    verknuepft werden.
-                  </p>
-                  <label className="field field-span-2">
-                    <span className="field-label">Master passphrase (Keychain fallback)</span>
-                    <input
-                      className="input"
-                      type="password"
-                      value={storePassphrase}
-                      onChange={(event) => setStorePassphrase(event.target.value)}
-                      placeholder="Optional, fuer encrypted keys"
-                    />
-                  </label>
-
-                  <div className="store-grid">
-                    <section className="store-card">
-                      <h4>Users</h4>
-                      <div className="store-list">
-                        {storeUsers.map((user) => (
-                          <div key={user.id} className="store-list-row">
-                            <span>{user.name}</span>
-                          </div>
-                        ))}
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>SSH directory</h3>
+                      <p className="muted-copy">
+                        Default is <code className="inline-code">~/.ssh</code> (on Windows typically{" "}
+                        <code className="inline-code">%USERPROFILE%\.ssh</code>). The identity store,{" "}
+                        <code className="inline-code">config</code>, and related files live under the active folder.
+                        Override must be an <strong>absolute</strong> path. After changing it, hosts and store reload from
+                        the new location.
+                      </p>
+                    </header>
+                    {sshDirInfo && (
+                      <div className="ssh-dir-info-block">
+                        <p className="muted-copy">
+                          <strong>Detected default:</strong>{" "}
+                          <code className="inline-code">{sshDirInfo.defaultPath}</code>
+                        </p>
+                        <p className="muted-copy">
+                          <strong>Active:</strong> <code className="inline-code">{sshDirInfo.effectivePath}</code>
+                        </p>
+                        {sshDirInfo.userProfile ? (
+                          <p className="muted-copy">
+                            <strong>USERPROFILE:</strong>{" "}
+                            <code className="inline-code">{sshDirInfo.userProfile}</code>
+                          </p>
+                        ) : null}
                       </div>
-                      <div className="store-inline">
-                        <input
-                          className="input"
-                          value={storeUserDraft}
-                          onChange={(event) => setStoreUserDraft(event.target.value)}
-                          placeholder="neuer user"
-                        />
-                        <button className="btn" onClick={() => void addStoreUser()}>
-                          Add
-                        </button>
-                      </div>
-                    </section>
-
-                    <section className="store-card">
-                      <h4>Groups</h4>
-                      <div className="store-list">
-                        {storeGroups.map((group) => (
-                          <div key={group.id} className="store-list-row">
-                            <span>{group.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="store-inline">
-                        <input
-                          className="input"
-                          value={storeGroupDraft}
-                          onChange={(event) => setStoreGroupDraft(event.target.value)}
-                          placeholder="neue gruppe"
-                        />
-                        <button className="btn" onClick={() => void addStoreGroup()}>
-                          Add
-                        </button>
-                      </div>
-                    </section>
-
-                    <section className="store-card">
-                      <h4>Tags</h4>
-                      <div className="store-list">
-                        {storeTags.map((tag) => (
-                          <div key={tag.id} className="store-list-row">
-                            <span>{tag.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="store-inline">
-                        <input
-                          className="input"
-                          value={storeTagDraft}
-                          onChange={(event) => setStoreTagDraft(event.target.value)}
-                          placeholder="neuer tag"
-                        />
-                        <button className="btn" onClick={() => void addStoreTag()}>
-                          Add
-                        </button>
-                      </div>
-                    </section>
-                  </div>
-
-                  <section className="store-card store-card-wide">
-                    <h4>SSH Keys</h4>
-                    <div className="store-key-grid">
-                      <div className="store-inline">
-                        <input
-                          className="input"
-                          value={storePathKeyNameDraft}
-                          onChange={(event) => setStorePathKeyNameDraft(event.target.value)}
-                          placeholder="Pfad-Key Name"
-                        />
-                        <input
-                          className="input"
-                          value={storePathKeyPathDraft}
-                          onChange={(event) => setStorePathKeyPathDraft(event.target.value)}
-                          placeholder="~/.ssh/id_ed25519"
-                        />
-                        <button className="btn" onClick={() => void addStorePathKey()}>
-                          Add path key
-                        </button>
-                      </div>
-                      <div className="store-inline">
-                        <input
-                          className="input"
-                          value={storeEncryptedKeyNameDraft}
-                          onChange={(event) => setStoreEncryptedKeyNameDraft(event.target.value)}
-                          placeholder="Encrypted key name"
-                        />
-                        <input
-                          className="input"
-                          value={storeEncryptedPublicKeyDraft}
-                          onChange={(event) => setStoreEncryptedPublicKeyDraft(event.target.value)}
-                          placeholder="optional public key"
-                        />
-                      </div>
-                      <textarea
-                        className="input store-textarea"
-                        value={storeEncryptedPrivateKeyDraft}
-                        onChange={(event) => setStoreEncryptedPrivateKeyDraft(event.target.value)}
-                        placeholder="-----BEGIN PRIVATE KEY-----"
-                      />
-                      <div className="store-inline">
-                        <button className="btn" onClick={() => void addStoreEncryptedKey()}>
-                          Add encrypted key
-                        </button>
-                      </div>
-                    </div>
-                    <div className="store-list">
-                      {storeKeys.map((key) => (
-                        <div key={key.id} className="store-list-row">
-                          <span>
-                            {key.name} ({key.type})
-                          </span>
-                          <div className="store-inline">
-                            <button className="btn" onClick={() => void unlockStoreKey(key.id)}>
-                              Unlock
-                            </button>
-                            <button className="btn btn-danger" onClick={() => void removeStoreKey(key.id)}>
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="store-card store-card-wide">
-                    <h4>Host binding</h4>
-                    <div className="store-inline">
-                      <select
-                        className="input"
-                        value={storeSelectedHostForBinding}
-                        onChange={(event) => setStoreSelectedHostForBinding(event.target.value)}
-                      >
-                        <option value="">Host waehlen</option>
-                        {hosts.map((host) => (
-                          <option key={host.host} value={host.host}>
-                            {host.host}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="input"
-                        value={storeBindingDraft.userId ?? ""}
-                        onChange={(event) =>
-                          setStoreBindingDraft((prev) => ({
-                            ...prev,
-                            userId: event.target.value || undefined,
-                          }))
-                        }
-                      >
-                        <option value="">User (optional)</option>
-                        {storeUsers.map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {user.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="input"
-                        value={storeBindingDraft.keyRefs[0]?.keyId ?? ""}
-                        onChange={(event) =>
-                          setStoreBindingDraft((prev) => ({
-                            ...prev,
-                            keyRefs: event.target.value
-                              ? [{ keyId: event.target.value, usage: "primary" }]
-                              : [],
-                          }))
-                        }
-                      >
-                        <option value="">Primary key (optional)</option>
-                        {storeKeys.map((key) => (
-                          <option key={key.id} value={key.id}>
-                            {key.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="store-inline">
+                    )}
+                    <label className="field field-span-2">
+                      <span className="field-label">Custom SSH directory (optional)</span>
                       <input
                         className="input"
-                        value={storeBindingDraft.proxyJump}
-                        onChange={(event) =>
-                          setStoreBindingDraft((prev) => ({
-                            ...prev,
-                            proxyJump: event.target.value,
-                          }))
-                        }
-                        placeholder="ProxyJump override"
+                        value={sshDirOverrideDraft}
+                        onChange={(event) => setSshDirOverrideDraft(event.target.value)}
+                        placeholder={sshDirInfo?.defaultPath ?? "Absolute path to .ssh folder"}
+                        spellCheck={false}
+                        autoComplete="off"
                       />
-                      <button className="btn btn-primary" onClick={() => void saveHostBindingDraft()}>
-                        Save host binding
+                    </label>
+                    <div className="action-row">
+                      <button type="button" className="btn btn-primary" onClick={() => void onApplySshDirOverride()}>
+                        Apply SSH directory
+                      </button>
+                      <button type="button" className="btn" onClick={() => void onResetSshDirOverride()}>
+                        Use default
                       </button>
                     </div>
-                    <p className="muted-copy">
-                      Groups and tags also remain available on legacy host records in the hybrid model and can be fully
-                      migrated later.
-                    </p>
                   </section>
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>SSH config</h3>
+                      <p className="muted-copy">
+                        Full <code className="inline-code">config</code> inside the active SSH directory (see above).
+                        Content reloads when you open this tab. Broken syntax can prevent the host list from loading until
+                        you fix the file or restore a backup.
+                      </p>
+                    </header>
+                    <textarea
+                      className="input ssh-config-textarea"
+                      value={sshConfigRaw}
+                      onChange={(event) => setSshConfigRaw(event.target.value)}
+                      spellCheck={false}
+                      autoComplete="off"
+                      aria-label="SSH config file contents"
+                    />
+                    <div className="action-row">
+                      <button type="button" className="btn btn-primary" onClick={() => void onSaveSshConfig()}>
+                        Save SSH config
+                      </button>
+                    </div>
+                  </section>
+                  <section className="settings-card">
+                    <header className="settings-card-head">
+                      <h3>Global defaults (Host *)</h3>
+                      <p className="muted-copy">
+                        Inserts or replaces only the block between{" "}
+                        <code className="inline-code">BEGIN_NOSUCKSHELL_HOST_STAR</code> /{" "}
+                        <code className="inline-code">END_NOSUCKSHELL_HOST_STAR</code>. The block is placed at the top of
+                        the buffer if missing (later stanzas can override). Use Apply, then Save SSH config, to write to
+                        disk.
+                      </p>
+                    </header>
+                    <div className="host-form-grid">
+                      <label className="field">
+                        <span className="field-label">ServerAliveInterval</span>
+                        <input
+                          className="input"
+                          value={sshHostStarServerAliveInterval}
+                          onChange={(event) => setSshHostStarServerAliveInterval(event.target.value)}
+                          placeholder="60"
+                          inputMode="numeric"
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">ServerAliveCountMax</span>
+                        <input
+                          className="input"
+                          value={sshHostStarServerAliveCountMax}
+                          onChange={(event) => setSshHostStarServerAliveCountMax(event.target.value)}
+                          placeholder="3"
+                          inputMode="numeric"
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">TCPKeepAlive</span>
+                        <select
+                          className="input"
+                          value={sshHostStarTcpKeepAlive}
+                          onChange={(event) => setSshHostStarTcpKeepAlive(event.target.value as "" | "yes" | "no")}
+                        >
+                          <option value="">(omit)</option>
+                          <option value="yes">yes</option>
+                          <option value="no">no</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">IdentityFile</span>
+                        <input
+                          className="input"
+                          value={sshHostStarIdentityFile}
+                          onChange={(event) => setSshHostStarIdentityFile(event.target.value)}
+                          placeholder="~/.ssh/id_ed25519"
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">User</span>
+                        <input
+                          className="input"
+                          value={sshHostStarUser}
+                          onChange={(event) => setSshHostStarUser(event.target.value)}
+                          placeholder="default user"
+                        />
+                      </label>
+                    </div>
+                    <div className="action-row">
+                      <button type="button" className="btn" onClick={applyHostStarBlockToBuffer}>
+                        Apply to config buffer
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              )}
+              {activeAppSettingsTab === "store" && (
+                <div className="settings-stack">
+                  <div className="store-panel store-panel--identity">
+                    {identityStoreSubTab === "overview" && (
+                      <section className="identity-store-section">
+                        <p className="muted-copy">
+                          Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as
+                          objects.
+                        </p>
+                        <label className="field field-span-2">
+                          <span className="field-label">Master passphrase (Keychain fallback)</span>
+                          <input
+                            className="input"
+                            type="password"
+                            value={storePassphrase}
+                            onChange={(event) => setStorePassphrase(event.target.value)}
+                            placeholder="Optional, fuer encrypted keys"
+                          />
+                        </label>
+                      </section>
+                    )}
+
+                    {identityStoreSubTab === "users" && (
+                      <section className="identity-store-section">
+                        <h4>Users</h4>
+                        <p className="muted-copy">
+                          Import creates store users from each distinct <span className="inline-code">User</span> value
+                          on your saved hosts. Keys on the user apply when a host binding does not set its own keys.
+                        </p>
+                        <div className="store-inline">
+                          <button type="button" className="btn" onClick={() => void importStoreUsersFromHosts()}>
+                            Import from SSH hosts
+                          </button>
+                        </div>
+                        <div className="store-list store-list--tall identity-store-list">
+                          {storeUsers.map((user) => (
+                            <div key={user.id} className="store-list-block">
+                              <div className="store-list-row store-list-row-clickable identity-store-row">
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost store-expand-toggle"
+                                  onClick={() =>
+                                    setExpandedStoreUserId((prev) => (prev === user.id ? null : user.id))
+                                  }
+                                  aria-expanded={expandedStoreUserId === user.id}
+                                >
+                                  {expandedStoreUserId === user.id ? "▼" : "▶"}
+                                </button>
+                                <span className="store-list-title">
+                                  {user.name}
+                                  {user.username && user.username !== user.name ? ` (${user.username})` : ""}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  onClick={() => {
+                                    setExpandedStoreUserId((prev) => (prev === user.id ? null : prev));
+                                    void deleteStoreUser(user.id);
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              {expandedStoreUserId === user.id && (
+                                <div className="store-nested-fields">
+                                  <label className="field">
+                                    <span className="field-label">Display name</span>
+                                    <input
+                                      key={`${user.id}-name`}
+                                      className="input"
+                                      defaultValue={user.name}
+                                      onBlur={(event) => {
+                                        const v = event.target.value.trim();
+                                        if (v && v !== user.name) {
+                                          void updateStoreUser(user.id, { name: v });
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                  <label className="field">
+                                    <span className="field-label">SSH username</span>
+                                    <input
+                                      key={`${user.id}-username`}
+                                      className="input"
+                                      defaultValue={user.username}
+                                      onBlur={(event) => {
+                                        const v = event.target.value.trim();
+                                        if (v !== user.username) {
+                                          void updateStoreUser(user.id, { username: v });
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                  <div className="field">
+                                    <span className="field-label">SSH keys (first = primary for sessions)</span>
+                                    <div className="store-checkbox-grid">
+                                      {storeKeys.length === 0 ? (
+                                        <span className="muted-copy">No keys in store yet.</span>
+                                      ) : (
+                                        storeKeys.map((key) => (
+                                          <label key={key.id} className="store-checkbox-label">
+                                            <input
+                                              type="checkbox"
+                                              checked={user.keyRefs.some((r) => r.keyId === key.id)}
+                                              onChange={(event) =>
+                                                toggleUserKey(user.id, user, key.id, event.target.checked)
+                                              }
+                                            />
+                                            {key.name}
+                                          </label>
+                                        ))
+                                      )}
+                                    </div>
+                                    {user.keyRefs.length > 0 && (
+                                      <div className="store-key-order-wrap">
+                                        <span className="field-label">Current order (sessions use the primary first)</span>
+                                        <ol className="store-key-order-ol">
+                                          {user.keyRefs.map((ref, idx) => {
+                                            const keyName =
+                                              storeKeys.find((k) => k.id === ref.keyId)?.name ?? ref.keyId;
+                                            const role = idx === 0 ? "Primary" : "Additional";
+                                            return (
+                                              <li key={ref.keyId} className="store-key-order-item">
+                                                <span>
+                                                  {idx + 1}. {role} — {keyName}
+                                                </span>
+                                                <span className="store-inline">
+                                                  <button
+                                                    type="button"
+                                                    className="btn"
+                                                    disabled={idx === 0}
+                                                    onClick={() => void reorderUserStoreKeys(user.id, idx, "up")}
+                                                  >
+                                                    Up
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="btn"
+                                                    disabled={idx === user.keyRefs.length - 1}
+                                                    onClick={() => void reorderUserStoreKeys(user.id, idx, "down")}
+                                                  >
+                                                    Down
+                                                  </button>
+                                                </span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ol>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="field">
+                                    <span className="field-label">Tags</span>
+                                    <div className="store-checkbox-grid">
+                                      {storeTags.length === 0 ? (
+                                        <span className="muted-copy">No tags yet.</span>
+                                      ) : (
+                                        storeTags.map((tag) => (
+                                          <label key={tag.id} className="store-checkbox-label">
+                                            <input
+                                              type="checkbox"
+                                              checked={user.tagIds.includes(tag.id)}
+                                              onChange={(event) =>
+                                                toggleUserTag(user.id, user, tag.id, event.target.checked)
+                                              }
+                                            />
+                                            {tag.name}
+                                          </label>
+                                        ))
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="field">
+                                    <span className="field-label">Groups</span>
+                                    <div className="store-checkbox-grid">
+                                      {storeGroups.length === 0 ? (
+                                        <span className="muted-copy">No groups yet.</span>
+                                      ) : (
+                                        storeGroups.map((group) => (
+                                          <label key={group.id} className="store-checkbox-label">
+                                            <input
+                                              type="checkbox"
+                                              checked={group.memberUserIds.includes(user.id)}
+                                              onChange={(event) =>
+                                                toggleUserInGroup(user.id, group.id, event.target.checked)
+                                              }
+                                            />
+                                            {group.name}
+                                          </label>
+                                        ))
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="store-inline">
+                          <input
+                            className="input"
+                            value={storeUserDraft}
+                            onChange={(event) => setStoreUserDraft(event.target.value)}
+                            placeholder="New user (display / SSH name)"
+                          />
+                          <button type="button" className="btn" onClick={() => void addStoreUser()}>
+                            Add
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                    {identityStoreSubTab === "groups" && (
+                      <section className="identity-store-section">
+                        <h4>Groups</h4>
+                        <div className="store-list identity-store-list">
+                          {storeGroups.map((group) => (
+                            <div key={group.id} className="store-list-block">
+                              <div className="store-list-row identity-store-row">
+                                <input
+                                  className="input"
+                                  defaultValue={group.name}
+                                  onBlur={(event) => {
+                                    const v = event.target.value.trim();
+                                    if (v && v !== group.name) {
+                                      void updateStoreGroup(group.id, { name: v });
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  onClick={() => void deleteStoreGroup(group.id)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              <div className="store-nested-fields">
+                                <span className="field-label">Members</span>
+                                <div className="store-checkbox-grid">
+                                  {storeUsers.length === 0 ? (
+                                    <span className="muted-copy">No users yet.</span>
+                                  ) : (
+                                    storeUsers.map((user) => (
+                                      <label key={user.id} className="store-checkbox-label">
+                                        <input
+                                          type="checkbox"
+                                          checked={group.memberUserIds.includes(user.id)}
+                                          onChange={(event) => {
+                                            const next = event.target.checked
+                                              ? [...group.memberUserIds, user.id]
+                                              : group.memberUserIds.filter((id) => id !== user.id);
+                                            void updateStoreGroup(group.id, { memberUserIds: next });
+                                          }}
+                                        />
+                                        {user.name}
+                                      </label>
+                                    ))
+                                  )}
+                                </div>
+                                <span className="field-label">Tags</span>
+                                <div className="store-checkbox-grid">
+                                  {storeTags.length === 0 ? (
+                                    <span className="muted-copy">No tags yet.</span>
+                                  ) : (
+                                    storeTags.map((tag) => (
+                                      <label key={tag.id} className="store-checkbox-label">
+                                        <input
+                                          type="checkbox"
+                                          checked={(group.tagIds ?? []).includes(tag.id)}
+                                          onChange={(event) =>
+                                            toggleGroupTag(group.id, group, tag.id, event.target.checked)
+                                          }
+                                        />
+                                        {tag.name}
+                                      </label>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="store-inline">
+                          <input
+                            className="input"
+                            value={storeGroupDraft}
+                            onChange={(event) => setStoreGroupDraft(event.target.value)}
+                            placeholder="New group name"
+                          />
+                          <button type="button" className="btn" onClick={() => void addStoreGroup()}>
+                            Add
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                    {identityStoreSubTab === "tags" && (
+                      <section className="identity-store-section">
+                        <h4>Tags</h4>
+                        <div className="store-list identity-store-list">
+                          {storeTags.map((tag) => (
+                            <div key={tag.id} className="store-list-row identity-store-row">
+                              <input
+                                className="input"
+                                defaultValue={tag.name}
+                                onBlur={(event) => {
+                                  const v = event.target.value.trim();
+                                  if (v && v !== tag.name) {
+                                    void updateStoreTag(tag.id, v);
+                                  }
+                                }}
+                              />
+                              <button type="button" className="btn btn-danger" onClick={() => void deleteStoreTag(tag.id)}>
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="store-inline">
+                          <input
+                            className="input"
+                            value={storeTagDraft}
+                            onChange={(event) => setStoreTagDraft(event.target.value)}
+                            placeholder="New tag name"
+                          />
+                          <button type="button" className="btn" onClick={() => void addStoreTag()}>
+                            Add
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                    {identityStoreSubTab === "keys" && (
+                      <section className="identity-store-section">
+                        <h4>SSH Keys</h4>
+                        <div className="identity-store-form">
+                          <div className="store-key-grid">
+                            <div className="store-inline">
+                              <input
+                                className="input"
+                                value={storePathKeyNameDraft}
+                                onChange={(event) => setStorePathKeyNameDraft(event.target.value)}
+                                placeholder="Pfad-Key Name"
+                              />
+                              <input
+                                className="input"
+                                value={storePathKeyPathDraft}
+                                onChange={(event) => setStorePathKeyPathDraft(event.target.value)}
+                                placeholder="~/.ssh/id_ed25519"
+                              />
+                              <button className="btn" onClick={() => void addStorePathKey()}>
+                                Add path key
+                              </button>
+                            </div>
+                            <div className="store-inline">
+                              <input
+                                className="input"
+                                value={storeEncryptedKeyNameDraft}
+                                onChange={(event) => setStoreEncryptedKeyNameDraft(event.target.value)}
+                                placeholder="Encrypted key name"
+                              />
+                              <input
+                                className="input"
+                                value={storeEncryptedPublicKeyDraft}
+                                onChange={(event) => setStoreEncryptedPublicKeyDraft(event.target.value)}
+                                placeholder="optional public key"
+                              />
+                            </div>
+                            <textarea
+                              className="input store-textarea"
+                              value={storeEncryptedPrivateKeyDraft}
+                              onChange={(event) => setStoreEncryptedPrivateKeyDraft(event.target.value)}
+                              placeholder="-----BEGIN PRIVATE KEY-----"
+                            />
+                            <div className="store-inline">
+                              <button className="btn" onClick={() => void addStoreEncryptedKey()}>
+                                Add encrypted key
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="store-list store-list--tall identity-store-list">
+                          {storeKeys.map((key) => (
+                            <div key={key.id} className="store-list-block">
+                              <div className="store-list-row identity-store-row">
+                                <span>
+                                  {key.name} ({key.type})
+                                </span>
+                                <div className="store-inline">
+                                  <button type="button" className="btn" onClick={() => void unlockStoreKey(key.id)}>
+                                    Unlock
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger"
+                                    onClick={() => void removeStoreKey(key.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="store-nested-fields">
+                                <span className="field-label">Tags</span>
+                                <div className="store-checkbox-grid">
+                                  {storeTags.length === 0 ? (
+                                    <span className="muted-copy">No tags yet.</span>
+                                  ) : (
+                                    storeTags.map((tag) => (
+                                      <label key={tag.id} className="store-checkbox-label">
+                                        <input
+                                          type="checkbox"
+                                          checked={(key.tagIds ?? []).includes(tag.id)}
+                                          onChange={(event) =>
+                                            toggleKeyTag(key.id, key, tag.id, event.target.checked)
+                                          }
+                                        />
+                                        {tag.name}
+                                      </label>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    {identityStoreSubTab === "hosts" && (
+                      <section className="identity-store-section">
+                        <h4>Hosts</h4>
+                        <p className="muted-copy">
+                          Per-host overrides: linked user, SSH keys (first selected = primary), groups, and tags. If no
+                          keys are set here, the linked user&apos;s keys apply when a user is selected.
+                        </p>
+                        <div className="store-inline">
+                          <select
+                            className="input"
+                            value={storeSelectedHostForBinding}
+                            onChange={(event) => setStoreSelectedHostForBinding(event.target.value)}
+                          >
+                            <option value="">Select host</option>
+                            {hosts.map((host, hostIndex) => (
+                              <option key={`host-opt-${hostIndex}`} value={host.host}>
+                                {host.host}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            className="input"
+                            value={storeBindingDraft.userId ?? ""}
+                            onChange={(event) =>
+                              setStoreBindingDraft((prev) => ({
+                                ...prev,
+                                userId: event.target.value || undefined,
+                              }))
+                            }
+                          >
+                            <option value="">Store user (optional)</option>
+                            {storeUsers.map((user) => (
+                              <option key={user.id} value={user.id}>
+                                {user.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field">
+                          <span className="field-label">SSH keys for this host</span>
+                          <div className="store-checkbox-grid">
+                            {storeKeys.length === 0 ? (
+                              <span className="muted-copy">No keys in store.</span>
+                            ) : (
+                              storeKeys.map((key) => (
+                                <label key={key.id} className="store-checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={storeBindingDraft.keyRefs.some((r) => r.keyId === key.id)}
+                                    onChange={(event) => toggleHostBindingKey(key.id, event.target.checked)}
+                                  />
+                                  {key.name}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                        <div className="field">
+                          <span className="field-label">Groups</span>
+                          <div className="store-checkbox-grid">
+                            {storeGroups.length === 0 ? (
+                              <span className="muted-copy">No groups.</span>
+                            ) : (
+                              storeGroups.map((group) => (
+                                <label key={group.id} className="store-checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={storeBindingDraft.groupIds.includes(group.id)}
+                                    onChange={(event) => toggleHostBindingGroup(group.id, event.target.checked)}
+                                  />
+                                  {group.name}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                        <div className="field">
+                          <span className="field-label">Tags</span>
+                          <div className="store-checkbox-grid">
+                            {storeTags.length === 0 ? (
+                              <span className="muted-copy">No tags.</span>
+                            ) : (
+                              storeTags.map((tag) => (
+                                <label key={tag.id} className="store-checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={storeBindingDraft.tagIds.includes(tag.id)}
+                                    onChange={(event) => toggleHostBindingTag(tag.id, event.target.checked)}
+                                  />
+                                  {tag.name}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                        <div className="store-inline">
+                          <input
+                            className="input"
+                            value={storeBindingDraft.proxyJump}
+                            onChange={(event) =>
+                              setStoreBindingDraft((prev) => ({
+                                ...prev,
+                                proxyJump: event.target.value,
+                              }))
+                            }
+                            placeholder="ProxyJump override"
+                          />
+                          <button type="button" className="btn btn-primary" onClick={() => void saveHostBindingDraft()}>
+                            Save host binding
+                          </button>
+                        </div>
+                      </section>
+                    )}
                   </div>
                 </div>
               )}

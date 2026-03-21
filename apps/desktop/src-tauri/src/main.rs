@@ -7,6 +7,7 @@ mod layout_profiles;
 mod secure_store;
 mod session;
 mod ssh_config;
+mod ssh_home;
 mod store_models;
 mod view_profiles;
 
@@ -23,6 +24,7 @@ use secure_store::{
     save_store_objects as save_store_objects_backend, unlock_key_material as unlock_key_material_backend,
 };
 use session::SessionState;
+use ssh_home::SshDirInfo;
 use ssh_config::{
     delete_host_from_file, load_hosts, load_ssh_config_raw, save_host_to_file, write_ssh_config_raw,
     HostConfig,
@@ -98,6 +100,26 @@ fn save_host(host: HostConfig) -> Result<(), String> {
 #[tauri::command]
 fn delete_host(host_name: String) -> Result<(), String> {
     delete_host_from_file(&host_name).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_ssh_config_raw() -> Result<String, String> {
+    load_ssh_config_raw().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn save_ssh_config_raw(content: String) -> Result<(), String> {
+    write_ssh_config_raw(&content).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn get_ssh_dir_info() -> Result<SshDirInfo, String> {
+    ssh_home::get_ssh_dir_info_for_ipc().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn set_ssh_dir_override(path: Option<String>) -> Result<(), String> {
+    ssh_home::apply_ssh_dir_override_from_ipc(path).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -279,6 +301,10 @@ fn main() {
             list_hosts,
             save_host,
             delete_host,
+            get_ssh_config_raw,
+            save_ssh_config_raw,
+            get_ssh_dir_info,
+            set_ssh_dir_override,
             list_host_metadata,
             save_host_metadata,
             touch_host_last_used,

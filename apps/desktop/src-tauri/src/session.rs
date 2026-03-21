@@ -36,17 +36,71 @@ pub struct SessionState {
     sessions: Mutex<HashMap<String, SessionHandle>>,
 }
 
+/// Expand `~/…` / `~\…` using the real home directory. Windows OpenSSH does not reliably treat
+/// `~` in `-i` / `UserKnownHostsFile` like Unix shells, and GUI apps often lack `ssh` on `PATH`.
+fn expand_ssh_user_path(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
+        if let Some(home) = home::home_dir() {
+            return home.join(rest).to_string_lossy().into_owned();
+        }
+    }
+    raw.to_string()
+}
+
+fn ssh_user_known_hosts_option() -> String {
+    let path = crate::ssh_home::effective_ssh_dir()
+        .map(|d| d.join("known_hosts").to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "~/.ssh/known_hosts".to_string());
+    format!("UserKnownHostsFile={path}")
+}
+
+fn resolve_ssh_program() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let windir = env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let openssh = Path::new(&windir).join("System32").join("OpenSSH").join("ssh.exe");
+        if openssh.is_file() {
+            return openssh.to_string_lossy().into_owned();
+        }
+        let fallback = Path::new(r"C:\Windows\System32\OpenSSH\ssh.exe");
+        if fallback.is_file() {
+            return fallback.to_string_lossy().into_owned();
+        }
+        for key in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(pf) = env::var(key) {
+                let git_ssh = Path::new(&pf).join("Git").join("usr").join("bin").join("ssh.exe");
+                if git_ssh.is_file() {
+                    return git_ssh.to_string_lossy().into_owned();
+                }
+            }
+        }
+        "ssh".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "ssh".to_string()
+    }
+}
+
 pub fn build_ssh_command(host: &HostConfig) -> CommandBuilder {
-    let mut command = CommandBuilder::new("ssh");
+    let ssh = resolve_ssh_program();
+    let mut command = CommandBuilder::new(&ssh);
     command.arg("-o");
     command.arg("StrictHostKeyChecking=ask");
     command.arg("-o");
-    command.arg("UserKnownHostsFile=~/.ssh/known_hosts");
+    command.arg(ssh_user_known_hosts_option());
     command.arg("-p");
     command.arg(host.port.to_string());
     if !host.identity_file.is_empty() {
-        command.arg("-i");
-        command.arg(host.identity_file.clone());
+        let identity = expand_ssh_user_path(&host.identity_file);
+        if !identity.is_empty() {
+            command.arg("-i");
+            command.arg(identity);
+        }
     }
     if !host.proxy_jump.is_empty() {
         command.arg("-J");
@@ -326,11 +380,12 @@ mod tests {
 
         let cmd = build_ssh_command(&host);
         let rendered = format!("{cmd:?}");
-        assert!(rendered.contains("ssh"));
+        assert!(rendered.to_lowercase().contains("ssh"));
         assert!(rendered.contains("-p"));
         assert!(rendered.contains("2201"));
         assert!(rendered.contains("-i"));
-        assert!(rendered.contains("~/.ssh/id_prod"));
+        assert!(rendered.contains("id_prod"));
+        assert!(rendered.contains("UserKnownHostsFile="));
         assert!(rendered.contains("-J"));
         assert!(rendered.contains("bastion"));
         assert!(rendered.contains("deploy@10.0.0.5"));

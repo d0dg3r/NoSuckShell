@@ -42,6 +42,9 @@ const seedHosts: HostConfig[] = [
 /** Mutable host list for e2e (save_host / delete_host update this; list_hosts reads it). */
 let e2eHosts: HostConfig[] = [...seedHosts];
 
+/** Raw ~/.ssh/config stand-in for settings SSH tab in e2e builds. */
+let e2eSshConfigRaw = `# e2e mock ssh config\nHost demo-server\n  HostName demo.local\n  User ssh-user\n`;
+
 const demoMetadata: HostMetadataStore = {
   defaultUser: "",
   hosts: {
@@ -95,7 +98,7 @@ const demoViewProfiles: ViewProfile[] = [
 ];
 
 const defaultEntityStore = (): EntityStore => ({
-  schemaVersion: 1,
+  schemaVersion: 3,
   updatedAt: now(),
   users: {},
   groups: {},
@@ -126,6 +129,21 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   switch (cmd) {
     case "list_hosts":
       return e2eHosts;
+    case "get_ssh_config_raw":
+      return e2eSshConfigRaw;
+    case "save_ssh_config_raw": {
+      e2eSshConfigRaw = typeof args?.content === "string" ? args.content : "";
+      return undefined;
+    }
+    case "get_ssh_dir_info":
+      return {
+        defaultPath: "/home/e2e/.ssh",
+        effectivePath: "/home/e2e/.ssh",
+        overridePath: null,
+        userProfile: null,
+      };
+    case "set_ssh_dir_override":
+      return undefined;
     case "list_host_metadata":
       return demoMetadata;
     case "list_layout_profiles":

@@ -29,6 +29,10 @@ import {
   saveViewProfile,
   deleteViewProfile,
   reorderViewProfiles,
+  getSshConfigRaw,
+  getSshDirInfo,
+  saveSshConfigRaw,
+  setSshDirOverride,
   sendInput,
   listStoreObjects,
   saveStoreObjects,
@@ -111,6 +115,7 @@ import type {
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
+  SshDirInfo,
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTransparent from "../../../img/logo_tranparent.png";
@@ -324,7 +329,7 @@ const readSplitRatioPreset = (): SplitRatioPreset => {
 };
 const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
 const createDefaultEntityStore = (): EntityStore => ({
-  schemaVersion: 1,
+  schemaVersion: 3,
   updatedAt: 0,
   users: {},
   groups: {},
@@ -667,6 +672,9 @@ export function App() {
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
   const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
+  const [sshConfigRaw, setSshConfigRaw] = useState<string>("");
+  const [sshDirInfo, setSshDirInfo] = useState<SshDirInfo | null>(null);
+  const [sshDirOverrideDraft, setSshDirOverrideDraft] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<HostStatusFilter>("all");
   const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
@@ -1179,8 +1187,68 @@ export function App() {
     });
   };
 
+  const handleSaveSshConfig = useCallback(async () => {
+    setError("");
+    try {
+      await saveSshConfigRaw(sshConfigRaw);
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }, [sshConfigRaw]);
+
   useEffect(() => {
     void load().catch((e: unknown) => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    if (!isAppSettingsOpen || activeAppSettingsTab !== "ssh") {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([getSshConfigRaw(), getSshDirInfo()])
+      .then(([raw, info]) => {
+        if (!cancelled) {
+          setSshConfigRaw(raw);
+          setSshDirInfo(info);
+          setSshDirOverrideDraft(info.overridePath ?? "");
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAppSettingsOpen, activeAppSettingsTab]);
+
+  const handleApplySshDirOverride = useCallback(async () => {
+    setError("");
+    try {
+      const t = sshDirOverrideDraft.trim();
+      await setSshDirOverride(t === "" ? null : t);
+      const info = await getSshDirInfo();
+      setSshDirInfo(info);
+      setSshDirOverrideDraft(info.overridePath ?? "");
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }, [sshDirOverrideDraft]);
+
+  const handleResetSshDirOverride = useCallback(async () => {
+    setError("");
+    try {
+      await setSshDirOverride(null);
+      const info = await getSshDirInfo();
+      setSshDirInfo(info);
+      setSshDirOverrideDraft("");
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1301,7 +1369,7 @@ export function App() {
       ...entityStore,
       users: {
         ...entityStore.users,
-        [id]: { id, name: username, username, createdAt: now, updatedAt: now },
+        [id]: { id, name: username, username, keyRefs: [], tagIds: [], createdAt: now, updatedAt: now },
       },
       updatedAt: now,
     };
@@ -1320,7 +1388,7 @@ export function App() {
       ...entityStore,
       groups: {
         ...entityStore.groups,
-        [id]: { id, name, memberUserIds: [], createdAt: now, updatedAt: now },
+        [id]: { id, name, memberUserIds: [], tagIds: [], createdAt: now, updatedAt: now },
       },
       updatedAt: now,
     };
@@ -1347,6 +1415,253 @@ export function App() {
     await persistEntityStore(next);
   }, [entityStore, persistEntityStore, storeTagDraft]);
 
+  const importStoreUsersFromHosts = useCallback(async () => {
+    const seen = new Set(
+      storeUsers.map((u) => (u.username || u.name).trim().toLowerCase()).filter(Boolean),
+    );
+    let next: EntityStore = { ...entityStore, users: { ...entityStore.users } };
+    const now = Date.now();
+    let added = false;
+    for (const h of hosts) {
+      const u = h.user?.trim();
+      if (!u) {
+        continue;
+      }
+      const key = u.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const id = `user-${createId()}`;
+      next.users[id] = {
+        id,
+        name: u,
+        username: u,
+        keyRefs: [],
+        tagIds: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      added = true;
+    }
+    if (!added) {
+      return;
+    }
+    next.updatedAt = now;
+    await persistEntityStore(next);
+  }, [entityStore, hosts, persistEntityStore, storeUsers]);
+
+  const updateStoreUser = useCallback(
+    async (userId: string, patch: Partial<Pick<UserObject, "name" | "username" | "keyRefs" | "tagIds">>) => {
+      const cur = entityStore.users[userId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        users: {
+          ...entityStore.users,
+          [userId]: { ...cur, ...patch, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreUser = useCallback(
+    async (userId: string) => {
+      const nextUsers = { ...entityStore.users };
+      delete nextUsers[userId];
+      const nextGroups: EntityStore["groups"] = Object.fromEntries(
+        Object.entries(entityStore.groups).map(([gid, g]) => [
+          gid,
+          { ...g, memberUserIds: g.memberUserIds.filter((id) => id !== userId), updatedAt: Date.now() },
+        ]),
+      );
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          b.userId === userId ? { ...b, userId: undefined } : b,
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        users: nextUsers,
+        groups: nextGroups,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const setStoreUserGroupMembership = useCallback(
+    async (userId: string, groupIds: string[]) => {
+      const now = Date.now();
+      const want = new Set(groupIds);
+      const nextGroups = { ...entityStore.groups };
+      for (const [gid, g] of Object.entries(nextGroups)) {
+        const has = g.memberUserIds.includes(userId);
+        const should = want.has(gid);
+        if (has === should) {
+          continue;
+        }
+        nextGroups[gid] = {
+          ...g,
+          memberUserIds: should
+            ? [...g.memberUserIds, userId]
+            : g.memberUserIds.filter((id) => id !== userId),
+          updatedAt: now,
+        };
+      }
+      await persistEntityStore({ ...entityStore, groups: nextGroups, updatedAt: now });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const updateStoreGroup = useCallback(
+    async (groupId: string, patch: Partial<Pick<GroupObject, "name" | "memberUserIds" | "tagIds">>) => {
+      const cur = entityStore.groups[groupId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        groups: {
+          ...entityStore.groups,
+          [groupId]: { ...cur, ...patch, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreGroup = useCallback(
+    async (groupId: string) => {
+      const nextGroups = { ...entityStore.groups };
+      delete nextGroups[groupId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          { ...b, groupIds: b.groupIds.filter((id) => id !== groupId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        groups: nextGroups,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const updateStoreTag = useCallback(
+    async (tagId: string, name: string) => {
+      const cur = entityStore.tags[tagId];
+      if (!cur) {
+        return;
+      }
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        tags: {
+          ...entityStore.tags,
+          [tagId]: { ...cur, name: trimmed, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreTag = useCallback(
+    async (tagId: string) => {
+      const nextTags = { ...entityStore.tags };
+      delete nextTags[tagId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          { ...b, tagIds: b.tagIds.filter((id) => id !== tagId) },
+        ]),
+      );
+      const nextUsers: EntityStore["users"] = Object.fromEntries(
+        Object.entries(entityStore.users).map(([id, u]) => [
+          id,
+          { ...u, tagIds: u.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      const nextGroups: EntityStore["groups"] = Object.fromEntries(
+        Object.entries(entityStore.groups).map(([id, g]) => [
+          id,
+          { ...g, tagIds: g.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      const nextKeys: EntityStore["keys"] = Object.fromEntries(
+        Object.entries(entityStore.keys).map(([kid, k]) => [
+          kid,
+          { ...k, tagIds: k.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        tags: nextTags,
+        hostBindings: nextBindings,
+        users: nextUsers,
+        groups: nextGroups,
+        keys: nextKeys,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const patchStoreKey = useCallback(
+    async (keyId: string, patch: { tagIds: string[] }) => {
+      const cur = entityStore.keys[keyId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      const nextKey: SshKeyObject =
+        cur.type === "path"
+          ? { ...cur, tagIds: patch.tagIds, updatedAt: now }
+          : { ...cur, tagIds: patch.tagIds, updatedAt: now };
+      await persistEntityStore({
+        ...entityStore,
+        keys: { ...entityStore.keys, [keyId]: nextKey },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const reorderUserStoreKeys = useCallback(
+    async (userId: string, index: number, direction: "up" | "down") => {
+      const user = entityStore.users[userId];
+      if (!user || user.keyRefs.length < 2) {
+        return;
+      }
+      const j = direction === "up" ? index - 1 : index + 1;
+      if (j < 0 || j >= user.keyRefs.length) {
+        return;
+      }
+      const refs = [...user.keyRefs];
+      [refs[index], refs[j]] = [refs[j], refs[index]];
+      const keyRefs = refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
+      await updateStoreUser(userId, { keyRefs });
+    },
+    [entityStore.users, updateStoreUser],
+  );
+
   const addStorePathKey = useCallback(async () => {
     const name = storePathKeyNameDraft.trim();
     const identityFilePath = storePathKeyPathDraft.trim();
@@ -1360,6 +1675,7 @@ export function App() {
       id,
       name,
       identityFilePath,
+      tagIds: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -1379,24 +1695,30 @@ export function App() {
     if (!name || !privateKeyPem) {
       return;
     }
-    const created = await createEncryptedKey(
-      name,
-      privateKeyPem,
-      storeEncryptedPublicKeyDraft.trim(),
-      storePassphrase.trim() || undefined,
-    );
-    const next: EntityStore = {
-      ...entityStore,
-      keys: {
-        ...entityStore.keys,
-        [created.id]: created,
-      },
-      updatedAt: Date.now(),
-    };
-    setStoreEncryptedKeyNameDraft("");
-    setStoreEncryptedPrivateKeyDraft("");
-    setStoreEncryptedPublicKeyDraft("");
-    await persistEntityStore(next);
+    setError("");
+    try {
+      const created = await createEncryptedKey(
+        name,
+        privateKeyPem,
+        storeEncryptedPublicKeyDraft.trim(),
+        storePassphrase.trim() || undefined,
+      );
+      const withTags = { ...created, tagIds: created.tagIds ?? [] } as SshKeyObject;
+      const next: EntityStore = {
+        ...entityStore,
+        keys: {
+          ...entityStore.keys,
+          [created.id]: withTags,
+        },
+        updatedAt: Date.now(),
+      };
+      setStoreEncryptedKeyNameDraft("");
+      setStoreEncryptedPrivateKeyDraft("");
+      setStoreEncryptedPublicKeyDraft("");
+      await persistEntityStore(next);
+    } catch (error: unknown) {
+      setError(String(error));
+    }
   }, [
     entityStore,
     persistEntityStore,
@@ -1417,10 +1739,17 @@ export function App() {
           { ...binding, keyRefs: binding.keyRefs.filter((entry) => entry.keyId !== keyId) },
         ]),
       );
+      const nextUsers: EntityStore["users"] = Object.fromEntries(
+        Object.entries(entityStore.users).map(([id, user]) => [
+          id,
+          { ...user, keyRefs: user.keyRefs.filter((entry) => entry.keyId !== keyId) },
+        ]),
+      );
       await persistEntityStore({
         ...entityStore,
         keys: nextKeys,
         hostBindings: nextBindings,
+        users: nextUsers,
         updatedAt: Date.now(),
       });
     },
@@ -1429,7 +1758,12 @@ export function App() {
 
   const unlockStoreKey = useCallback(
     async (keyId: string) => {
-      await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+      setError("");
+      try {
+        await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+      } catch (error: unknown) {
+        setError(String(error));
+      }
     },
     [storePassphrase],
   );
@@ -2853,25 +3187,27 @@ export function App() {
         const existingSession =
           sessions.find((session) => session.kind === "sshSaved" && session.hostAlias === payload.hostAlias) ?? null;
         if (existingSession) {
-          if (oldSessionId && oldSessionId !== existingSession.id) {
-            await closeSessionById(oldSessionId);
-          }
           setSplitSlots((prev) =>
             assignSessionToPane(removeSessionFromSlots(prev, existingSession.id), paneIndex, existingSession.id),
           );
           setActivePaneIndex(paneIndex);
           setActiveSession(existingSession.id);
+          if (oldSessionId && oldSessionId !== existingSession.id) {
+            await closeSessionById(oldSessionId);
+          }
           lastInternalDragPayloadRef.current = null;
           return;
         }
-        if (oldSessionId) {
-          await closeSessionById(oldSessionId);
-        }
         const newSessionId = await connectToHost(hostConfig);
-        if (newSessionId) {
-          setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, newSessionId));
-          setActivePaneIndex(paneIndex);
-          setActiveSession(newSessionId);
+        if (!newSessionId) {
+          lastInternalDragPayloadRef.current = null;
+          return;
+        }
+        setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, newSessionId));
+        setActivePaneIndex(paneIndex);
+        setActiveSession(newSessionId);
+        if (oldSessionId && oldSessionId !== newSessionId) {
+          await closeSessionById(oldSessionId);
         }
         lastInternalDragPayloadRef.current = null;
         return;
@@ -4765,6 +5101,16 @@ export function App() {
           storeTagDraft={storeTagDraft}
           setStoreTagDraft={setStoreTagDraft}
           addStoreTag={addStoreTag}
+          importStoreUsersFromHosts={importStoreUsersFromHosts}
+          updateStoreUser={updateStoreUser}
+          deleteStoreUser={deleteStoreUser}
+          setStoreUserGroupMembership={setStoreUserGroupMembership}
+          updateStoreGroup={updateStoreGroup}
+          deleteStoreGroup={deleteStoreGroup}
+          updateStoreTag={updateStoreTag}
+          deleteStoreTag={deleteStoreTag}
+          patchStoreKey={patchStoreKey}
+          reorderUserStoreKeys={reorderUserStoreKeys}
           storePathKeyNameDraft={storePathKeyNameDraft}
           setStorePathKeyNameDraft={setStorePathKeyNameDraft}
           storePathKeyPathDraft={storePathKeyPathDraft}
@@ -4784,6 +5130,14 @@ export function App() {
           storeBindingDraft={storeBindingDraft}
           setStoreBindingDraft={setStoreBindingDraft}
           saveHostBindingDraft={saveHostBindingDraft}
+          sshConfigRaw={sshConfigRaw}
+          setSshConfigRaw={setSshConfigRaw}
+          onSaveSshConfig={handleSaveSshConfig}
+          sshDirInfo={sshDirInfo}
+          sshDirOverrideDraft={sshDirOverrideDraft}
+          setSshDirOverrideDraft={setSshDirOverrideDraft}
+          onApplySshDirOverride={handleApplySshDirOverride}
+          onResetSshDirOverride={handleResetSshDirOverride}
         />
       )}
       {isLayoutCommandCenterOpen && (

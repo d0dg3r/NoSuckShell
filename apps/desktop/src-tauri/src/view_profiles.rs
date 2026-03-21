@@ -26,8 +26,7 @@ fn now_unix_seconds() -> anyhow::Result<u64> {
 }
 
 fn profiles_dir() -> anyhow::Result<PathBuf> {
-    let home = home::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
-    Ok(home.join(".ssh"))
+    crate::ssh_home::effective_ssh_dir()
 }
 
 fn profiles_path() -> anyhow::Result<PathBuf> {

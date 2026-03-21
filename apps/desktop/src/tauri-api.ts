@@ -8,6 +8,7 @@ import type {
   LayoutProfile,
   QuickSshSessionRequest,
   SessionStarted,
+  SshDirInfo,
   SshKeyObject,
   TagObject,
   UserObject,
@@ -80,6 +81,16 @@ export const saveHost = (host: HostConfig): Promise<void> =>
 
 export const deleteHost = (hostName: string): Promise<void> =>
   invoke("delete_host", { hostName });
+
+export const getSshConfigRaw = (): Promise<string> => invoke("get_ssh_config_raw");
+
+export const saveSshConfigRaw = (content: string): Promise<void> =>
+  invoke("save_ssh_config_raw", { content });
+
+export const getSshDirInfo = (): Promise<SshDirInfo> => invoke("get_ssh_dir_info");
+
+export const setSshDirOverride = (path: string | null): Promise<void> =>
+  invoke("set_ssh_dir_override", { path });
 
 export const startSession = (host: HostConfig): Promise<SessionStarted> =>
   invoke("start_session", { host });

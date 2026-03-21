@@ -23,10 +23,17 @@ export type HostMetadataStore = {
 export type StoreSchemaVersion = 1;
 export type KeyKdf = "argon2id";
 
+export type HostKeyRef = {
+  keyId: string;
+  usage: string;
+};
+
 export type UserObject = {
   id: string;
   name: string;
   username: string;
+  keyRefs: HostKeyRef[];
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -35,6 +42,7 @@ export type GroupObject = {
   id: string;
   name: string;
   memberUserIds: string[];
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -51,6 +59,7 @@ export type PathSshKeyObject = {
   id: string;
   name: string;
   identityFilePath: string;
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -65,16 +74,12 @@ export type EncryptedSshKeyObject = {
   nonce: string;
   fingerprint: string;
   publicKey: string;
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
 
 export type SshKeyObject = PathSshKeyObject | EncryptedSshKeyObject;
-
-export type HostKeyRef = {
-  keyId: string;
-  usage: "primary" | "proxy" | string;
-};
 
 export type HostBinding = {
   userId?: string;
@@ -103,6 +108,14 @@ export type BackupPayload = {
   sshConfig: string;
   metadata: HostMetadataStore;
   exportedAt: number;
+};
+
+/** Paths for OpenSSH data root (`config`, store, etc.). From `get_ssh_dir_info`. */
+export type SshDirInfo = {
+  defaultPath: string;
+  effectivePath: string;
+  overridePath: string | null;
+  userProfile: string | null;
 };
 
 export type SessionOutputEvent = {

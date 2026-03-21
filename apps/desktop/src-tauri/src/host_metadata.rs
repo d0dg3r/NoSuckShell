@@ -32,8 +32,7 @@ impl Default for HostMetadataStore {
 }
 
 fn metadata_dir() -> anyhow::Result<PathBuf> {
-    let home = home::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?;
-    Ok(home.join(".ssh"))
+    crate::ssh_home::effective_ssh_dir()
 }
 
 fn metadata_path() -> anyhow::Result<PathBuf> {
