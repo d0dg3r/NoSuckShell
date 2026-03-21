@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -39,9 +41,21 @@ import {
   touchHostLastUsed,
 } from "./tauri-api";
 import { HostForm } from "./components/HostForm";
-import { HelpPanel } from "./components/HelpPanel";
-import { LayoutCommandCenter } from "./components/LayoutCommandCenter";
-import { TerminalPane } from "./components/TerminalPane";
+
+const HelpPanel = lazy(async () => {
+  const m = await import("./components/HelpPanel");
+  return { default: m.HelpPanel };
+});
+
+const LayoutCommandCenter = lazy(async () => {
+  const m = await import("./components/LayoutCommandCenter");
+  return { default: m.LayoutCommandCenter };
+});
+
+const TerminalPane = lazy(async () => {
+  const m = await import("./components/TerminalPane");
+  return { default: m.TerminalPane };
+});
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
 import { buildPaneContextActions, type ContextActionId } from "./features/context-actions";
 import {
@@ -4064,12 +4078,16 @@ export function App() {
             </div>
           </div>
           {paneSessionId ? (
-            <TerminalPane
-              sessionId={paneSessionId}
-              onUserInput={handleTerminalInput}
-              fontSize={terminalFontSize}
-              fontFamily={terminalFontFamily}
-            />
+            <Suspense
+              fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
+            >
+              <TerminalPane
+                sessionId={paneSessionId}
+                onUserInput={handleTerminalInput}
+                fontSize={terminalFontSize}
+                fontFamily={terminalFontFamily}
+              />
+            </Suspense>
           ) : (
             <div className="empty-pane split-empty-pane">
               <p className="split-empty-pane-copy">One click and we both get what we want</p>
@@ -5393,7 +5411,11 @@ export function App() {
                   </div>
                 </div>
               )}
-              {activeAppSettingsTab === "help" && <HelpPanel />}
+              {activeAppSettingsTab === "help" && (
+                <Suspense fallback={null}>
+                  <HelpPanel />
+                </Suspense>
+              )}
               {activeAppSettingsTab === "about" && (
                 <section className="about-hero">
                   <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
@@ -5405,41 +5427,43 @@ export function App() {
         </div>
       )}
       {isLayoutCommandCenterOpen && (
-        <LayoutCommandCenter
-          open={isLayoutCommandCenterOpen}
-          onClose={() => setIsLayoutCommandCenterOpen(false)}
-          layoutPresets={LAYOUT_PRESET_DEFINITIONS}
-          profiles={layoutProfiles}
-          selectedProfileId={selectedLayoutProfileId}
-          onSelectProfileId={(id) => {
-            setSelectedLayoutProfileId(id);
-            setPendingLayoutProfileDeleteId("");
-            const nextProfile = layoutProfiles.find((profile) => profile.id === id) ?? null;
-            if (nextProfile) {
-              setLayoutProfileName(nextProfile.name);
-            }
-          }}
-          profileName={layoutProfileName}
-          onProfileNameChange={setLayoutProfileName}
-          restoreSessions={saveLayoutWithHosts}
-          onRestoreSessionsChange={setSaveLayoutWithHosts}
-          onApplyProfile={() => {
-            void loadSelectedLayoutProfile().then(() => setIsLayoutCommandCenterOpen(false));
-          }}
-          onSaveProfile={() => void saveCurrentLayoutProfile()}
-          pendingDeleteProfileId={pendingLayoutProfileDeleteId}
-          onDeleteProfileIntent={() => void handleDeleteSelectedLayoutProfileIntent()}
-          onApplyPreset={(tree) => {
-            applyLayoutPresetTree(tree);
-            setIsLayoutCommandCenterOpen(false);
-          }}
-          onCloseAllIntent={(withLayoutReset) => void handleCloseAllIntent(withLayoutReset)}
-          pendingCloseAllIntent={pendingCloseAllIntent}
-          previewTree={layoutCommandCenterPreviewTree}
-          applyProfileDisabled={!selectedLayoutProfileId}
-          saveDisabled={false}
-          closeActionsDisabled={sessions.length === 0}
-        />
+        <Suspense fallback={null}>
+          <LayoutCommandCenter
+            open={isLayoutCommandCenterOpen}
+            onClose={() => setIsLayoutCommandCenterOpen(false)}
+            layoutPresets={LAYOUT_PRESET_DEFINITIONS}
+            profiles={layoutProfiles}
+            selectedProfileId={selectedLayoutProfileId}
+            onSelectProfileId={(id) => {
+              setSelectedLayoutProfileId(id);
+              setPendingLayoutProfileDeleteId("");
+              const nextProfile = layoutProfiles.find((profile) => profile.id === id) ?? null;
+              if (nextProfile) {
+                setLayoutProfileName(nextProfile.name);
+              }
+            }}
+            profileName={layoutProfileName}
+            onProfileNameChange={setLayoutProfileName}
+            restoreSessions={saveLayoutWithHosts}
+            onRestoreSessionsChange={setSaveLayoutWithHosts}
+            onApplyProfile={() => {
+              void loadSelectedLayoutProfile().then(() => setIsLayoutCommandCenterOpen(false));
+            }}
+            onSaveProfile={() => void saveCurrentLayoutProfile()}
+            pendingDeleteProfileId={pendingLayoutProfileDeleteId}
+            onDeleteProfileIntent={() => void handleDeleteSelectedLayoutProfileIntent()}
+            onApplyPreset={(tree) => {
+              applyLayoutPresetTree(tree);
+              setIsLayoutCommandCenterOpen(false);
+            }}
+            onCloseAllIntent={(withLayoutReset) => void handleCloseAllIntent(withLayoutReset)}
+            pendingCloseAllIntent={pendingCloseAllIntent}
+            previewTree={layoutCommandCenterPreviewTree}
+            applyProfileDisabled={!selectedLayoutProfileId}
+            saveDisabled={false}
+            closeActionsDisabled={sessions.length === 0}
+          />
+        </Suspense>
       )}
       {isAddHostModalOpen && (
         <div className="app-settings-overlay" onClick={closeAddHostModal}>

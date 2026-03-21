@@ -44,11 +44,12 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
 
   await shot(page, "01-main");
 
-  const splitRight = page.locator(".pane-toolbar-btn-split").nth(1);
-  await splitRight.click({ force: true });
-  await page.locator(".split-pane").nth(1).click();
-  await page.getByLabel("SSH host lab-runner").dblclick();
-  await expect(page.locator(".xterm-rows").nth(1)).toContainText("lab", { timeout: 15_000 });
+  await page.getByRole("button", { name: "Open add menu" }).click();
+  await page.getByText("New local terminal").click();
+  await expect(page.locator(".split-pane")).toHaveCount(2, { timeout: 15_000 });
+  await expect(page.locator('.split-pane[data-pane-index="1"] .xterm-rows')).toContainText("NoSuckShell local", {
+    timeout: 15_000,
+  });
 
   await shot(page, "02-split");
 
@@ -62,7 +63,7 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
   await page.getByText("Quick connect terminal").click();
   await expect(page.getByRole("heading", { name: "Quick connect" })).toBeVisible();
   await shot(page, "04-quick-connect");
-  await page.locator(".add-host-modal").getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Open app settings" }).click();
   await page.getByRole("button", { name: "Data & Backup" }).click();
@@ -74,7 +75,7 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
   await shot(page, "06-organization");
 
   await page.locator(".split-pane").first().click();
-  await page.getByRole("button", { name: "Turn on broadcast to multiple panes" }).click();
-  await page.getByRole("button", { name: "Target all visible panes" }).click();
+  await page.getByRole("button", { name: "Turn on broadcast to multiple panes" }).first().click({ force: true });
+  await page.getByRole("button", { name: "Target all visible panes" }).first().click({ force: true });
   await shot(page, "07-broadcast");
 });
