@@ -45,7 +45,7 @@ import {
 } from "./tauri-api";
 import { AddHostModal } from "./components/AddHostModal";
 import { HostContextMenu } from "./components/HostContextMenu";
-import { HostForm } from "./components/HostForm";
+import { HostListRow } from "./components/HostListRow";
 import { HostSidebar } from "./components/HostSidebar";
 import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
@@ -3652,175 +3652,38 @@ export function App() {
   });
 
   const renderHostRow = (row: HostRowViewModel, key: string) => (
-    <div
+    <HostListRow
       key={key}
-      className="host-row"
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setContextMenu((prev) => ({ ...prev, visible: false }));
-        setHostContextMenu({
-          x: event.clientX,
-          y: event.clientY,
-          host: row.host,
-        });
-      }}
-    >
-      <div
-        className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
-          activeHost === row.host.host ? "is-active" : ""
-        } ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`}
-      >
-        <button
-          className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
-            row.metadata.favorite ? "is-active" : ""
-          }`}
-          aria-label={`Toggle favorite for ${row.host.host}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void toggleFavoriteForHost(row.host.host);
-          }}
-        >
-          ★
-        </button>
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={`SSH host ${row.host.host}`}
-          className="host-item"
-          onClick={() => {
-            if (suppressHostClickAliasRef.current) {
-              const suppressedAlias = suppressHostClickAliasRef.current;
-              suppressHostClickAliasRef.current = null;
-              if (suppressedAlias === row.host.host) {
-                return;
-              }
-            }
-            toggleHostSelection(row.host);
-          }}
-          onMouseEnter={() => {
-            // Only enable hover affordances for connected hosts to avoid flicker on disconnected rows
-            if (row.connected) {
-              setHoveredHostAlias(row.host.host);
-            }
-          }}
-          onMouseLeave={() => {
-            if (row.connected) {
-              setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
-            }
-          }}
-          onDoubleClick={() => {
-            void connectToHostInNewPane(row.host);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              if (activeHost !== row.host.host) {
-                setActiveHost(row.host.host);
-              }
-              void connectToHostInNewPane(row.host);
-            }
-          }}
-          draggable
-          onDragStart={(event) => {
-            suppressHostClickAliasRef.current = row.host.host;
-            setDragPayload(event, { type: "machine", hostAlias: row.host.host });
-            setDraggingKind("machine");
-            missingDragPayloadLoggedRef.current = false;
-          }}
-          onDragEnd={() => {
-            setDraggingKind(null);
-            setDragOverPaneIndex(null);
-            missingDragPayloadLoggedRef.current = false;
-          }}
-        >
-          <span className="host-item-main">{row.host.host}</span>
-          <span className="host-user-badge">{row.displayUser}</span>
-        </div>
-        <div className="host-row-actions">
-          <button
-            className={`host-settings-inline-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
-            aria-label={`Open host settings for ${row.host.host}`}
-            title={`Open host settings for ${row.host.host}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleHostMenu(row.host);
-            }}
-          >
-            ⋮
-          </button>
-        </div>
-      </div>
-      <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
-        {openHostMenuHostAlias === row.host.host && (
-          <div className="host-slide-content">
-            <HostForm host={currentHost} onChange={setCurrentHost} />
-            <div className="host-meta-edit">
-              <label className="field">
-                <span className="field-label">Tags (comma separated)</span>
-                <input
-                  className="input"
-                  value={tagDraft}
-                  onChange={(event) => setTagDraft(event.target.value)}
-                  placeholder="prod, home, lab"
-                />
-              </label>
-              <label className="field checkbox-field">
-                <input
-                  className="checkbox-input"
-                  type="checkbox"
-                  checked={activeHostMetadata.favorite}
-                  onChange={() => void toggleFavoriteForHost(activeHost)}
-                />
-                <span className="field-label">Favorite</span>
-              </label>
-            </div>
-            <div className="action-row host-slide-actions">
-              <button
-                className="btn icon-btn"
-                aria-label="Save tags"
-                title="Save tags"
-                onClick={() => {
-                  void saveTagsForActiveHost().catch((e: unknown) => setError(String(e)));
-                }}
-              >
-                #
-              </button>
-              <button
-                className="btn btn-primary icon-btn"
-                aria-label="Save settings"
-                title="Save settings"
-                onClick={onSave}
-                disabled={!canSave}
-              >
-                ✓
-              </button>
-              <button
-                className={`btn btn-danger icon-btn ${
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "btn-danger-confirm"
-                    : ""
-                }`}
-                onClick={() => handleRemoveHostIntent(currentHost.host, "settings")}
-                disabled={!currentHost.host || !hosts.some((host) => host.host === currentHost.host)}
-                aria-label={
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "Confirm remove host"
-                    : "Remove host"
-                }
-                title={
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "Confirm remove host"
-                    : "Remove host"
-                }
-              >
-                {pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings" ? "!" : "×"}
-              </button>
-            </div>
-            {error && <p className="error-text">{error}</p>}
-          </div>
-        )}
-      </div>
-    </div>
+      row={row}
+      activeHost={activeHost}
+      openHostMenuHostAlias={openHostMenuHostAlias}
+      currentHost={currentHost}
+      setCurrentHost={setCurrentHost}
+      hosts={hosts}
+      tagDraft={tagDraft}
+      setTagDraft={setTagDraft}
+      activeHostMetadata={activeHostMetadata}
+      error={error}
+      canSave={canSave}
+      pendingRemoveConfirm={pendingRemoveConfirm}
+      suppressHostClickAliasRef={suppressHostClickAliasRef}
+      setContextMenu={setContextMenu}
+      setHostContextMenu={setHostContextMenu}
+      setHoveredHostAlias={setHoveredHostAlias}
+      setActiveHost={setActiveHost}
+      setDragOverPaneIndex={setDragOverPaneIndex}
+      setError={setError}
+      toggleFavoriteForHost={toggleFavoriteForHost}
+      toggleHostSelection={toggleHostSelection}
+      connectToHostInNewPane={connectToHostInNewPane}
+      setDragPayload={setDragPayload}
+      setDraggingKind={setDraggingKind}
+      missingDragPayloadLoggedRef={missingDragPayloadLoggedRef}
+      toggleHostMenu={toggleHostMenu}
+      onSave={onSave}
+      saveTagsForActiveHost={saveTagsForActiveHost}
+      handleRemoveHostIntent={handleRemoveHostIntent}
+    />
   );
 
   const appShellStyle = {
