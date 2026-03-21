@@ -132,10 +132,10 @@ pub fn resolve_backup_path(input: &str) -> Result<PathBuf, BackupError> {
 
 pub fn export_encrypted_backup(
     path: &str,
-    password: &str,
+    passphrase: &str,
     payload: &BackupPayload,
 ) -> Result<(), BackupError> {
-    if password.is_empty() {
+    if passphrase.is_empty() {
         return Err(BackupError::EmptyPassword);
     }
 
@@ -152,7 +152,7 @@ pub fn export_encrypted_backup(
     let salt = rand::random::<[u8; SALT_LEN]>();
     let nonce = rand::random::<[u8; NONCE_LEN]>();
 
-    let key = derive_key(password, &salt, &kdf)?;
+    let key = derive_key(passphrase, &salt, &kdf)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
     let payload_raw = serde_json::to_vec(payload)
         .map_err(|err| BackupError::Message(format!("Failed to serialize backup payload: {err}")))?;
@@ -174,8 +174,8 @@ pub fn export_encrypted_backup(
     fs::write(&resolved, raw).map_err(|err| map_export_io_error(err, resolved.display().to_string()))
 }
 
-pub fn import_encrypted_backup(path: &str, password: &str) -> Result<BackupPayload, BackupError> {
-    if password.is_empty() {
+pub fn import_encrypted_backup(path: &str, passphrase: &str) -> Result<BackupPayload, BackupError> {
+    if passphrase.is_empty() {
         return Err(BackupError::EmptyPassword);
     }
 
@@ -207,7 +207,7 @@ pub fn import_encrypted_backup(path: &str, password: &str) -> Result<BackupPaylo
     let ciphertext = STANDARD
         .decode(envelope.ciphertext.as_bytes())
         .map_err(|_| BackupError::InvalidBackupFormat)?;
-    let key = derive_key(password, &salt, &envelope.kdf)?;
+    let key = derive_key(passphrase, &salt, &envelope.kdf)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
 
     let plaintext = cipher
@@ -227,13 +227,13 @@ fn decode_exact_len(encoded: &str, expected_len: usize) -> Result<Vec<u8>, Backu
     Ok(bytes)
 }
 
-fn derive_key(password: &str, salt: &[u8], kdf: &KdfParams) -> Result<[u8; KDF_OUTPUT_LEN], BackupError> {
+fn derive_key(passphrase: &str, salt: &[u8], kdf: &KdfParams) -> Result<[u8; KDF_OUTPUT_LEN], BackupError> {
     let params = Params::new(kdf.memory_kib, kdf.iterations, kdf.parallelism, Some(KDF_OUTPUT_LEN))
         .map_err(|err| BackupError::Message(format!("Failed to initialize KDF parameters: {err}")))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = rand::random::<[u8; KDF_OUTPUT_LEN]>();
     argon2
-        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
         .map_err(|err| BackupError::Message(format!("Failed to derive backup key: {err}")))?;
     Ok(key)
 }
