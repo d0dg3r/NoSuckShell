@@ -1,6 +1,7 @@
-import type { ReactNode, RefObject } from "react";
+import type { RefObject } from "react";
 import type { HostStatusFilter, SidebarViewId } from "../features/session-model";
 import type { HostRowViewModel } from "../features/view-profile-filters";
+import { HostListRow, type HostListRowBridgeProps } from "./HostListRow";
 
 export type HostSidebarView = { id: SidebarViewId; label: string };
 
@@ -39,7 +40,7 @@ export type HostSidebarProps = {
   onClearFilters: () => void;
   connectedHostRows: HostRowViewModel[];
   otherHostRows: HostRowViewModel[];
-  renderHostRow: (row: HostRowViewModel, key: string) => ReactNode;
+  hostListRowBridge: HostListRowBridgeProps;
 };
 
 export function HostSidebar({
@@ -77,7 +78,7 @@ export function HostSidebar({
   onClearFilters,
   connectedHostRows,
   otherHostRows,
-  renderHostRow,
+  hostListRowBridge,
 }: HostSidebarProps) {
   return (
     <aside
@@ -229,13 +230,23 @@ export function HostSidebar({
             {connectedHostRows.length > 0 && (
               <div className="host-list-top">
                 <p className="host-list-section-title">Connected</p>
-                {connectedHostRows.map((row, index) =>
-                  renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`),
-                )}
+                {connectedHostRows.map((row, index) => (
+                  <HostListRow
+                    key={`connected-${row.host.host}-${row.host.port}-${index}`}
+                    row={row}
+                    {...hostListRowBridge}
+                  />
+                ))}
               </div>
             )}
             <div className="host-list-scroll">
-              {otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`))}
+              {otherHostRows.map((row, index) => (
+                <HostListRow
+                  key={`other-${row.host.host}-${row.host.port}-${index}`}
+                  row={row}
+                  {...hostListRowBridge}
+                />
+              ))}
             </div>
           </>
         )}

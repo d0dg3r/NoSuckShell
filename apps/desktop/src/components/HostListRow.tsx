@@ -37,6 +37,9 @@ export type HostListRowProps = {
   handleRemoveHostIntent: (hostAlias: string, scope: "settings") => void;
 };
 
+/** Props shared by every row; pass with `row` into {@link HostListRow}. */
+export type HostListRowBridgeProps = Omit<HostListRowProps, "row">;
+
 export function HostListRow({
   row,
   activeHost,

@@ -45,7 +45,6 @@ import {
 } from "./tauri-api";
 import { AddHostModal } from "./components/AddHostModal";
 import { HostContextMenu } from "./components/HostContextMenu";
-import { HostListRow } from "./components/HostListRow";
 import { HostSidebar } from "./components/HostSidebar";
 import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
@@ -3652,41 +3651,6 @@ export function App() {
     missingDragPayloadLoggedRef,
   });
 
-  const renderHostRow = (row: HostRowViewModel, key: string) => (
-    <HostListRow
-      key={key}
-      row={row}
-      activeHost={activeHost}
-      openHostMenuHostAlias={openHostMenuHostAlias}
-      currentHost={currentHost}
-      setCurrentHost={setCurrentHost}
-      hosts={hosts}
-      tagDraft={tagDraft}
-      setTagDraft={setTagDraft}
-      activeHostMetadata={activeHostMetadata}
-      error={error}
-      canSave={canSave}
-      pendingRemoveConfirm={pendingRemoveConfirm}
-      suppressHostClickAliasRef={suppressHostClickAliasRef}
-      setContextMenu={setContextMenu}
-      setHostContextMenu={setHostContextMenu}
-      setHoveredHostAlias={setHoveredHostAlias}
-      setActiveHost={setActiveHost}
-      setDragOverPaneIndex={setDragOverPaneIndex}
-      setError={setError}
-      toggleFavoriteForHost={toggleFavoriteForHost}
-      toggleHostSelection={toggleHostSelection}
-      connectToHostInNewPane={connectToHostInNewPane}
-      setDragPayload={setDragPayload}
-      setDraggingKind={setDraggingKind}
-      missingDragPayloadLoggedRef={missingDragPayloadLoggedRef}
-      toggleHostMenu={toggleHostMenu}
-      onSave={onSave}
-      saveTagsForActiveHost={saveTagsForActiveHost}
-      handleRemoveHostIntent={handleRemoveHostIntent}
-    />
-  );
-
   const appShellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
@@ -3771,7 +3735,36 @@ export function App() {
         onClearFilters={clearFilters}
         connectedHostRows={connectedHostRows}
         otherHostRows={otherHostRows}
-        renderHostRow={renderHostRow}
+        hostListRowBridge={{
+          activeHost,
+          openHostMenuHostAlias,
+          currentHost,
+          setCurrentHost,
+          hosts,
+          tagDraft,
+          setTagDraft,
+          activeHostMetadata,
+          error,
+          canSave,
+          pendingRemoveConfirm,
+          suppressHostClickAliasRef,
+          setContextMenu,
+          setHostContextMenu,
+          setHoveredHostAlias,
+          setActiveHost,
+          setDragOverPaneIndex,
+          setError,
+          toggleFavoriteForHost,
+          toggleHostSelection,
+          connectToHostInNewPane,
+          setDragPayload,
+          setDraggingKind,
+          missingDragPayloadLoggedRef,
+          toggleHostMenu,
+          onSave,
+          saveTagsForActiveHost,
+          handleRemoveHostIntent,
+        }}
       />
       <div
         className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}
