@@ -53,6 +53,7 @@ import { createSplitPaneRenderer } from "./components/SplitWorkspace";
 import { useAppRefSync } from "./hooks/useAppRefSync";
 import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
 import { useWorkspaceBootstrapFromStorage, useWorkspacePersistToStorage } from "./hooks/useWorkspaceLocalStorage";
+import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
 import { TrustHostModal } from "./components/TrustHostModal";
 import {
   AppSettingsPanel,
@@ -3780,123 +3781,28 @@ export function App() {
         onPointerDown={startSidebarResize}
       />
 
-      <section className="right-dock panel">
-        <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
-          {workspaceTabs.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              role="tab"
-              aria-selected={workspace.id === activeWorkspaceId}
-              className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
-              onClick={() => switchWorkspace(workspace.id)}
-              onDragOver={(event) => {
-                const payload = parseDragPayload(event);
-                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-                if (shouldReject) {
-                  return;
-                }
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event) => {
-                const payload = parseDragPayload(event);
-                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-                if (shouldReject) {
-                  return;
-                }
-                event.preventDefault();
-                sendSessionToWorkspace(payload.sessionId, workspace.id);
-              }}
-            >
-              {workspace.name}
-            </button>
-          ))}
-          <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
-            + Workspace
-          </button>
-          {workspaceTabs.length > 1 && (
-            <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
-              Remove current
-            </button>
-          )}
-        </div>
-        <div className="sessions-workspace">
-          <div className="sessions-zone">
-            <div className="session-pane-canvas">
-              <div
-                className={`terminal-grid ${splitResizeState ? `is-pane-resizing is-pane-resizing-${splitResizeState.axis}` : ""}${
-                  isStackedShell && mobileShellTab === "terminal" ? " is-mobile-terminal-pager" : ""
-                }`}
-              >
-                {isStackedShell && mobileShellTab === "terminal" ? (
-                  <div className="mobile-terminal-pager">
-                    {paneOrder.length > 1 ? (
-                      <div className="mobile-terminal-pager-controls" role="toolbar" aria-label="Terminal pager">
-                        <button
-                          type="button"
-                          className="btn mobile-terminal-pager-nav"
-                          onClick={() => nudgeMobilePager(-1)}
-                          aria-label="Previous terminal"
-                        >
-                          ‹
-                        </button>
-                        <span className="mobile-terminal-pager-status" aria-live="polite">
-                          {(() => {
-                            const pos = paneOrder.indexOf(activePaneIndex);
-                            return `${pos >= 0 ? pos + 1 : 1} / ${paneOrder.length}`;
-                          })()}
-                        </span>
-                        <button
-                          type="button"
-                          className="btn mobile-terminal-pager-nav"
-                          onClick={() => nudgeMobilePager(1)}
-                          aria-label="Next terminal"
-                        >
-                          ›
-                        </button>
-                      </div>
-                    ) : null}
-                    <div
-                      ref={mobilePagerRef}
-                      className="mobile-terminal-pager-viewport"
-                      onScroll={handleMobilePagerScroll}
-                    >
-                      {paneOrder.map((paneIndex) => (
-                        <div key={paneIndex} className="mobile-terminal-slide">
-                          {renderSplitNode(createLeafNode(paneIndex))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  renderSplitNode(splitTree)
-                )}
-              </div>
-            </div>
-            <div className="sessions-footer" role="status">
-              <div className="sessions-footer-meta">
-                <div className="footer-layout-controls">
-                  <button
-                    type="button"
-                    className="btn btn-primary footer-layout-command-btn"
-                    onClick={() => setIsLayoutCommandCenterOpen(true)}
-                    aria-label="Open layout command center"
-                    title="Layouts, templates, session cleanup"
-                  >
-                    Layouts
-                  </button>
-                  <div className="sessions-footer-status">
-                    <span className={`context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`}>
-                      Broadcast: {isBroadcastModeEnabled ? "enabled" : "disabled"} ({broadcastTargets.size} targets)
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <TerminalWorkspaceDock
+        workspaceTabs={workspaceTabs}
+        activeWorkspaceId={activeWorkspaceId}
+        switchWorkspace={switchWorkspace}
+        parseDragPayload={parseDragPayload}
+        sendSessionToWorkspace={sendSessionToWorkspace}
+        createWorkspace={createWorkspace}
+        removeWorkspace={removeWorkspace}
+        splitResizeState={splitResizeState}
+        isStackedShell={isStackedShell}
+        mobileShellTab={mobileShellTab}
+        paneOrder={paneOrder}
+        activePaneIndex={activePaneIndex}
+        nudgeMobilePager={nudgeMobilePager}
+        mobilePagerRef={mobilePagerRef}
+        handleMobilePagerScroll={handleMobilePagerScroll}
+        splitTree={splitTree}
+        renderSplitNode={renderSplitNode}
+        onOpenLayoutCommandCenter={() => setIsLayoutCommandCenterOpen(true)}
+        isBroadcastModeEnabled={isBroadcastModeEnabled}
+        broadcastTargetCount={broadcastTargets.size}
+      />
       {isAppSettingsOpen && (
         <AppSettingsPanel
           settingsOpenMode={settingsOpenMode}
