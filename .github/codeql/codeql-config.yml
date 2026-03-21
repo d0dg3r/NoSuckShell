@@ -1,0 +1,4 @@
+# Skip Cargo output and build-script generated sources (reduces CodeQL warnings
+# like "semantic analyzer unavailable" for target/debug/build/*/out/*.rs).
+paths-ignore:
+  - "**/target/**"
