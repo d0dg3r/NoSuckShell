@@ -34,7 +34,6 @@ const HelpPanel = lazy(async () => {
 export type AppSettingsTab =
   | "appearance"
   | "layout"
-  | "connections"
   | "data"
   | "ssh"
   | "views"
@@ -55,11 +54,10 @@ export type LayoutMode = "auto" | "wide" | "compact";
 export type SplitRatioPreset = "50-50" | "60-40" | "70-30";
 export type AutoArrangeMode = "off" | "a" | "b" | "c" | "free";
 
-/** Order: look & workspace → how you connect & filter → identities → advanced SSH → data safety → meta. */
+/** Order: look & workspace & quick connect → views → identities → advanced SSH → data safety → meta. */
 const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "appearance", label: "Appearance" },
   { id: "layout", label: "Layout & Navigation" },
-  { id: "connections", label: "Connections" },
   { id: "views", label: "Views" },
   { id: "store", label: "Identity Store" },
   { id: "ssh", label: "SSH" },
@@ -619,7 +617,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         When off, the sidebar can auto-hide; hover the left edge or use the slim handle to show it. You
                         can still toggle pin from that edge handle.
                       </p>
-                      <label className="field field-span-2">
+                      <label className="field">
                         <span className="field-label">Window layout</span>
                         <select
                           className="input density-profile-select"
@@ -634,7 +632,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                           Auto uses mobile shell on narrow screens. Wide keeps desktop grid. Compact stays stacked.
                         </span>
                       </label>
-                      <label className="field field-span-2">
+                      <label className="field">
                         <span className="field-label">Default split ratio preset</span>
                         <select
                           className="input density-profile-select"
@@ -685,34 +683,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       </p>
                     </div>
                   </section>
-                </div>
-              )}
-              {activeAppSettingsTab === "connections" && (
-                <div className="settings-stack">
-                  <section className="settings-card">
-                    <header className="settings-card-head">
-                      <h3>Defaults</h3>
-                      <p className="muted-copy">Connection defaults applied before manual overrides.</p>
-                    </header>
-                    <div className="host-form-grid">
-                      <label className="field field-span-2">
-                        <span className="field-label">Default login user</span>
-                        <input
-                          className="input"
-                          value={metadataStore.defaultUser}
-                          onChange={(event) => {
-                            const nextValue = event.target.value;
-                            setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
-                          }}
-                          onBlur={(event) => {
-                            void applyDefaultUser(event.target.value).catch((e: unknown) => setError(String(e)));
-                          }}
-                          placeholder="ubuntu"
-                        />
-                        <span className="field-help">Used when a host has no explicit user.</span>
-                      </label>
-                    </div>
-                  </section>
                   <section className="settings-card">
                     <header className="settings-card-head">
                       <h3>Quick connect</h3>
@@ -750,202 +720,248 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               )}
               {activeAppSettingsTab === "views" && (
                 <div className="settings-stack">
-                  <section className="settings-card backup-panel view-manager-panel">
-                  <div className="field">
-                    <span className="field-label">Saved custom views</span>
-                    <div className="view-manager-list">
+                  <section className="view-manager-panel">
+                    <div className="view-manager-panel-head">
+                      <span className="field-label">Saved custom views</span>
                       {sortedViewProfiles.length === 0 ? (
-                        <p className="muted-copy">No custom views yet.</p>
+                        <p className="muted-copy view-manager-empty">No custom views yet.</p>
                       ) : (
-                        sortedViewProfiles.map((profile) => (
-                          <button
-                            key={profile.id}
-                            className={`btn ${selectedViewProfileIdInSettings === profile.id ? "btn-primary" : ""}`}
-                            onClick={() => selectViewProfileForSettings(profile.id)}
-                          >
-                            {profile.name}
-                          </button>
-                        ))
+                        <div className="app-settings-subtabs view-manager-view-tabs" role="tablist" aria-label="Custom views">
+                          {sortedViewProfiles.map((profile) => (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={selectedViewProfileIdInSettings === profile.id}
+                              className={`settings-tab settings-subtab ${selectedViewProfileIdInSettings === profile.id ? "is-active" : ""}`}
+                              onClick={() => selectViewProfileForSettings(profile.id)}
+                            >
+                              {profile.name}
+                            </button>
+                          ))}
+                        </div>
                       )}
-                    </div>
-                  </div>
-                  <div className="action-row">
-                    <button className="btn" onClick={createNewViewDraft}>
-                      New view
-                    </button>
-                    <button className="btn" onClick={() => void reorderView("up")} disabled={!selectedViewProfileIdInSettings}>
-                      Move up
-                    </button>
-                    <button className="btn" onClick={() => void reorderView("down")} disabled={!selectedViewProfileIdInSettings}>
-                      Move down
-                    </button>
-                    <button className="btn btn-danger" onClick={() => void deleteCurrentViewDraft()} disabled={!selectedViewProfileIdInSettings}>
-                      Delete
-                    </button>
-                  </div>
-                  <label className="field">
-                    <span className="field-label">View name</span>
-                    <input
-                      className="input"
-                      value={viewDraft.name}
-                      onChange={(event) => setViewDraft((prev) => ({ ...prev, name: event.target.value }))}
-                      placeholder="Production hosts"
-                    />
-                  </label>
-                  <div className="filter-row">
-                    <label className="field">
-                      <span className="field-label">Rule mode</span>
-                      <select
-                        className="input"
-                        value={viewDraft.filterGroup.mode}
-                        onChange={(event) =>
-                          setViewDraft((prev) => ({
-                            ...prev,
-                            filterGroup: { ...prev.filterGroup, mode: event.target.value as "and" | "or" },
-                          }))
-                        }
-                      >
-                        <option value="and">All rules (AND)</option>
-                        <option value="or">Any rule (OR)</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div className="view-rule-list">
-                    {viewDraft.filterGroup.rules.map((rule) => (
-                      <div className="filter-row" key={rule.id}>
-                        <select
-                          className="input"
-                          value={rule.field}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, field: event.target.value as ViewFilterField } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                        >
-                          <option value="host">Alias</option>
-                          <option value="hostName">Hostname</option>
-                          <option value="user">User</option>
-                          <option value="port">Port</option>
-                          <option value="status">Status</option>
-                          <option value="favorite">Favorite</option>
-                          <option value="recent">Recent</option>
-                          <option value="tag">Tag</option>
-                        </select>
-                        <select
-                          className="input"
-                          value={rule.operator}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, operator: event.target.value as ViewFilterOperator } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                        >
-                          <option value="contains">contains</option>
-                          <option value="equals">equals</option>
-                          <option value="not_equals">not equals</option>
-                          <option value="starts_with">starts with</option>
-                          <option value="ends_with">ends with</option>
-                          <option value="greater_than">greater than</option>
-                          <option value="less_than">less than</option>
-                          <option value="in">in (comma separated)</option>
-                        </select>
-                        <input
-                          className="input"
-                          value={rule.value}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, value: event.target.value } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                          placeholder="value"
-                        />
+                      <div className="view-manager-toolbar">
+                        <button type="button" className="btn btn-view-tool" onClick={createNewViewDraft}>
+                          New view
+                        </button>
                         <button
-                          className="btn btn-danger"
-                          onClick={() =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.filter((entry) => entry.id !== rule.id),
-                              },
-                            }))
-                          }
+                          type="button"
+                          className="btn btn-view-tool"
+                          onClick={() => void reorderView("up")}
+                          disabled={!selectedViewProfileIdInSettings}
                         >
-                          Remove
+                          Move up
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-view-tool"
+                          onClick={() => void reorderView("down")}
+                          disabled={!selectedViewProfileIdInSettings}
+                        >
+                          Move down
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-view-tool btn-view-tool-danger"
+                          onClick={() => void deleteCurrentViewDraft()}
+                          disabled={!selectedViewProfileIdInSettings}
+                        >
+                          Delete
                         </button>
                       </div>
-                    ))}
-                  </div>
-                  <div className="action-row">
-                    <button
-                      className="btn"
-                      onClick={() =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          filterGroup: { ...prev.filterGroup, rules: [...prev.filterGroup.rules, createViewRule()] },
-                        }))
-                      }
-                    >
-                      Add rule
-                    </button>
-                  </div>
-                  <div className="filter-row">
-                    <select
-                      className="input"
-                      value={viewDraft.sortRules[0]?.field ?? "host"}
-                      onChange={(event) =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          sortRules: [{ field: event.target.value as ViewSortField, direction: prev.sortRules[0]?.direction ?? "asc" }],
-                        }))
-                      }
-                    >
-                      <option value="host">Sort by alias</option>
-                      <option value="hostName">Sort by hostname</option>
-                      <option value="user">Sort by user</option>
-                      <option value="port">Sort by port</option>
-                      <option value="lastUsedAt">Sort by last used</option>
-                      <option value="status">Sort by status</option>
-                      <option value="favorite">Sort by favorite</option>
-                    </select>
-                    <select
-                      className="input"
-                      value={viewDraft.sortRules[0]?.direction ?? "asc"}
-                      onChange={(event) =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          sortRules: [{ field: prev.sortRules[0]?.field ?? "host", direction: event.target.value as "asc" | "desc" }],
-                        }))
-                      }
-                    >
-                      <option value="asc">Ascending</option>
-                      <option value="desc">Descending</option>
-                    </select>
-                    <button className="btn btn-primary" onClick={() => void saveCurrentViewDraft()}>
-                      Save view
-                    </button>
-                  </div>
-                  <p className="muted-copy">
-                    Built-in views are fixed (`Alle`, `Favoriten`). Custom views are persisted and shown as sidebar tabs.
-                  </p>
+                    </div>
+                    <div className="view-manager-editor">
+                      <label className="field view-manager-field-name">
+                        <span className="field-label">View name</span>
+                        <input
+                          className="input"
+                          value={viewDraft.name}
+                          onChange={(event) => setViewDraft((prev) => ({ ...prev, name: event.target.value }))}
+                          placeholder="Production hosts"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </label>
+                      <div className="view-manager-rules-block">
+                        <span className="view-manager-block-label">Filter rules</span>
+                        <div className="filter-row view-manager-rule-mode-row">
+                          <label className="field">
+                            <span className="field-label">Rule mode</span>
+                            <select
+                              className="input density-profile-select"
+                              value={viewDraft.filterGroup.mode}
+                              onChange={(event) =>
+                                setViewDraft((prev) => ({
+                                  ...prev,
+                                  filterGroup: { ...prev.filterGroup, mode: event.target.value as "and" | "or" },
+                                }))
+                              }
+                            >
+                              <option value="and">All rules (AND)</option>
+                              <option value="or">Any rule (OR)</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="view-rule-list">
+                          {viewDraft.filterGroup.rules.map((rule) => (
+                            <div className="filter-row view-rule-row" key={rule.id}>
+                              <select
+                                className="input density-profile-select"
+                                value={rule.field}
+                                onChange={(event) =>
+                                  setViewDraft((prev) => ({
+                                    ...prev,
+                                    filterGroup: {
+                                      ...prev.filterGroup,
+                                      rules: prev.filterGroup.rules.map((entry) =>
+                                        entry.id === rule.id ? { ...entry, field: event.target.value as ViewFilterField } : entry,
+                                      ),
+                                    },
+                                  }))
+                                }
+                              >
+                                <option value="host">Alias</option>
+                                <option value="hostName">Hostname</option>
+                                <option value="user">User</option>
+                                <option value="port">Port</option>
+                                <option value="status">Status</option>
+                                <option value="favorite">Favorite</option>
+                                <option value="recent">Recent</option>
+                                <option value="tag">Tag</option>
+                              </select>
+                              <select
+                                className="input density-profile-select"
+                                value={rule.operator}
+                                onChange={(event) =>
+                                  setViewDraft((prev) => ({
+                                    ...prev,
+                                    filterGroup: {
+                                      ...prev.filterGroup,
+                                      rules: prev.filterGroup.rules.map((entry) =>
+                                        entry.id === rule.id
+                                          ? { ...entry, operator: event.target.value as ViewFilterOperator }
+                                          : entry,
+                                      ),
+                                    },
+                                  }))
+                                }
+                              >
+                                <option value="contains">contains</option>
+                                <option value="equals">equals</option>
+                                <option value="not_equals">not equals</option>
+                                <option value="starts_with">starts with</option>
+                                <option value="ends_with">ends with</option>
+                                <option value="greater_than">greater than</option>
+                                <option value="less_than">less than</option>
+                                <option value="in">in (comma separated)</option>
+                              </select>
+                              <input
+                                className="input view-rule-value-input"
+                                value={rule.value}
+                                onChange={(event) =>
+                                  setViewDraft((prev) => ({
+                                    ...prev,
+                                    filterGroup: {
+                                      ...prev.filterGroup,
+                                      rules: prev.filterGroup.rules.map((entry) =>
+                                        entry.id === rule.id ? { ...entry, value: event.target.value } : entry,
+                                      ),
+                                    },
+                                  }))
+                                }
+                                placeholder="value"
+                                spellCheck={false}
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-view-tool btn-view-tool-danger"
+                                onClick={() =>
+                                  setViewDraft((prev) => ({
+                                    ...prev,
+                                    filterGroup: {
+                                      ...prev.filterGroup,
+                                      rules: prev.filterGroup.rules.filter((entry) => entry.id !== rule.id),
+                                    },
+                                  }))
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="action-row action-row--view-manager">
+                          <button
+                            type="button"
+                            className="btn btn-view-tool"
+                            onClick={() =>
+                              setViewDraft((prev) => ({
+                                ...prev,
+                                filterGroup: { ...prev.filterGroup, rules: [...prev.filterGroup.rules, createViewRule()] },
+                              }))
+                            }
+                          >
+                            Add rule
+                          </button>
+                        </div>
+                      </div>
+                      <div className="view-manager-editor-footer">
+                        <span className="view-manager-footer-label">Sort & save</span>
+                        <div className="filter-row view-manager-sort-row">
+                          <select
+                            className="input density-profile-select"
+                            value={viewDraft.sortRules[0]?.field ?? "host"}
+                            onChange={(event) =>
+                              setViewDraft((prev) => ({
+                                ...prev,
+                                sortRules: [
+                                  {
+                                    field: event.target.value as ViewSortField,
+                                    direction: prev.sortRules[0]?.direction ?? "asc",
+                                  },
+                                ],
+                              }))
+                            }
+                          >
+                            <option value="host">Sort by alias</option>
+                            <option value="hostName">Sort by hostname</option>
+                            <option value="user">Sort by user</option>
+                            <option value="port">Sort by port</option>
+                            <option value="lastUsedAt">Sort by last used</option>
+                            <option value="status">Sort by status</option>
+                            <option value="favorite">Sort by favorite</option>
+                          </select>
+                          <select
+                            className="input density-profile-select"
+                            value={viewDraft.sortRules[0]?.direction ?? "asc"}
+                            onChange={(event) =>
+                              setViewDraft((prev) => ({
+                                ...prev,
+                                sortRules: [
+                                  {
+                                    field: prev.sortRules[0]?.field ?? "host",
+                                    direction: event.target.value as "asc" | "desc",
+                                  },
+                                ],
+                              }))
+                            }
+                          >
+                            <option value="asc">Ascending</option>
+                            <option value="desc">Descending</option>
+                          </select>
+                          <button type="button" className="btn btn-view-save" onClick={() => void saveCurrentViewDraft()}>
+                            Save view
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="view-manager-after">
+                      <p className="muted-copy view-manager-footnote">
+                        Built-in views are fixed (`All`, `Favorites`). Custom views are persisted and shown as sidebar
+                        tabs.
+                      </p>
+                    </div>
                   </section>
                 </div>
               )}
@@ -1111,7 +1127,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       <label className="field">
                         <span className="field-label">TCPKeepAlive</span>
                         <select
-                          className="input"
+                          className="input density-profile-select"
                           value={sshHostStarTcpKeepAlive}
                           onChange={(event) => setSshHostStarTcpKeepAlive(event.target.value as "" | "yes" | "no")}
                         >
@@ -1176,6 +1192,24 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                           Import creates store users from each distinct <span className="inline-code">User</span> value
                           on your saved hosts. Keys on the user apply when a host binding does not set its own keys.
                         </p>
+                        <label className="field">
+                          <span className="field-label">Default login user</span>
+                          <input
+                            className="input"
+                            value={metadataStore.defaultUser}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
+                            }}
+                            onBlur={(event) => {
+                              void applyDefaultUser(event.target.value).catch((e: unknown) => setError(String(e)));
+                            }}
+                            placeholder="ubuntu"
+                          />
+                          <span className="field-help">
+                            Used when a host has no explicit user (SSH config / host entry).
+                          </span>
+                        </label>
                         <div className="store-inline">
                           <button type="button" className="btn" onClick={() => void importStoreUsersFromHosts()}>
                             Import from SSH hosts

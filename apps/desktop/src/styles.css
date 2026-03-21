@@ -1104,8 +1104,9 @@ body,
   gap: 6px;
 }
 
-.checkbox-field {
+.field.checkbox-field {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 6px;
 }
@@ -3347,6 +3348,71 @@ body,
   background: rgba(13, 18, 21, 0.72);
 }
 
+/* Compact selects; columns align; full-width fields stay full where needed */
+.app-settings-content .host-form-grid {
+  align-items: start;
+}
+
+.app-settings-content .host-form-grid > .field:not(.checkbox-field) {
+  justify-items: start;
+}
+
+.app-settings-content .host-form-grid select.input,
+.app-settings-content .host-form-grid select.density-profile-select {
+  width: max-content;
+  max-width: 100%;
+  min-width: min(100%, 10.5rem);
+  box-sizing: border-box;
+}
+
+.app-settings-content .host-form-grid .field input.input[type="number"] {
+  width: max-content;
+  min-width: 5.25rem;
+  max-width: 100%;
+}
+
+.app-settings-content .host-form-grid > .field:not(.checkbox-field) .field-help {
+  max-width: min(100%, 48ch);
+}
+
+.app-settings-content .host-form-grid > .field.field-span-2:not(.checkbox-field) .field-help {
+  max-width: none;
+}
+
+.app-settings-content .view-manager-panel .filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: 0;
+}
+
+.app-settings-content .view-manager-panel .filter-row.view-rule-row {
+  margin-top: 0;
+}
+
+.app-settings-content .view-manager-panel .filter-row .field {
+  justify-items: start;
+}
+
+.app-settings-content .view-manager-panel .filter-row select.input {
+  width: max-content;
+  max-width: 100%;
+  min-width: min(100%, 9rem);
+}
+
+.app-settings-content .view-manager-panel .filter-row > .input:not(select) {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  max-width: 100%;
+}
+
+.app-settings-content .identity-store-section .store-inline select.input {
+  width: max-content;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
 .app-settings-modal:not(.add-host-modal):not(.trust-host-modal) .app-settings-content {
   flex: 1 1 auto;
   min-height: 0;
@@ -4200,18 +4266,204 @@ body,
   white-space: nowrap;
 }
 
+/* Custom views editor: tab strip + flat editor (no nested settings-card) */
 .view-manager-panel {
+  display: grid;
+  gap: 0;
+}
+
+.view-manager-panel-head {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.view-manager-panel-head > .field-label {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b8ccc2;
+}
+
+.view-manager-empty {
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+.view-manager-view-tabs {
+  margin: 0;
+  padding-left: 0;
+}
+
+.view-manager-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn-view-tool {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border-width: 1px;
+  border-color: rgba(150, 170, 161, 0.35);
+  background: rgba(18, 24, 28, 0.65);
+  color: rgba(210, 225, 216, 0.92);
+}
+
+.btn-view-tool:hover:not(:disabled) {
+  border-color: rgba(130, 184, 152, 0.45);
+  background: rgba(26, 34, 40, 0.85);
+  color: #f0faf4;
+}
+
+.view-manager-panel .btn-view-tool:disabled,
+.view-manager-panel .btn-view-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.view-manager-panel .settings-tab:focus-visible {
+  outline: 2px solid rgba(130, 184, 152, 0.55);
+  outline-offset: 2px;
+}
+
+.view-manager-panel .btn-view-tool:focus-visible,
+.view-manager-panel .btn-view-save:focus-visible {
+  outline: 2px solid rgba(130, 184, 152, 0.45);
+  outline-offset: 2px;
+}
+
+.btn-view-tool-danger {
+  border-color: rgba(180, 100, 95, 0.45);
+  color: rgba(230, 190, 186, 0.92);
+}
+
+.btn-view-tool-danger:hover:not(:disabled) {
+  border-color: rgba(210, 120, 108, 0.55);
+  color: #fde8e4;
+}
+
+.btn-view-save {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: rgba(36, 72, 54, 0.75);
+  border: 1px solid rgba(110, 168, 138, 0.5);
+  color: #e8f6ee;
+}
+
+.btn-view-save:hover:not(:disabled) {
+  background: rgba(44, 88, 66, 0.88);
+  border-color: rgba(130, 190, 155, 0.6);
+  color: #f6fffa;
+}
+
+.view-manager-editor {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-radius: 10px;
+  background: var(--tone-host-list-bg);
+  border: 1px solid rgba(150, 170, 161, 0.14);
+}
+
+.view-manager-field-name {
+  justify-items: start;
+}
+
+.view-manager-field-name .input {
+  width: 100%;
+  max-width: min(28rem, 100%);
+  box-sizing: border-box;
+}
+
+.view-manager-block-label,
+.view-manager-footer-label {
+  display: block;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(184, 204, 194, 0.78);
+  margin: 0;
+}
+
+.view-manager-rules-block {
+  display: grid;
   gap: var(--space-3);
 }
 
-.view-manager-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+.view-manager-rule-mode-row {
+  margin: 0;
+}
+
+.app-settings-content .view-manager-panel .view-manager-editor .input,
+.app-settings-content .view-manager-panel .view-manager-editor select.input {
+  border-radius: 6px;
 }
 
 .view-rule-list {
   display: flex;
   flex-direction: column;
+  gap: 0;
+}
+
+.view-rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid rgba(150, 170, 161, 0.12);
+}
+
+.view-rule-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.app-settings-content .view-manager-panel .view-rule-row > select.input {
+  flex: 0 0 auto;
+}
+
+.app-settings-content .view-manager-panel .view-rule-value-input {
+  flex: 1 1 10rem;
+  min-width: min(100%, 8rem);
+  max-width: 100%;
+}
+
+.app-settings-content .view-manager-panel .action-row--view-manager {
+  margin-top: 0;
+}
+
+.view-manager-editor-footer {
+  display: grid;
   gap: var(--space-2);
+  padding-top: var(--space-4);
+  margin-top: var(--space-1);
+  border-top: 1px solid rgba(150, 170, 161, 0.14);
+}
+
+.app-settings-content .view-manager-panel .view-manager-sort-row {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.view-manager-after {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(150, 170, 161, 0.1);
+}
+
+.view-manager-footnote {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  max-width: 58ch;
 }
