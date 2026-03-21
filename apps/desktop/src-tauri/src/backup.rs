@@ -3,7 +3,6 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -150,10 +149,8 @@ pub fn export_encrypted_backup(
     }
 
     let kdf = EncryptedBackupEnvelope::default_kdf();
-    let mut salt = [0u8; SALT_LEN];
-    let mut nonce = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut salt);
-    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let salt = rand::random::<[u8; SALT_LEN]>();
+    let nonce = rand::random::<[u8; NONCE_LEN]>();
 
     let key = derive_key(password, &salt, &kdf)?;
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
@@ -234,7 +231,7 @@ fn derive_key(password: &str, salt: &[u8], kdf: &KdfParams) -> Result<[u8; KDF_O
     let params = Params::new(kdf.memory_kib, kdf.iterations, kdf.parallelism, Some(KDF_OUTPUT_LEN))
         .map_err(|err| BackupError::Message(format!("Failed to initialize KDF parameters: {err}")))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = [0u8; KDF_OUTPUT_LEN];
+    let mut key = rand::random::<[u8; KDF_OUTPUT_LEN]>();
     argon2
         .hash_password_into(password.as_bytes(), salt, &mut key)
         .map_err(|err| BackupError::Message(format!("Failed to derive backup key: {err}")))?;
@@ -261,6 +258,7 @@ fn map_import_io_error(err: std::io::Error, path: String) -> BackupError {
 mod tests {
     use super::{export_encrypted_backup, import_encrypted_backup, resolve_backup_path, BackupPayload};
     use crate::host_metadata::HostMetadataStore;
+    use crate::testutil::random_password;
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -293,10 +291,11 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("backup.enc");
         let path_raw = path.to_string_lossy().to_string();
+        let password = random_password();
 
-        export_encrypted_backup(&path_raw, "correct horse battery staple", &sample_payload()).expect("export succeeds");
+        export_encrypted_backup(&path_raw, &password, &sample_payload()).expect("export succeeds");
         assert!(path.exists(), "expected export to create parent directory and file");
-        let restored = import_encrypted_backup(&path_raw, "correct horse battery staple").expect("import succeeds");
+        let restored = import_encrypted_backup(&path_raw, &password).expect("import succeeds");
 
         assert_eq!(restored.ssh_config, sample_payload().ssh_config);
     }
@@ -306,9 +305,14 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("backup.enc");
         let path_raw = path.to_string_lossy().to_string();
-        export_encrypted_backup(&path_raw, "correct password", &sample_payload()).expect("export succeeds");
+        let good = random_password();
+        let mut bad = random_password();
+        while bad == good {
+            bad = random_password();
+        }
+        export_encrypted_backup(&path_raw, &good, &sample_payload()).expect("export succeeds");
 
-        let err = import_encrypted_backup(&path_raw, "wrong password").expect_err("wrong password must fail");
+        let err = import_encrypted_backup(&path_raw, &bad).expect_err("wrong password must fail");
         assert!(
             err.to_string().to_ascii_lowercase().contains("password"),
             "expected password related error but got {err}"
@@ -323,7 +327,7 @@ mod tests {
         let raw = serde_json::to_vec(&sample_payload()).expect("serialize payload");
         fs::write(&path, raw).expect("write legacy backup");
 
-        let err = import_encrypted_backup(&path_raw, "some password").expect_err("legacy backup must fail");
+        let err = import_encrypted_backup(&path_raw, &random_password()).expect_err("legacy backup must fail");
         assert!(
             err.to_string().to_ascii_lowercase().contains("legacy"),
             "expected legacy rejection error but got {err}"

@@ -1,6 +1,8 @@
 mod backup;
 mod host_metadata;
 mod key_crypto;
+#[cfg(test)]
+mod testutil;
 mod layout_profiles;
 mod secure_store;
 mod session;
