@@ -6,6 +6,7 @@ type Handler = (payload: SessionOutputEvent) => void;
 
 const handlersBySession = new Map<string, Set<Handler>>();
 let globalListenerStarted = false;
+let globalUnlisten: (() => void) | null = null;
 
 const hasTauriTransformCallback = (): boolean => {
   if (import.meta.env.VITE_E2E === "true") {
@@ -46,8 +47,23 @@ function ensureGlobalListener(): void {
     for (const handler of set) {
       handler(payload);
     }
+  }).then((unlisten) => {
+    globalUnlisten = unlisten;
   }).catch(() => {
     globalListenerStarted = false;
+  });
+}
+
+// Clean up the global listener on Vite HMR to prevent duplicate dispatches
+// when the module is re-evaluated during hot reload.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    globalListenerStarted = false;
+    if (globalUnlisten) {
+      globalUnlisten();
+      globalUnlisten = null;
+    }
+    handlersBySession.clear();
   });
 }
 

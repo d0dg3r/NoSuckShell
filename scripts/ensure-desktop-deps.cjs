@@ -8,10 +8,13 @@ const { spawnSync } = require("child_process");
 
 const root = path.join(__dirname, "..");
 const desktop = path.join(root, "apps", "desktop");
-const tscBin = path.join(desktop, "node_modules", ".bin", "tsc");
-const tauriBin = path.join(desktop, "node_modules", ".bin", "tauri");
 
-if (fs.existsSync(tscBin) && fs.existsSync(tauriBin)) {
+// Check package presence rather than bin executables to be cross-platform safe
+// (on Windows .bin entries are .cmd wrappers; checking the package dir is always reliable).
+const tscPresent = fs.existsSync(path.join(desktop, "node_modules", "typescript"));
+const tauriPresent = fs.existsSync(path.join(desktop, "node_modules", "@tauri-apps", "cli"));
+
+if (tscPresent && tauriPresent) {
   process.exit(0);
 }
 
@@ -21,7 +24,9 @@ if (!fs.existsSync(path.join(desktop, "package.json"))) {
 }
 
 console.error("[nosuckshell] Installing desktop dependencies (apps/desktop) …");
-const r = spawnSync("npm", ["install"], {
+// On Windows the npm executable is `npm.cmd`; spawn requires the correct name.
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const r = spawnSync(npm, ["install"], {
   cwd: desktop,
   stdio: "inherit",
   env: process.env,
@@ -29,7 +34,8 @@ const r = spawnSync("npm", ["install"], {
 if (r.status !== 0) {
   process.exit(r.status ?? 1);
 }
-if (!fs.existsSync(tscBin) || !fs.existsSync(tauriBin)) {
-  console.error("[nosuckshell] Install finished but tsc/tauri is still missing. Check apps/desktop npm output.");
+if (!fs.existsSync(path.join(desktop, "node_modules", "typescript")) ||
+    !fs.existsSync(path.join(desktop, "node_modules", "@tauri-apps", "cli"))) {
+  console.error("[nosuckshell] Install finished but typescript/@tauri-apps/cli is still missing. Check apps/desktop npm output.");
   process.exit(1);
 }
