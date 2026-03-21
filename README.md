@@ -93,13 +93,13 @@ Details: [docs/backup-security.md](docs/backup-security.md)
 GitHub releases are created by pushing a SemVer tag:
 
 - Final: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v1.0.0-beta.1`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v0.1.0-beta.4`)
 
-**Next planned pre-release:** `v1.0.0-beta.1` (push the tag when you want CI to publish binaries). Changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+**Current pre-release line:** `v0.1.0-beta.4` (push the tag when you want CI to publish binaries). Changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ```bash
-git tag v1.0.0-beta.1
-git push origin v1.0.0-beta.1
+git tag v0.1.0-beta.4
+git push origin v0.1.0-beta.4
 ```
 
 Full checklist: [docs/releases.md](docs/releases.md)
