@@ -267,6 +267,7 @@ fn reorder_view_profiles(ids: Vec<String>) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .manage(SessionState::default())
+        // codeql[rust/hard-coded-cryptographic-value]: False positive — `generate_handler!` only registers Tauri IPC command symbols, not literal passwords or keys.
         .invoke_handler(tauri::generate_handler![
             list_hosts,
             save_host,
