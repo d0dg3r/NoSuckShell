@@ -7,6 +7,7 @@ use crate::store_models::{
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -261,9 +262,12 @@ fn write_runtime_private_key(key_id: &str, private_key: &str) -> Result<PathBuf>
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.pem", normalize_id(key_id)));
     fs::write(&path, private_key)?;
-    let mut perms = fs::metadata(&path)?.permissions();
-    perms.set_mode(0o600);
-    fs::set_permissions(&path, perms)?;
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&path, perms)?;
+    }
     Ok(path)
 }
 
