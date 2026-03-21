@@ -2,6 +2,20 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.1.0-beta.5] - 2026-03-21
+
+**Pre-release.** Binaries are published after you push tag [`v0.1.0-beta.5`][v0.1.0-beta.5] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Changed
+
+- **Code scanning (Rust):** Avoid hard-coded test passphrases and `[0u8; N]` crypto-buffer patterns flagged by CodeQL — `testutil::random_password()`, `rand::random` for backup salt/nonce and key buffers, aligned with `rand` 0.10.
+- **Code scanning (JS):** `createId` prefers `crypto.getRandomValues` for the random suffix (Tauri webview); `Math.random` only as a rare fallback.
+- **Code scanning:** In-source suppression for a **false positive** on `tauri::generate_handler!` (IPC command registration is not a literal password).
+
+### Notes
+
+- Installers remain **unsigned**; see [releases.md](releases.md) for signing / notarization follow-up.
+
 ## [0.1.0-beta.4] - 2026-03-21
 
 **Pre-release.** Binaries are published after you push tag [`v0.1.0-beta.4`][v0.1.0-beta.4] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -50,3 +64,4 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.1.0-beta.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.2
 [v0.1.0-beta.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.3
 [v0.1.0-beta.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.4
+[v0.1.0-beta.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.5

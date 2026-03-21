@@ -5,7 +5,7 @@ This repository publishes desktop releases from Git tags via GitHub Actions.
 ## Tag convention
 
 - Final release: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v0.1.0-beta.4`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v0.1.0-beta.5`)
 - Accepted prerelease token format: dot-separated `[0-9A-Za-z-]+` parts.
 
 Validation regex in workflow:
@@ -71,14 +71,14 @@ git tag v0.3.0-rc.1
 git push origin v0.3.0-rc.1
 
 # beta prerelease (current line)
-git tag v0.1.0-beta.4
-git push origin v0.1.0-beta.4
+git tag v0.1.0-beta.5
+git push origin v0.1.0-beta.5
 ```
 
 ## Current beta (planned)
 
-- **Target tag:** `v0.1.0-beta.4` — push when you are ready; in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` match this prerelease.
-- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.1.0-beta.4`.
+- **Target tag:** `v0.1.0-beta.5` — push when you are ready; in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` match this prerelease.
+- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.1.0-beta.5`.
 - The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
 
 ## Common pitfalls checklist

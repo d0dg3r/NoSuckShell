@@ -6,7 +6,7 @@ labels: bug
 
 ## Environment
 
-- NoSuckShell version (or commit), e.g. `0.1.0-beta.4` or `git rev-parse HEAD`:
+- NoSuckShell version (or commit), e.g. `0.1.0-beta.5` or `git rev-parse HEAD`:
 - OS / distro (e.g. CachyOS, macOS 14, Windows 11):
 - If Linux WebKit issues: did you try `WEBKIT_DISABLE_DMABUF_RENDERER=1`? (yes/no)
 
