@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copy the <screenshots> block into your AppStream metainfo (e.g. Flatpak).
+  Adjust image URLs to your Flathub repo raw paths or relative install paths.
+  Default assets assume English UI and English captions. For another locale, add
+  xml:lang on those <screenshot> nodes and translated captions; keep at least
+  one English screenshot for Flathub curation where required.
+-->
+<screenshots>
+  <screenshot type="default">
+    <image>https://dl.flathub.org/media/…/01-main.png</image>
+    <caption>Host list and embedded terminal in one workspace</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/02-split.png</image>
+    <caption>Split panes with independent sessions and resizable dividers</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/03-layout-profiles.png</image>
+    <caption>Save and restore layout profiles with or without host mappings</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/04-quick-connect.png</image>
+    <caption>Quick connect and session tooling from the toolbar</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/05-backup.png</image>
+    <caption>Password-protected encrypted backup export and import</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/06-organization.png</image>
+    <caption>Favorites, tags, and custom views in the sidebar</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://dl.flathub.org/media/…/07-broadcast.png</image>
+    <caption>Broadcast input to multiple sessions when enabled</caption>
+  </screenshot>
+</screenshots>

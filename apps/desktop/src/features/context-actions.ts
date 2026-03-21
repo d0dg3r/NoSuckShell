@@ -1,15 +1,20 @@
 export type ContextActionId =
+  | "pane.newLocal"
+  | "pane.quickConnect"
   | "pane.clear"
   | "pane.close"
   | "layout.split.left"
   | "layout.split.right"
   | "layout.split.top"
   | "layout.split.bottom"
+  | "layout.freeMove.enable"
+  | "layout.freeMove.disable"
   | "broadcast.mode.enable"
   | "broadcast.mode.disable"
   | "broadcast.selectAllVisible"
   | "broadcast.clearTargets"
-  | "broadcast.togglePaneTarget";
+  | "broadcast.togglePaneTarget"
+  | "app.openSettings";
 
 export type ContextAction = {
   id: ContextActionId;
@@ -23,66 +28,102 @@ type BuildArgs = {
   canClosePane?: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
+  splitMode?: "duplicate" | "empty";
+  freeMoveEnabled?: boolean;
+};
+
+const buildSplitLabels = (splitMode: "duplicate" | "empty") => {
+  if (splitMode === "empty") {
+    return {
+      top: "Split top (empty pane)",
+      left: "Split left (empty pane)",
+      right: "Split right (empty pane)",
+      bottom: "Split bottom (empty pane)",
+    } as const;
+  }
+
+  return {
+    top: "Split top (duplicate session)",
+    left: "Split left (duplicate session)",
+    right: "Split right (duplicate session)",
+    bottom: "Split bottom (duplicate session)",
+  } as const;
 };
 
 export const buildPaneContextActions = ({
   paneSessionId,
   canClosePane = true,
   broadcastModeEnabled,
-  broadcastCount,
+  splitMode = "duplicate",
+  freeMoveEnabled = false,
 }: BuildArgs): ContextAction[] => {
   const hasPaneSession = Boolean(paneSessionId);
+  const splitLabels = buildSplitLabels(splitMode);
+  const freeMoveAction: ContextAction = freeMoveEnabled
+    ? {
+        id: "layout.freeMove.disable",
+        label: "Resume auto-arrange for layout",
+        separatorAbove: true,
+      }
+    : {
+        id: "layout.freeMove.enable",
+        label: "Pause auto-arrange (manual layout only)",
+        separatorAbove: true,
+      };
+  const broadcastModeAction: ContextAction = broadcastModeEnabled
+    ? {
+        id: "broadcast.mode.disable",
+        label: "Stop broadcasting keyboard to multiple panes",
+        separatorAbove: true,
+      }
+    : {
+        id: "broadcast.mode.enable",
+        label: "Broadcast keyboard input to multiple panes",
+        separatorAbove: true,
+      };
 
   return [
-    { id: "pane.clear", label: "Close session in pane", disabled: !hasPaneSession },
+    { id: "pane.newLocal", label: "New local terminal" },
+    { id: "pane.quickConnect", label: "Quick connect" },
     {
-      id: "pane.close",
-      label: "Close pane (and session)",
-      disabled: !canClosePane,
+      id: "layout.split.top",
+      label: splitLabels.top,
       separatorAbove: true,
     },
     {
       id: "layout.split.left",
-      label: "Split left",
-      separatorAbove: true,
+      label: splitLabels.left,
     },
     {
       id: "layout.split.right",
-      label: "Split right",
-    },
-    {
-      id: "layout.split.top",
-      label: "Split top",
+      label: splitLabels.right,
     },
     {
       id: "layout.split.bottom",
-      label: "Split bottom",
+      label: splitLabels.bottom,
     },
-    {
-      id: "broadcast.mode.enable",
-      label: "Broadcast: ON",
-      disabled: broadcastModeEnabled,
-      separatorAbove: true,
-    },
-    {
-      id: "broadcast.mode.disable",
-      label: "Broadcast: OFF",
-      disabled: !broadcastModeEnabled,
-    },
+    freeMoveAction,
+    broadcastModeAction,
     {
       id: "broadcast.togglePaneTarget",
-      label: "Toggle pane target",
+      label: "Target this pane",
       disabled: !broadcastModeEnabled || !hasPaneSession,
     },
     {
-      id: "broadcast.selectAllVisible",
-      label: "Target all visible",
-      disabled: !broadcastModeEnabled,
+      id: "pane.clear",
+      label: "Close session",
+      disabled: !hasPaneSession,
+      separatorAbove: true,
     },
     {
-      id: "broadcast.clearTargets",
-      label: "Clear targets",
-      disabled: !broadcastModeEnabled || broadcastCount === 0,
+      id: "pane.close",
+      label: "Close pane",
+      disabled: !canClosePane,
+    },
+    {
+      id: "app.openSettings",
+      label: "Open app settings",
+      separatorAbove: true,
     },
   ];
 };

@@ -3,7 +3,9 @@ use anyhow::Context;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::env;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
@@ -18,6 +20,10 @@ pub struct SessionOutputEvent {
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedMaster = Arc<Mutex<Box<dyn MasterPty + Send>>>;
 type SharedChild = Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>;
+
+/// Maximum bytes to buffer per IPC event to avoid oversized messages.
+const SESSION_OUTPUT_COALESCE_MAX_BYTES: usize = 16 * 1024;
+const SESSION_OUTPUT_HOST_KEY_NEEDLE: &str = "Are you sure you want to continue connecting";
 
 pub struct SessionHandle {
     writer: SharedWriter,
@@ -58,6 +64,59 @@ pub fn build_ssh_command(host: &HostConfig) -> CommandBuilder {
     command
 }
 
+fn resolve_local_shell_path(explicit_shell: Option<&str>) -> String {
+    if let Some(shell) = explicit_shell {
+        let trimmed = shell.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(shell_from_env) = env::var("SHELL") {
+            let trimmed = shell_from_env.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if Path::new("/bin/zsh").exists() {
+            return "/bin/zsh".to_string();
+        }
+        if Path::new("/bin/bash").exists() {
+            return "/bin/bash".to_string();
+        }
+        return "sh".to_string();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Prefer PowerShell; fall back to cmd.exe.
+        if let Ok(windir) = env::var("WINDIR") {
+            let ps = Path::new(&windir)
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            if ps.exists() {
+                return ps.to_string_lossy().into_owned();
+            }
+            let cmd = Path::new(&windir).join("System32").join("cmd.exe");
+            if cmd.exists() {
+                return cmd.to_string_lossy().into_owned();
+            }
+        }
+        "powershell.exe".to_string()
+    }
+}
+
+pub fn build_local_shell_command(explicit_shell: Option<&str>) -> CommandBuilder {
+    let shell = resolve_local_shell_path(explicit_shell);
+    let mut command = CommandBuilder::new(&shell);
+    // `-l` (login shell) is a POSIX convention; PowerShell and cmd.exe do not support it.
+    #[cfg(not(target_os = "windows"))]
+    command.arg("-l");
+    command
+}
+
 impl SessionState {
     pub fn start(&self, app: AppHandle, host: HostConfig) -> anyhow::Result<String> {
         let pty_system = native_pty_system();
@@ -69,16 +128,30 @@ impl SessionState {
                 pixel_height: 0,
             })
             .context("failed to allocate pty")?;
-        self.spawn_and_register(app, pair, host)
+        let command = build_ssh_command(&host);
+        self.spawn_and_register_command(app, pair, command)
     }
 
-    fn spawn_and_register(
+    pub fn start_local(&self, app: AppHandle) -> anyhow::Result<String> {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 30,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("failed to allocate pty")?;
+        let command = build_local_shell_command(None);
+        self.spawn_and_register_command(app, pair, command)
+    }
+
+    fn spawn_and_register_command(
         &self,
         app: AppHandle,
         pair: PtyPair,
-        host: HostConfig,
+        mut command: CommandBuilder,
     ) -> anyhow::Result<String> {
-        let mut command = build_ssh_command(&host);
         command.env("TERM", "xterm-256color");
 
         let child = pair
@@ -118,23 +191,57 @@ impl SessionState {
 
         let session_id_for_thread = session_id.clone();
         std::thread::spawn(move || {
+            let emit_chunk = |chunk: String| {
+                let host_key_prompt = chunk.contains(SESSION_OUTPUT_HOST_KEY_NEEDLE);
+                let _ = app.emit(
+                    "session-output",
+                    SessionOutputEvent {
+                        session_id: session_id_for_thread.clone(),
+                        chunk,
+                        host_key_prompt,
+                    },
+                );
+            };
+
             let mut buf = [0_u8; 8192];
+            let mut pending = String::new();
+
+            let flush_pending = |pending: &mut String, emit: &dyn Fn(String)| {
+                if pending.is_empty() {
+                    return;
+                }
+                let chunk = std::mem::take(pending);
+                emit(chunk);
+            };
+
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(read_len) => {
-                        let chunk = String::from_utf8_lossy(&buf[..read_len]).to_string();
-                        let host_key_prompt = chunk.contains("Are you sure you want to continue connecting");
-                        let _ = app.emit(
-                            "session-output",
-                            SessionOutputEvent {
-                                session_id: session_id_for_thread.clone(),
-                                chunk,
-                                host_key_prompt,
-                            },
-                        );
+                    Ok(0) => {
+                        flush_pending(&mut pending, &emit_chunk);
+                        break;
                     }
-                    Err(_) => break,
+                    Ok(read_len) => {
+                        let fragment = String::from_utf8_lossy(&buf[..read_len]);
+                        pending.push_str(&fragment);
+
+                        // Emit in MAX_BYTES-sized chunks to avoid oversized IPC messages.
+                        while pending.len() > SESSION_OUTPUT_COALESCE_MAX_BYTES {
+                            let rest = pending.split_off(SESSION_OUTPUT_COALESCE_MAX_BYTES);
+                            let chunk = std::mem::replace(&mut pending, rest);
+                            emit_chunk(chunk);
+                        }
+
+                        // Always flush after each read so prompts and interactive output
+                        // are delivered immediately without waiting for a next read.
+                        // Under high-throughput bursts, `reader.read` returns ~buf-sized
+                        // chunks (8 KB), keeping the IPC event rate reasonable while
+                        // ensuring no data is ever held indefinitely when output quiets.
+                        flush_pending(&mut pending, &emit_chunk);
+                    }
+                    Err(_) => {
+                        flush_pending(&mut pending, &emit_chunk);
+                        break;
+                    }
                 }
             }
         });
@@ -202,7 +309,7 @@ impl SessionState {
 
 #[cfg(test)]
 mod tests {
-    use super::build_ssh_command;
+    use super::{build_local_shell_command, build_ssh_command};
     use crate::ssh_config::HostConfig;
 
     #[test]
@@ -227,5 +334,31 @@ mod tests {
         assert!(rendered.contains("-J"));
         assert!(rendered.contains("bastion"));
         assert!(rendered.contains("deploy@10.0.0.5"));
+    }
+
+    #[test]
+    fn builds_local_shell_command_from_explicit_shell() {
+        let cmd = build_local_shell_command(Some("/usr/bin/fish"));
+        let rendered = format!("{cmd:?}");
+        assert!(rendered.contains("/usr/bin/fish"));
+        // `-l` (login shell) is only passed on POSIX-like platforms.
+        #[cfg(not(target_os = "windows"))]
+        assert!(rendered.contains("-l"));
+        #[cfg(target_os = "windows")]
+        assert!(!rendered.contains("-l"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn builds_local_shell_command_default_uses_windows_shell() {
+        let cmd = build_local_shell_command(None);
+        let rendered = format!("{cmd:?}").to_lowercase();
+        // On Windows the default must resolve to PowerShell or cmd.exe, never Unix paths.
+        assert!(
+            rendered.contains("powershell") || rendered.contains("cmd"),
+            "expected PowerShell or cmd.exe as default shell on Windows, got: {rendered}"
+        );
+        // Login flag must not be passed to Windows shells.
+        assert!(!rendered.contains("-l"));
     }
 }

@@ -1,11 +1,15 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -26,18 +30,55 @@ import {
   deleteViewProfile,
   reorderViewProfiles,
   sendInput,
+  listStoreObjects,
+  saveStoreObjects,
+  createEncryptedKey,
+  unlockKeyMaterial,
+  deleteKeyById,
+  startLocalSession,
+  startQuickSshSession,
   startSession,
   touchHostLastUsed,
 } from "./tauri-api";
 import { HostForm } from "./components/HostForm";
-import { TerminalPane } from "./components/TerminalPane";
+import {
+  AppSettingsPanel,
+  type AppSettingsTab,
+  type AutoArrangeMode,
+  type DensityProfile,
+  type FrameModePreset,
+  type LayoutMode,
+  type ListTonePreset,
+  type QuickConnectMode,
+  type SettingsOpenMode,
+  type SplitRatioPreset,
+  type TerminalFontPreset,
+  type UiFontPreset,
+} from "./components/AppSettingsPanel";
+
+const LayoutCommandCenter = lazy(async () => {
+  const m = await import("./components/LayoutCommandCenter");
+  return { default: m.LayoutCommandCenter };
+});
+
+const TerminalPane = lazy(async () => {
+  const m = await import("./components/TerminalPane");
+  return { default: m.TerminalPane };
+});
+import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
 import { buildPaneContextActions, type ContextActionId } from "./features/context-actions";
+import {
+  buildQuickConnectUserCandidates,
+  parseHostPortInput,
+  parseQuickConnectCommandInput,
+} from "./features/quick-connect";
 import {
   assignSessionToPane,
   clearPaneAtIndex,
   createPaneLayoutItem,
   createPaneLayoutsFromSlots,
   createInitialPaneState,
+  ensurePaneIndex,
   MIN_PANE_HEIGHT,
   MIN_PANE_WIDTH,
   reconcilePaneLayouts,
@@ -45,24 +86,34 @@ import {
   resolveInputTargets,
   sanitizeBroadcastTargets,
 } from "./features/split";
+import { sortRowsByFavoriteThenAlias } from "./features/host-order";
+import {
+  createDefaultViewProfile,
+  createEmptyViewFilterRule,
+  evaluateGroup,
+  type HostRowViewModel,
+} from "./features/view-profile-filters";
 import type {
   HostConfig,
   HostMetadata,
   HostMetadataStore,
+  EntityStore,
+  HostBinding,
+  UserObject,
+  GroupObject,
+  TagObject,
+  SshKeyObject,
   LayoutProfile,
   LayoutSplitTreeNode,
   PaneLayoutItem,
+  QuickSshSessionRequest,
   SessionOutputEvent,
-  ViewFilterField,
-  ViewFilterGroup,
-  ViewFilterOperator,
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTransparent from "../../../img/logo_tranparent.png";
-import logoTerminal from "../../../img/logo_terminal.png";
 
 const emptyHost = (): HostConfig => ({
   host: "",
@@ -74,24 +125,54 @@ const emptyHost = (): HostConfig => ({
   proxyCommand: "",
 });
 
-type SessionTab = {
+const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => ({
+  hostName: "",
+  user: defaultUser.trim(),
+  identityFile: "",
+  proxyJump: "",
+  proxyCommand: "",
+});
+
+type SavedSshSessionTab = {
   id: string;
-  host: string;
+  kind: "sshSaved";
+  hostAlias: string;
+};
+type QuickSshSessionTab = {
+  id: string;
+  kind: "sshQuick";
+  label: string;
+  request: QuickSshSessionRequest;
+};
+type LocalSessionTab = {
+  id: string;
+  kind: "local";
+  label: string;
+};
+type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab;
+type QuickConnectDraft = {
+  hostName: string;
+  user: string;
+  identityFile: string;
+  proxyJump: string;
+  proxyCommand: string;
 };
 
 type HostStatusFilter = "all" | "connected" | "disconnected";
-type HostRowViewModel = {
-  host: HostConfig;
-  metadata: HostMetadata;
-  connected: boolean;
-  displayUser: string;
-};
 
-type AppSettingsTab = "general" | "views" | "backup" | "extras" | "help" | "about";
-type DensityProfile = "aggressive" | "balanced" | "safe";
-type ListTonePreset = "subtle" | "strong";
-type FrameModePreset = "cleaner" | "balanced" | "clearer";
+type QuickConnectWizardStep = 1 | 2;
+type AutoArrangeActiveMode = "a" | "b" | "c";
 type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
+type SplitMode = "duplicate" | "empty";
+type WorkspaceSnapshot = {
+  id: string;
+  name: string;
+  splitSlots: Array<string | null>;
+  paneLayouts: PaneLayoutItem[];
+  splitTree: SplitTreeNode;
+  activePaneIndex: number;
+  activeSessionId: string;
+};
 type DragPayload =
   | { type: "session"; sessionId: string }
   | { type: "machine"; hostAlias: string };
@@ -101,6 +182,7 @@ type ContextMenuState = {
   x: number;
   y: number;
   paneIndex: number | null;
+  splitMode: SplitMode;
 };
 type SplitAxis = "horizontal" | "vertical";
 type SplitLeafNode = { id: string; type: "leaf"; paneIndex: number };
@@ -120,14 +202,6 @@ const DEFAULT_SPLIT_RATIO = 0.6;
 const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 
-const appSettingsTabs: Array<{ id: AppSettingsTab; label: string }> = [
-  { id: "general", label: "General" },
-  { id: "views", label: "Views" },
-  { id: "backup", label: "Backup & Restore" },
-  { id: "extras", label: "Extras" },
-  { id: "help", label: "Help" },
-  { id: "about", label: "About" },
-];
 const SIDEBAR_MIN_WIDTH = 240;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_DEFAULT_WIDTH = 280;
@@ -138,7 +212,36 @@ const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
 const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
 const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
 const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
+const UI_FONT_PRESET_STORAGE_KEY = "nosuckshell.ui.fontPreset";
+const TERMINAL_FONT_PRESET_STORAGE_KEY = "nosuckshell.terminal.fontPreset";
+const QUICK_CONNECT_MODE_STORAGE_KEY = "nosuckshell.quickConnect.mode";
+const QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY = "nosuckshell.quickConnect.autoTrust";
+const SPLIT_RATIO_PRESET_STORAGE_KEY = "nosuckshell.layout.splitRatioPreset";
+const AUTO_ARRANGE_MODE_STORAGE_KEY = "nosuckshell.layout.autoArrangeMode";
+
+const parseStoredAutoArrangeMode = (raw: string | null): AutoArrangeMode => {
+  if (raw === "off" || raw === "a" || raw === "b" || raw === "c" || raw === "free") {
+    return raw;
+  }
+  return "c";
+};
+const WORKSPACES_STORAGE_KEY = "nosuckshell.layout.workspaces.v1";
+const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
 const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
+const DEFAULT_WORKSPACE_ID = "workspace-main";
+const SPLIT_RATIO_PRESET_VALUE: Record<SplitRatioPreset, number> = {
+  "50-50": 0.5,
+  "60-40": 0.6,
+  "70-30": 0.7,
+};
+const TERMINAL_FONT_FAMILY_BY_PRESET: Record<TerminalFontPreset, string> = {
+  "jetbrains-mono":
+    '"JetBrains Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+  "ibm-plex-mono":
+    '"IBM Plex Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+  "source-code-pro":
+    '"Source Code Pro", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
+};
 const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
   aggressive: 12,
   balanced: 13,
@@ -149,35 +252,15 @@ const TERMINAL_FONT_OFFSET_MAX = 6;
 const TERMINAL_FONT_MIN = 9;
 const TERMINAL_FONT_MAX = 22;
 const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
+const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
+/** Must match CSS breakpoint for stacked-mobile shell */
+const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
 
 const createId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-const createEmptyFilterGroup = (): ViewFilterGroup => ({
-  id: createId(),
-  mode: "and",
-  rules: [],
-  groups: [],
-});
-const createDefaultViewProfile = (): ViewProfile => ({
-  id: createId(),
-  name: "New view",
-  order: 0,
-  filterGroup: createEmptyFilterGroup(),
-  sortRules: [{ field: "host", direction: "asc" }],
-  createdAt: 0,
-  updatedAt: 0,
-});
-
-const parseBooleanRuleValue = (value: string): boolean | null => {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes") {
+const hasTauriTransformCallback = (): boolean => {
+  if (import.meta.env.VITE_E2E === "true") {
     return true;
   }
-  if (normalized === "false" || normalized === "0" || normalized === "no") {
-    return false;
-  }
-  return null;
-};
-const hasTauriTransformCallback = (): boolean => {
   if (typeof window === "undefined") {
     return false;
   }
@@ -186,12 +269,241 @@ const hasTauriTransformCallback = (): boolean => {
   return typeof tauriInternals?.transformCallback === "function";
 };
 
+/** Block WebKit/Electron default context menu app-wide except in real text fields. */
+const allowNativeBrowserContextMenu = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  if (target.closest("textarea, select, [contenteditable='true'], [contenteditable='']")) {
+    return true;
+  }
+  const input = target.closest("input");
+  if (!input) {
+    return false;
+  }
+  const type = (input as HTMLInputElement).type;
+  return (
+    type === "text" ||
+    type === "search" ||
+    type === "password" ||
+    type === "email" ||
+    type === "url" ||
+    type === "tel" ||
+    type === "number" ||
+    type === "date" ||
+    type === "time" ||
+    type === "datetime-local" ||
+    type === ""
+  );
+};
+
 const clampSidebarWidth = (value: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
+const readLayoutMode = (): LayoutMode => {
+  if (typeof window === "undefined") {
+    return "auto";
+  }
+  const persisted = window.localStorage.getItem(LAYOUT_MODE_STORAGE_KEY);
+  return persisted === "wide" || persisted === "compact" ? persisted : "auto";
+};
+const readSplitRatioPreset = (): SplitRatioPreset => {
+  if (typeof window === "undefined") {
+    return "60-40";
+  }
+  const persisted = window.localStorage.getItem(SPLIT_RATIO_PRESET_STORAGE_KEY);
+  return persisted === "50-50" || persisted === "60-40" || persisted === "70-30" ? persisted : "60-40";
+};
 const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
+const createDefaultEntityStore = (): EntityStore => ({
+  schemaVersion: 1,
+  updatedAt: 0,
+  users: {},
+  groups: {},
+  keys: {},
+  tags: {},
+  hostBindings: {},
+});
 const createDefaultHostMetadata = (): HostMetadata => ({ favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false });
 const createLeafNode = (paneIndex: number): SplitLeafNode => ({ id: `leaf-${paneIndex}`, type: "leaf", paneIndex });
+const cloneSplitTree = (node: SplitTreeNode): SplitTreeNode =>
+  node.type === "leaf"
+    ? { ...node }
+    : {
+        ...node,
+        first: cloneSplitTree(node.first),
+        second: cloneSplitTree(node.second),
+      };
+const clonePaneLayouts = (layouts: PaneLayoutItem[]): PaneLayoutItem[] => layouts.map((entry) => ({ ...entry }));
+const cloneWorkspaceSnapshot = (snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
+  ...snapshot,
+  splitSlots: [...snapshot.splitSlots],
+  paneLayouts: clonePaneLayouts(snapshot.paneLayouts),
+  splitTree: cloneSplitTree(snapshot.splitTree),
+});
+const rebalanceSplitTree = (node: SplitTreeNode): SplitTreeNode => {
+  if (node.type === "leaf") {
+    return node;
+  }
+  const nextFirst = rebalanceSplitTree(node.first);
+  const nextSecond = rebalanceSplitTree(node.second);
+  const nextRatio = 0.5;
+  if (nextFirst === node.first && nextSecond === node.second && node.ratio === nextRatio) {
+    return node;
+  }
+  return {
+    ...node,
+    ratio: nextRatio,
+    first: nextFirst,
+    second: nextSecond,
+  };
+};
+const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOrder: number[]): Array<string | null> => {
+  if (paneOrder.length === 0) {
+    return slots;
+  }
+  const maxPaneIndex = Math.max(0, ...paneOrder);
+  const next = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
+  paneOrder.forEach((paneIndex) => {
+    next[paneIndex] = slots[paneIndex] ?? null;
+  });
+  if (next.length !== slots.length) {
+    return next;
+  }
+  for (let index = 0; index < next.length; index += 1) {
+    if (next[index] !== slots[index]) {
+      return next;
+    }
+  }
+  return slots;
+};
+
+/** Must match `.pane-drop-zones` in styles.css (size + grid fr ratios). */
+const PANE_DROP_OVERLAY = {
+  widthPx: 190,
+  widthMaxPct: 0.88,
+  widthCap: 220,
+  heightPx: 160,
+  heightMaxPct: 0.78,
+  heightCap: 190,
+  gapPx: 5,
+  /** 1fr + 1.2fr + 1fr */
+  frSum: 3.2,
+} as const;
+
+const getPaneDropOverlaySize = (paneWidth: number, paneHeight: number): { w: number; h: number } => {
+  const w = Math.min(
+    PANE_DROP_OVERLAY.widthCap,
+    Math.min(PANE_DROP_OVERLAY.widthPx, paneWidth * PANE_DROP_OVERLAY.widthMaxPct),
+  );
+  const h = Math.min(
+    PANE_DROP_OVERLAY.heightCap,
+    Math.min(PANE_DROP_OVERLAY.heightPx, paneHeight * PANE_DROP_OVERLAY.heightMaxPct),
+  );
+  return { w, h };
+};
+
+const resolvePaneDropZoneFromOverlay = (
+  clientX: number,
+  clientY: number,
+  bounds: Pick<DOMRect, "left" | "top" | "width" | "height">,
+): PaneDropZone => {
+  const { w, h } = getPaneDropOverlaySize(bounds.width, bounds.height);
+  const left = bounds.left + (bounds.width - w) / 2;
+  const top = bounds.top + (bounds.height - h) / 2;
+  const lx = Math.max(0, Math.min(w, clientX - left));
+  const ly = Math.max(0, Math.min(h, clientY - top));
+
+  const { frSum, gapPx } = PANE_DROP_OVERLAY;
+  const trackW = w - 2 * gapPx;
+  const trackH = h - 2 * gapPx;
+  const col0w = (trackW * 1) / frSum;
+  const col1w = (trackW * 1.2) / frSum;
+  const row0h = (trackH * 1) / frSum;
+  const row1h = (trackH * 1.2) / frSum;
+  const x1 = col0w;
+  const x2 = col0w + gapPx + col1w;
+  const y1 = row0h;
+  const y2 = row0h + gapPx + row1h;
+
+  const col = lx < x1 ? 0 : lx < x2 ? 1 : 2;
+  const row = ly < y1 ? 0 : ly < y2 ? 1 : 2;
+
+  if (row === 1 && col === 1) return "center";
+  if (row === 0 && col === 1) return "top";
+  if (row === 2 && col === 1) return "bottom";
+  if (row === 1 && col === 0) return "left";
+  if (row === 1 && col === 2) return "right";
+
+  const midTop = { x: w / 2, y: 0 };
+  const midBottom = { x: w / 2, y: h };
+  const midLeft = { x: 0, y: h / 2 };
+  const midRight = { x: w, y: h / 2 };
+  const dist = (ax: number, ay: number) => Math.hypot(lx - ax, ly - ay);
+
+  if (row === 0 && col === 0) {
+    return dist(midTop.x, midTop.y) < dist(midLeft.x, midLeft.y) ? "top" : "left";
+  }
+  if (row === 0 && col === 2) {
+    return dist(midTop.x, midTop.y) < dist(midRight.x, midRight.y) ? "top" : "right";
+  }
+  if (row === 2 && col === 0) {
+    return dist(midBottom.x, midBottom.y) < dist(midLeft.x, midLeft.y) ? "bottom" : "left";
+  }
+  return dist(midBottom.x, midBottom.y) < dist(midRight.x, midRight.y) ? "bottom" : "right";
+};
+
+const createEmptyWorkspaceSnapshot = (id: string, name: string): WorkspaceSnapshot => {
+  const splitSlots = createInitialPaneState();
+  return {
+    id,
+    name,
+    splitSlots,
+    paneLayouts: createPaneLayoutsFromSlots(splitSlots),
+    splitTree: createLeafNode(0),
+    activePaneIndex: 0,
+    activeSessionId: "",
+  };
+};
 const collectPaneOrder = (node: SplitTreeNode): number[] =>
   node.type === "leaf" ? [node.paneIndex] : [...collectPaneOrder(node.first), ...collectPaneOrder(node.second)];
+
+/** Places a new session into a workspace snapshot (free pane or new split). Used for host connect → chosen workspace. */
+const appendSessionToWorkspaceSnapshot = (
+  targetSnapshot: WorkspaceSnapshot,
+  sessionId: string,
+  splitRatioDefaultValue: number,
+): WorkspaceSnapshot => {
+  const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
+  const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
+  const nextTargetPaneIndex =
+    typeof firstFreePaneIndex === "number"
+      ? firstFreePaneIndex
+      : Math.max(-1, ...targetPaneOrder) + 1;
+  const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
+  const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
+  if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
+    nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+  }
+  const nextTargetSplitTree: SplitTreeNode =
+    typeof firstFreePaneIndex === "number"
+      ? cloneSplitTree(targetSnapshot.splitTree)
+      : {
+          id: `split-workspace-${createId()}`,
+          type: "split",
+          axis: "vertical",
+          ratio: splitRatioDefaultValue,
+          first: cloneSplitTree(targetSnapshot.splitTree),
+          second: createLeafNode(nextTargetPaneIndex),
+        };
+  return {
+    ...cloneWorkspaceSnapshot(targetSnapshot),
+    splitSlots: nextTargetSlots,
+    paneLayouts: nextTargetPaneLayouts,
+    splitTree: nextTargetSplitTree,
+    activePaneIndex: nextTargetPaneIndex,
+    activeSessionId: sessionId,
+  };
+};
+
 const replacePaneInTree = (
   node: SplitTreeNode,
   targetPaneIndex: number,
@@ -303,89 +615,6 @@ const parseSplitTree = (raw: LayoutSplitTreeNode | null | undefined): SplitTreeN
   return null;
 };
 
-const getRuleFieldValue = (row: HostRowViewModel, field: ViewFilterField): string => {
-  switch (field) {
-    case "host":
-      return row.host.host;
-    case "hostName":
-      return row.host.hostName;
-    case "user":
-      return row.displayUser;
-    case "port":
-      return String(row.host.port);
-    case "status":
-      return row.connected ? "connected" : "disconnected";
-    case "favorite":
-      return row.metadata.favorite ? "true" : "false";
-    case "recent":
-      return row.metadata.lastUsedAt ? "true" : "false";
-    case "tag":
-      return row.metadata.tags.join(",");
-    default:
-      return "";
-  }
-};
-
-const evaluateRule = (row: HostRowViewModel, rule: ViewFilterRule): boolean => {
-  if (rule.field === "favorite" || rule.field === "recent") {
-    const parsed = parseBooleanRuleValue(rule.value);
-    if (parsed !== null && (rule.operator === "equals" || rule.operator === "not_equals")) {
-      const current = rule.field === "favorite" ? row.metadata.favorite : Boolean(row.metadata.lastUsedAt);
-      return rule.operator === "equals" ? current === parsed : current !== parsed;
-    }
-  }
-  const sourceValue = getRuleFieldValue(row, rule.field);
-  const sourceLower = sourceValue.toLowerCase();
-  const ruleValue = rule.value.trim();
-  const ruleLower = ruleValue.toLowerCase();
-
-  switch (rule.operator as ViewFilterOperator) {
-    case "equals":
-      return sourceLower === ruleLower;
-    case "not_equals":
-      return sourceLower !== ruleLower;
-    case "contains":
-      return sourceLower.includes(ruleLower);
-    case "starts_with":
-      return sourceLower.startsWith(ruleLower);
-    case "ends_with":
-      return sourceLower.endsWith(ruleLower);
-    case "greater_than": {
-      const left = Number(sourceValue);
-      const right = Number(ruleValue);
-      return Number.isFinite(left) && Number.isFinite(right) ? left > right : sourceLower > ruleLower;
-    }
-    case "less_than": {
-      const left = Number(sourceValue);
-      const right = Number(ruleValue);
-      return Number.isFinite(left) && Number.isFinite(right) ? left < right : sourceLower < ruleLower;
-    }
-    case "in": {
-      const options = ruleValue
-        .split(",")
-        .map((entry) => entry.trim().toLowerCase())
-        .filter((entry) => entry.length > 0);
-      if (rule.field === "tag") {
-        const tags = row.metadata.tags.map((entry) => entry.trim().toLowerCase());
-        return options.some((entry) => tags.includes(entry));
-      }
-      return options.includes(sourceLower);
-    }
-    default:
-      return true;
-  }
-};
-
-const evaluateGroup = (row: HostRowViewModel, group: ViewFilterGroup): boolean => {
-  const ruleResults = group.rules.map((rule) => evaluateRule(row, rule));
-  const groupResults = group.groups.map((child) => evaluateGroup(row, child));
-  const allResults = [...ruleResults, ...groupResults];
-  if (allResults.length === 0) {
-    return true;
-  }
-  return group.mode === "or" ? allResults.some(Boolean) : allResults.every(Boolean);
-};
-
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
   const [currentHost, setCurrentHost] = useState<HostConfig>(emptyHost());
@@ -393,9 +622,41 @@ export function App() {
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
   const [metadataStore, setMetadataStore] = useState<HostMetadataStore>(() => createDefaultMetadataStore());
+  const [entityStore, setEntityStore] = useState<EntityStore>(() => createDefaultEntityStore());
+  const [storePassphrase, setStorePassphrase] = useState<string>("");
+  const [storeUserDraft, setStoreUserDraft] = useState<string>("");
+  const [storeGroupDraft, setStoreGroupDraft] = useState<string>("");
+  const [storeTagDraft, setStoreTagDraft] = useState<string>("");
+  const [storePathKeyNameDraft, setStorePathKeyNameDraft] = useState<string>("");
+  const [storePathKeyPathDraft, setStorePathKeyPathDraft] = useState<string>("");
+  const [storeEncryptedKeyNameDraft, setStoreEncryptedKeyNameDraft] = useState<string>("");
+  const [storeEncryptedPrivateKeyDraft, setStoreEncryptedPrivateKeyDraft] = useState<string>("");
+  const [storeEncryptedPublicKeyDraft, setStoreEncryptedPublicKeyDraft] = useState<string>("");
+  const [storeSelectedHostForBinding, setStoreSelectedHostForBinding] = useState<string>("");
+  const [storeBindingDraft, setStoreBindingDraft] = useState<HostBinding>({
+    userId: undefined,
+    groupIds: [],
+    tagIds: [],
+    keyRefs: [],
+    proxyJump: "",
+    legacyUser: "",
+    legacyTags: [],
+    legacyIdentityFile: "",
+    legacyProxyJump: "",
+    legacyProxyCommand: "",
+  });
   const [error, setError] = useState<string>("");
   const [isAppSettingsOpen, setIsAppSettingsOpen] = useState<boolean>(false);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("general");
+  const [settingsOpenMode, setSettingsOpenMode] = useState<SettingsOpenMode>(() => {
+    if (typeof window === "undefined") {
+      return "modal";
+    }
+    const persisted = window.localStorage.getItem(SETTINGS_OPEN_MODE_STORAGE_KEY);
+    return persisted === "docked" || persisted === "modal" ? persisted : "modal";
+  });
+  const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
+  const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<HostStatusFilter>("all");
   const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
@@ -405,7 +666,12 @@ export function App() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
   const [isQuickAddMenuOpen, setIsQuickAddMenuOpen] = useState<boolean>(false);
   const [isAddHostModalOpen, setIsAddHostModalOpen] = useState<boolean>(false);
+  const [isQuickConnectModalOpen, setIsQuickConnectModalOpen] = useState<boolean>(false);
+  const [pendingQuickConnectPaneIndex, setPendingQuickConnectPaneIndex] = useState<number | null>(null);
   const [newHostDraft, setNewHostDraft] = useState<HostConfig>(emptyHost());
+  const [quickConnectDraft, setQuickConnectDraft] = useState<QuickConnectDraft>(() => createQuickConnectDraft());
+  const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
+  const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
   const [tagDraft, setTagDraft] = useState<string>("");
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
@@ -439,10 +705,9 @@ export function App() {
   const [pendingLayoutProfileDeleteId, setPendingLayoutProfileDeleteId] = useState<string>("");
   const [layoutProfileName, setLayoutProfileName] = useState<string>("");
   const [saveLayoutWithHosts, setSaveLayoutWithHosts] = useState<boolean>(false);
-  const [isFooterLayoutPanelOpen, setIsFooterLayoutPanelOpen] = useState<boolean>(false);
+  const [isLayoutCommandCenterOpen, setIsLayoutCommandCenterOpen] = useState<boolean>(false);
   const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
-  const [sessionDropMode, setSessionDropMode] = useState<"spawn" | "move">("spawn");
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
   const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState<number | null>(null);
   const [activeDropZone, setActiveDropZone] = useState<PaneDropZone | null>(null);
@@ -494,16 +759,73 @@ export function App() {
     }
     return Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(persisted)));
   });
+  const [uiFontPreset, setUiFontPreset] = useState<UiFontPreset>(() => {
+    if (typeof window === "undefined") {
+      return "inter";
+    }
+    const persisted = window.localStorage.getItem(UI_FONT_PRESET_STORAGE_KEY);
+    return persisted === "manrope" || persisted === "ibm-plex-sans" || persisted === "inter" ? persisted : "inter";
+  });
+  const [terminalFontPreset, setTerminalFontPreset] = useState<TerminalFontPreset>(() => {
+    if (typeof window === "undefined") {
+      return "jetbrains-mono";
+    }
+    const persisted = window.localStorage.getItem(TERMINAL_FONT_PRESET_STORAGE_KEY);
+    return persisted === "ibm-plex-mono" || persisted === "source-code-pro" || persisted === "jetbrains-mono"
+      ? persisted
+      : "jetbrains-mono";
+  });
+  const [quickConnectMode, setQuickConnectMode] = useState<QuickConnectMode>(() => {
+    if (typeof window === "undefined") {
+      return "smart";
+    }
+    const persisted = window.localStorage.getItem(QUICK_CONNECT_MODE_STORAGE_KEY);
+    return persisted === "wizard" || persisted === "command" || persisted === "smart" ? persisted : "smart";
+  });
+  const [quickConnectAutoTrust, setQuickConnectAutoTrust] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY) === "true";
+  });
+  const [splitRatioPreset, setSplitRatioPreset] = useState<SplitRatioPreset>(() => readSplitRatioPreset());
+  const [autoArrangeMode, setAutoArrangeMode] = useState<AutoArrangeMode>(() => {
+    if (typeof window === "undefined") {
+      return "c";
+    }
+    const persisted = window.localStorage.getItem(AUTO_ARRANGE_MODE_STORAGE_KEY);
+    return parseStoredAutoArrangeMode(persisted);
+  });
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readLayoutMode());
+  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
+  const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<string, WorkspaceSnapshot>>({
+    [DEFAULT_WORKSPACE_ID]: createEmptyWorkspaceSnapshot(DEFAULT_WORKSPACE_ID, "Main"),
+  });
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
+  const [viewportStacked, setViewportStacked] = useState<boolean>(() =>
+    typeof window === "undefined" ? false : window.matchMedia(MOBILE_STACKED_MEDIA).matches,
+  );
+  const [mobileShellTab, setMobileShellTab] = useState<"hosts" | "terminal">("terminal");
   const [hoveredHostAlias, setHoveredHostAlias] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
     y: 0,
     paneIndex: null,
+    splitMode: "duplicate",
   });
+  const [hostContextMenu, setHostContextMenu] = useState<{
+    x: number;
+    y: number;
+    host: HostConfig;
+  } | null>(null);
   const sidebarDragStartXRef = useRef<number>(0);
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const settingsModalRef = useRef<HTMLElement | null>(null);
+  const settingsDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const mobilePagerRef = useRef<HTMLDivElement | null>(null);
+  const skipMobilePagerScrollRef = useRef(false);
   const nextSplitIdRef = useRef<number>(1);
   const nextPaneIndexRef = useRef<number>(1);
   const splitResizeLatestRatioRef = useRef<number | null>(null);
@@ -516,11 +838,44 @@ export function App() {
   const pendingProfileLoadSessionIdsRef = useRef<Set<string> | null>(null);
   const sessionsRef = useRef<SessionTab[]>([]);
   const metadataStoreRef = useRef<HostMetadataStore>(createDefaultMetadataStore());
+  const quickConnectAutoTrustRef = useRef<boolean>(false);
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
+  const draggingSessionIdRef = useRef<string | null>(null);
+  const suppressHostClickAliasRef = useRef<string | null>(null);
+  const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
+  const isAutoArrangeApplyingRef = useRef<boolean>(false);
+  const lastAutoArrangeBeforeFreeRef = useRef<AutoArrangeActiveMode>("c");
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
+  const shouldSplitAsEmpty = (
+    eventLike?:
+      | {
+          type?: string;
+          key?: string;
+          code?: string;
+          altKey?: boolean;
+          getModifierState?: (...args: any[]) => boolean;
+        }
+      | null,
+  ): boolean => {
+    if (!eventLike) {
+      return false;
+    }
+    const modifierKey =
+      eventLike.key === "Alt" ||
+      eventLike.key === "AltGraph" ||
+      eventLike.code === "AltLeft" ||
+      eventLike.code === "AltRight";
+    if (modifierKey && eventLike.type === "keydown") {
+      return true;
+    }
+    if (modifierKey && eventLike.type === "keyup") {
+      return false;
+    }
+    return Boolean(eventLike.altKey || eventLike.getModifierState?.("AltGraph"));
+  };
 
   const canSave = useMemo(
     () => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0,
@@ -531,6 +886,9 @@ export function App() {
     [newHostDraft],
   );
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
+  const sessionById = useMemo(() => {
+    return new Map(sessions.map((session) => [session.id, session]));
+  }, [sessions]);
   const paneOrder = useMemo(() => collectPaneOrder(splitTree), [splitTree]);
   const visiblePaneSessionIds = useMemo(
     () => splitSlots.filter((slot): slot is string => Boolean(slot)),
@@ -541,14 +899,35 @@ export function App() {
     () => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null,
     [layoutProfiles, selectedLayoutProfileId],
   );
-  const connectedHosts = useMemo(() => new Set(sessions.map((session) => session.host)), [sessions]);
+  const layoutCommandCenterPreviewTree = useMemo((): LayoutSplitTreeNode | null => {
+    return selectedLayoutProfile?.splitTree ?? null;
+  }, [selectedLayoutProfile]);
+  const connectedHosts = useMemo(() => {
+    return new Set(
+      sessions
+        .filter((session): session is SavedSshSessionTab => session.kind === "sshSaved")
+        .map((session) => session.hostAlias),
+    );
+  }, [sessions]);
   const isSidebarOpen = isSidebarVisible;
   const terminalFontSize = useMemo(() => {
     const base = DENSITY_TERMINAL_BASE_FONT[densityProfile];
     const next = base + terminalFontOffset;
     return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, next));
   }, [densityProfile, terminalFontOffset]);
-
+  const terminalFontFamily = useMemo(
+    () => TERMINAL_FONT_FAMILY_BY_PRESET[terminalFontPreset],
+    [terminalFontPreset],
+  );
+  const splitRatioDefaultValue = SPLIT_RATIO_PRESET_VALUE[splitRatioPreset];
+  const workspaceTabs = useMemo(
+    () =>
+      workspaceOrder
+        .map((workspaceId) => workspaceSnapshots[workspaceId])
+        .filter((workspace): workspace is WorkspaceSnapshot => Boolean(workspace)),
+    [workspaceOrder, workspaceSnapshots],
+  );
+  const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
   const activeHostMetadata = useMemo(() => {
     if (!activeHost) {
@@ -669,14 +1048,17 @@ export function App() {
       });
   }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
   const connectedHostRows = useMemo(
-    () => filteredHostRows.filter((row) => row.connected).sort((a, b) => a.host.host.localeCompare(b.host.host)),
+    () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => row.connected)),
     [filteredHostRows],
   );
-  const otherHostRows = useMemo(() => filteredHostRows.filter((row) => !row.connected), [filteredHostRows]);
+  const otherHostRows = useMemo(
+    () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => !row.connected)),
+    [filteredHostRows],
+  );
   const sidebarViews = useMemo(
     () => [
-      { id: "builtin:all" as SidebarViewId, label: "Alle" },
-      { id: "builtin:favorites" as SidebarViewId, label: "Favoriten" },
+      { id: "builtin:all" as SidebarViewId, label: "All" },
+      { id: "builtin:favorites" as SidebarViewId, label: "Favorites" },
       ...sortedViewProfiles.map((profile) => ({
         id: `custom:${profile.id}` as SidebarViewId,
         label: profile.name,
@@ -684,28 +1066,59 @@ export function App() {
     ],
     [sortedViewProfiles],
   );
-  const hoveredHostPaneIndices = useMemo(() => {
-    if (!hoveredHostAlias) {
+  const highlightedHostAlias = useMemo(() => {
+    if (hoveredHostAlias) {
+      return hoveredHostAlias;
+    }
+    const normalized = activeHost.trim();
+    return normalized.length > 0 ? normalized : null;
+  }, [activeHost, hoveredHostAlias]);
+  const highlightedHostPaneIndices = useMemo(() => {
+    if (!highlightedHostAlias) {
       return new Set<number>();
     }
-    const hoveredSessions = new Set(
-      sessions.filter((session) => session.host === hoveredHostAlias).map((session) => session.id),
+    const highlightedSessions = new Set(
+      sessions
+        .filter((session): session is SavedSshSessionTab => session.kind === "sshSaved")
+        .filter((session) => session.hostAlias === highlightedHostAlias)
+        .map((session) => session.id),
     );
     const paneIndices = new Set<number>();
     splitSlots.forEach((slot, paneIndex) => {
-      if (slot && hoveredSessions.has(slot)) {
+      if (slot && highlightedSessions.has(slot)) {
         paneIndices.add(paneIndex);
       }
     });
     return paneIndices;
-  }, [hoveredHostAlias, sessions, splitSlots]);
-  const hasHoveredHostTargets = hoveredHostAlias !== null && hoveredHostPaneIndices.size > 0;
+  }, [highlightedHostAlias, sessions, splitSlots]);
+  const hasHighlightedHostTargets = highlightedHostAlias !== null && highlightedHostPaneIndices.size > 0;
+  const resolveSessionTitle = useCallback(
+    (session: SessionTab | null): string => {
+      if (!session) {
+        return "Drop it on me";
+      }
+      if (session.kind === "local") {
+        return session.label;
+      }
+      if (session.kind === "sshQuick") {
+        return session.label;
+      }
+      const paneHostConfig = hosts.find((host) => host.host === session.hostAlias) ?? null;
+      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
+      const paneHostName = paneHostConfig?.hostName.trim() || session.hostAlias;
+      return `${paneUser}@${paneHostName}`;
+    },
+    [hosts, metadataStore.defaultUser],
+  );
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
   useEffect(() => {
     metadataStoreRef.current = metadataStore;
   }, [metadataStore]);
+  useEffect(() => {
+    quickConnectAutoTrustRef.current = quickConnectAutoTrust;
+  }, [quickConnectAutoTrust]);
   useEffect(() => {
     if (!activeTrustPrompt) {
       return;
@@ -718,32 +1131,24 @@ export function App() {
       if (!paneSessionId) {
         return "Drop it on me";
       }
-      const paneSessionHost = sessions.find((session) => session.id === paneSessionId)?.host ?? null;
-      if (!paneSessionHost) {
-        return "Drop it on me";
-      }
-      const paneHostConfig = hosts.find((host) => host.host === paneSessionHost) ?? null;
-      const paneUser = paneHostConfig?.user.trim() || metadataStore.defaultUser.trim() || "n/a";
-      const paneHostName = paneHostConfig?.hostName.trim() || paneSessionHost;
-      return `${paneUser}@${paneHostName}`;
+      const paneSession = sessionById.get(paneSessionId) ?? null;
+      return resolveSessionTitle(paneSession);
     },
-    [hosts, metadataStore.defaultUser, sessions, splitSlots],
+    [resolveSessionTitle, sessionById, splitSlots],
   );
-  const toggleFooterLayoutPanel = useCallback(() => {
-    setIsFooterLayoutPanelOpen((prev) => !prev);
-  }, []);
-
   const load = async () => {
-    const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles] = await Promise.all([
+    const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles, loadedStore] = await Promise.all([
       listHosts(),
       listHostMetadata(),
       listLayoutProfiles(),
       listViewProfiles(),
+      listStoreObjects().catch(() => createDefaultEntityStore()),
     ]);
     setHosts(loadedHosts);
     setMetadataStore(loadedMetadata);
     setLayoutProfiles(loadedProfiles);
     setViewProfiles(loadedViewProfiles);
+    setEntityStore(loadedStore);
     setSelectedLayoutProfileId((prev) => {
       if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
         return prev;
@@ -754,6 +1159,7 @@ export function App() {
       setActiveHost(loadedHosts[0].host);
       setCurrentHost(loadedHosts[0]);
       setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
+      setStoreSelectedHostForBinding((prev) => prev || loadedHosts[0].host);
     }
     setSelectedViewProfileIdInSettings((prev) => {
       if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
@@ -766,6 +1172,274 @@ export function App() {
   useEffect(() => {
     void load().catch((e: unknown) => setError(String(e)));
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(WORKSPACES_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as {
+        order?: string[];
+        activeWorkspaceId?: string;
+        snapshots?: Record<string, WorkspaceSnapshot>;
+      };
+      const order = Array.isArray(parsed.order) ? parsed.order.filter((entry): entry is string => typeof entry === "string") : [];
+      const snapshots = parsed.snapshots ?? {};
+      if (order.length === 0) {
+        return;
+      }
+      const normalizedOrder = order.filter((workspaceId) => {
+        const snapshot = snapshots[workspaceId];
+        return Boolean(snapshot && Array.isArray(snapshot.splitSlots) && snapshot.splitTree);
+      });
+      if (normalizedOrder.length === 0) {
+        return;
+      }
+      const normalizedSnapshots = normalizedOrder.reduce<Record<string, WorkspaceSnapshot>>((acc, workspaceId) => {
+        const snapshot = snapshots[workspaceId];
+        if (!snapshot) {
+          return acc;
+        }
+        acc[workspaceId] = {
+          ...snapshot,
+          id: snapshot.id || workspaceId,
+          name: snapshot.name || workspaceId,
+          splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
+          paneLayouts: Array.isArray(snapshot.paneLayouts)
+            ? snapshot.paneLayouts.map((entry) => ({ ...entry }))
+            : createPaneLayoutsFromSlots(createInitialPaneState()),
+          splitTree: snapshot.splitTree ? cloneSplitTree(snapshot.splitTree) : createLeafNode(0),
+          activePaneIndex: Number.isInteger(snapshot.activePaneIndex) ? snapshot.activePaneIndex : 0,
+          activeSessionId: typeof snapshot.activeSessionId === "string" ? snapshot.activeSessionId : "",
+        };
+        return acc;
+      }, {});
+      const fallbackWorkspaceId = normalizedOrder[0] ?? DEFAULT_WORKSPACE_ID;
+      const nextActiveWorkspaceId =
+        typeof parsed.activeWorkspaceId === "string" && normalizedSnapshots[parsed.activeWorkspaceId]
+          ? parsed.activeWorkspaceId
+          : fallbackWorkspaceId;
+      const nextActiveSnapshot = normalizedSnapshots[nextActiveWorkspaceId];
+      if (!nextActiveSnapshot) {
+        return;
+      }
+      isApplyingWorkspaceSnapshotRef.current = true;
+      setWorkspaceOrder(normalizedOrder);
+      setWorkspaceSnapshots(normalizedSnapshots);
+      setActiveWorkspaceId(nextActiveWorkspaceId);
+      setSplitSlots([...nextActiveSnapshot.splitSlots]);
+      setPaneLayouts(clonePaneLayouts(nextActiveSnapshot.paneLayouts));
+      setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
+      setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
+      setActiveSession(nextActiveSnapshot.activeSessionId);
+      queueMicrotask(() => {
+        isApplyingWorkspaceSnapshotRef.current = false;
+      });
+    } catch {
+      // ignore broken persisted workspace data
+    }
+  }, []);
+
+  const storeUsers = useMemo<UserObject[]>(() => Object.values(entityStore.users), [entityStore.users]);
+  const storeGroups = useMemo<GroupObject[]>(() => Object.values(entityStore.groups), [entityStore.groups]);
+  const storeTags = useMemo<TagObject[]>(() => Object.values(entityStore.tags), [entityStore.tags]);
+  const storeKeys = useMemo<SshKeyObject[]>(() => Object.values(entityStore.keys), [entityStore.keys]);
+  const quickConnectUserOptions = useMemo<string[]>(
+    () => buildQuickConnectUserCandidates(metadataStore.defaultUser, storeUsers.map((entry) => entry.username || entry.name)),
+    [metadataStore.defaultUser, storeUsers],
+  );
+  useEffect(() => {
+    if (!storeSelectedHostForBinding) {
+      return;
+    }
+    const existing = entityStore.hostBindings[storeSelectedHostForBinding];
+    if (existing) {
+      setStoreBindingDraft(existing);
+      return;
+    }
+    const host = hosts.find((entry) => entry.host === storeSelectedHostForBinding);
+    setStoreBindingDraft({
+      userId: undefined,
+      groupIds: [],
+      tagIds: [],
+      keyRefs: [],
+      proxyJump: host?.proxyJump ?? "",
+      legacyUser: host?.user ?? "",
+      legacyTags: metadataStore.hosts[storeSelectedHostForBinding]?.tags ?? [],
+      legacyIdentityFile: host?.identityFile ?? "",
+      legacyProxyJump: host?.proxyJump ?? "",
+      legacyProxyCommand: host?.proxyCommand ?? "",
+    });
+  }, [entityStore.hostBindings, hosts, metadataStore.hosts, storeSelectedHostForBinding]);
+
+  const persistEntityStore = useCallback(async (next: EntityStore) => {
+    setEntityStore(next);
+    await saveStoreObjects(next);
+  }, []);
+
+  const addStoreUser = useCallback(async () => {
+    const username = storeUserDraft.trim();
+    if (!username) {
+      return;
+    }
+    const now = Date.now();
+    const id = `user-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      users: {
+        ...entityStore.users,
+        [id]: { id, name: username, username, createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreUserDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeUserDraft]);
+
+  const addStoreGroup = useCallback(async () => {
+    const name = storeGroupDraft.trim();
+    if (!name) {
+      return;
+    }
+    const now = Date.now();
+    const id = `group-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      groups: {
+        ...entityStore.groups,
+        [id]: { id, name, memberUserIds: [], createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreGroupDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeGroupDraft]);
+
+  const addStoreTag = useCallback(async () => {
+    const name = storeTagDraft.trim();
+    if (!name) {
+      return;
+    }
+    const now = Date.now();
+    const id = `tag-${createId()}`;
+    const next: EntityStore = {
+      ...entityStore,
+      tags: {
+        ...entityStore.tags,
+        [id]: { id, name, createdAt: now, updatedAt: now },
+      },
+      updatedAt: now,
+    };
+    setStoreTagDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeTagDraft]);
+
+  const addStorePathKey = useCallback(async () => {
+    const name = storePathKeyNameDraft.trim();
+    const identityFilePath = storePathKeyPathDraft.trim();
+    if (!name || !identityFilePath) {
+      return;
+    }
+    const now = Date.now();
+    const id = `key-path-${createId()}`;
+    const key: SshKeyObject = {
+      type: "path",
+      id,
+      name,
+      identityFilePath,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next: EntityStore = {
+      ...entityStore,
+      keys: { ...entityStore.keys, [id]: key },
+      updatedAt: now,
+    };
+    setStorePathKeyNameDraft("");
+    setStorePathKeyPathDraft("");
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storePathKeyNameDraft, storePathKeyPathDraft]);
+
+  const addStoreEncryptedKey = useCallback(async () => {
+    const name = storeEncryptedKeyNameDraft.trim();
+    const privateKeyPem = storeEncryptedPrivateKeyDraft.trim();
+    if (!name || !privateKeyPem) {
+      return;
+    }
+    const created = await createEncryptedKey(
+      name,
+      privateKeyPem,
+      storeEncryptedPublicKeyDraft.trim(),
+      storePassphrase.trim() || undefined,
+    );
+    const next: EntityStore = {
+      ...entityStore,
+      keys: {
+        ...entityStore.keys,
+        [created.id]: created,
+      },
+      updatedAt: Date.now(),
+    };
+    setStoreEncryptedKeyNameDraft("");
+    setStoreEncryptedPrivateKeyDraft("");
+    setStoreEncryptedPublicKeyDraft("");
+    await persistEntityStore(next);
+  }, [
+    entityStore,
+    persistEntityStore,
+    storeEncryptedKeyNameDraft,
+    storeEncryptedPrivateKeyDraft,
+    storeEncryptedPublicKeyDraft,
+    storePassphrase,
+  ]);
+
+  const removeStoreKey = useCallback(
+    async (keyId: string) => {
+      await deleteKeyById(keyId);
+      const nextKeys = { ...entityStore.keys };
+      delete nextKeys[keyId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, binding]) => [
+          alias,
+          { ...binding, keyRefs: binding.keyRefs.filter((entry) => entry.keyId !== keyId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        keys: nextKeys,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const unlockStoreKey = useCallback(
+    async (keyId: string) => {
+      await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+    },
+    [storePassphrase],
+  );
+
+  const saveHostBindingDraft = useCallback(async () => {
+    const hostAlias = storeSelectedHostForBinding.trim();
+    if (!hostAlias) {
+      return;
+    }
+    const nextBindings = {
+      ...entityStore.hostBindings,
+      [hostAlias]: storeBindingDraft,
+    };
+    const next: EntityStore = {
+      ...entityStore,
+      hostBindings: nextBindings,
+      updatedAt: Date.now(),
+    };
+    await persistEntityStore(next);
+  }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
 
 
   useEffect(() => {
@@ -778,19 +1452,32 @@ export function App() {
         return;
       }
       const sessionId = event.payload.session_id;
-      const hostAlias = sessionsRef.current.find((session) => session.id === sessionId)?.host ?? "";
-      if (hostAlias) {
-        const metadata = metadataStoreRef.current.hosts[hostAlias] ?? null;
+      const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
+      if (session?.kind === "sshQuick" && quickConnectAutoTrustRef.current) {
+        void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
+        return;
+      }
+      const trustHostAlias = session?.kind === "sshSaved" ? session.hostAlias : "";
+      if (trustHostAlias) {
+        const metadata = metadataStoreRef.current.hosts[trustHostAlias] ?? null;
         if (metadata?.trustHostDefault) {
           void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
           return;
         }
       }
+      const promptHostLabel =
+        session?.kind === "sshSaved"
+          ? session.hostAlias
+          : session?.kind === "sshQuick"
+            ? session.label
+            : session?.kind === "local"
+              ? "local-shell"
+              : "unknown";
       setTrustPromptQueue((prev) => {
         if (prev.some((entry) => entry.sessionId === sessionId)) {
           return prev;
         }
-        return [...prev, { sessionId, hostAlias: hostAlias || "unknown" }];
+        return [...prev, { sessionId, hostAlias: promptHostLabel }];
       });
     }).then((fn) => {
       unlisten = fn;
@@ -830,7 +1517,10 @@ export function App() {
   }, [sessionIds]);
 
   useEffect(() => {
-    const assignedSessionIds = new Set(splitSlots.filter((slot): slot is string => Boolean(slot)));
+    const assignedSessionIds = new Set<string>([
+      ...Object.values(workspaceSnapshots).flatMap((workspace) => workspace.splitSlots),
+      ...splitSlots,
+    ].filter((slot): slot is string => Boolean(slot)));
     const orphanSessionIds = sessions
       .map((session) => session.id)
       .filter((sessionId) => !assignedSessionIds.has(sessionId));
@@ -860,6 +1550,18 @@ export function App() {
           setSessions((prev) => prev.filter((session) => session.id !== sessionId));
           setActiveSession((prev) => (prev === sessionId ? "" : prev));
           setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+          setWorkspaceSnapshots((prev) =>
+            Object.fromEntries(
+              Object.entries(prev).map(([workspaceId, snapshot]) => [
+                workspaceId,
+                {
+                  ...snapshot,
+                  splitSlots: removeSessionFromSlots(snapshot.splitSlots, sessionId),
+                  activeSessionId: snapshot.activeSessionId === sessionId ? "" : snapshot.activeSessionId,
+                },
+              ]),
+            ),
+          );
           setBroadcastTargets((prev) => {
             const nextSet = new Set(prev);
             nextSet.delete(sessionId);
@@ -870,7 +1572,7 @@ export function App() {
           orphanClosingSessionIdsRef.current.delete(sessionId);
         });
     });
-  }, [sessions, splitSlots]);
+  }, [sessions, splitSlots, workspaceSnapshots]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -903,17 +1605,133 @@ export function App() {
       return paneOrder[0] ?? 0;
     });
   }, [paneOrder]);
+  useEffect(() => {
+    if (isApplyingWorkspaceSnapshotRef.current) {
+      return;
+    }
+    setWorkspaceSnapshots((prev) => {
+      const current = prev[activeWorkspaceId];
+      if (!current) {
+        return prev;
+      }
+      const sameSlots =
+        current.splitSlots.length === splitSlots.length &&
+        current.splitSlots.every((slot, index) => slot === splitSlots[index]);
+      const sameLayouts =
+        current.paneLayouts.length === paneLayouts.length &&
+        current.paneLayouts.every(
+          (entry, index) =>
+            entry.id === paneLayouts[index]?.id &&
+            entry.width === paneLayouts[index]?.width &&
+            entry.height === paneLayouts[index]?.height,
+        );
+      const sameActive = current.activePaneIndex === activePaneIndex && current.activeSessionId === activeSession;
+      const sameTree = JSON.stringify(current.splitTree) === JSON.stringify(splitTree);
+      if (sameSlots && sameLayouts && sameActive && sameTree) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [activeWorkspaceId]: {
+          ...current,
+          splitSlots: [...splitSlots],
+          paneLayouts: clonePaneLayouts(paneLayouts),
+          splitTree: cloneSplitTree(splitTree),
+          activePaneIndex,
+          activeSessionId: activeSession,
+        },
+      };
+    });
+  }, [activePaneIndex, activeSession, activeWorkspaceId, paneLayouts, splitSlots, splitTree]);
+  useEffect(() => {
+    if (autoArrangeMode === "a" || autoArrangeMode === "b" || autoArrangeMode === "c") {
+      lastAutoArrangeBeforeFreeRef.current = autoArrangeMode;
+    }
+  }, [autoArrangeMode]);
+
+  useEffect(() => {
+    if (autoArrangeMode === "off" || autoArrangeMode === "free") {
+      return;
+    }
+    if (isAutoArrangeApplyingRef.current) {
+      return;
+    }
+    const nextSplitTree = rebalanceSplitTree(splitTree);
+    const nextSplitSlots = compactSplitSlotsByPaneOrder(splitSlots, paneOrder);
+    const shouldRebalanceTree = autoArrangeMode === "b" || autoArrangeMode === "c";
+    const shouldCompactSlots = autoArrangeMode === "a" || autoArrangeMode === "c";
+    const splitTreeChanged = shouldRebalanceTree && nextSplitTree !== splitTree;
+    const splitSlotsChanged = shouldCompactSlots && nextSplitSlots !== splitSlots;
+    if (!splitTreeChanged && !splitSlotsChanged) {
+      return;
+    }
+    isAutoArrangeApplyingRef.current = true;
+    if (splitTreeChanged) {
+      setSplitTree(nextSplitTree);
+    }
+    if (splitSlotsChanged) {
+      setSplitSlots(nextSplitSlots);
+    }
+    queueMicrotask(() => {
+      isAutoArrangeApplyingRef.current = false;
+    });
+  }, [autoArrangeMode, paneOrder, splitSlots, splitTree]);
+
+  useEffect(() => {
+    if (!contextMenu.visible && !hostContextMenu) {
+      return;
+    }
+    const hide = () => {
+      setContextMenu((prev) => ({ ...prev, visible: false }));
+      setHostContextMenu(null);
+    };
+    window.addEventListener("click", hide);
+    return () => {
+      window.removeEventListener("click", hide);
+    };
+  }, [contextMenu.visible, hostContextMenu]);
+
+  useEffect(() => {
+    const paneMenuOpen = contextMenu.visible && contextMenu.paneIndex !== null;
+    if (!paneMenuOpen && !hostContextMenu) {
+      return;
+    }
+    const blockNativeMenuOutsideOverlay = (e: Event) => {
+      const ev = e as MouseEvent;
+      const t = ev.target;
+      if (!(t instanceof Element)) {
+        return;
+      }
+      if (t.closest(".context-menu")) {
+        return;
+      }
+      ev.preventDefault();
+    };
+    document.addEventListener("contextmenu", blockNativeMenuOutsideOverlay, true);
+    return () => document.removeEventListener("contextmenu", blockNativeMenuOutsideOverlay, true);
+  }, [contextMenu.visible, contextMenu.paneIndex, hostContextMenu]);
 
   useEffect(() => {
     if (!contextMenu.visible) {
       return;
     }
-    const hide = () => {
-      setContextMenu((prev) => ({ ...prev, visible: false }));
+    const syncSplitModeFromModifier = (event: KeyboardEvent) => {
+      setContextMenu((prev) => {
+        if (!prev.visible) {
+          return prev;
+        }
+        const nextMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
+        if (prev.splitMode === nextMode) {
+          return prev;
+        }
+        return { ...prev, splitMode: nextMode };
+      });
     };
-    window.addEventListener("click", hide);
+    window.addEventListener("keydown", syncSplitModeFromModifier);
+    window.addEventListener("keyup", syncSplitModeFromModifier);
     return () => {
-      window.removeEventListener("click", hide);
+      window.removeEventListener("keydown", syncSplitModeFromModifier);
+      window.removeEventListener("keyup", syncSplitModeFromModifier);
     };
   }, [contextMenu.visible]);
 
@@ -943,8 +1761,113 @@ export function App() {
     window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
   }, [terminalFontOffset]);
   useEffect(() => {
+    window.localStorage.setItem(UI_FONT_PRESET_STORAGE_KEY, uiFontPreset);
+  }, [uiFontPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(TERMINAL_FONT_PRESET_STORAGE_KEY, terminalFontPreset);
+  }, [terminalFontPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(QUICK_CONNECT_MODE_STORAGE_KEY, quickConnectMode);
+  }, [quickConnectMode]);
+  useEffect(() => {
+    window.localStorage.setItem(QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY, String(quickConnectAutoTrust));
+  }, [quickConnectAutoTrust]);
+  useEffect(() => {
+    window.localStorage.setItem(SPLIT_RATIO_PRESET_STORAGE_KEY, splitRatioPreset);
+  }, [splitRatioPreset]);
+  useEffect(() => {
+    window.localStorage.setItem(AUTO_ARRANGE_MODE_STORAGE_KEY, autoArrangeMode);
+  }, [autoArrangeMode]);
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_OPEN_MODE_STORAGE_KEY, settingsOpenMode);
+  }, [settingsOpenMode]);
+  useEffect(() => {
     window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, selectedSidebarViewId);
   }, [selectedSidebarViewId]);
+  useEffect(() => {
+    window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
+  }, [layoutMode]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      WORKSPACES_STORAGE_KEY,
+      JSON.stringify({
+        order: workspaceOrder,
+        activeWorkspaceId,
+        snapshots: workspaceSnapshots,
+      }),
+    );
+  }, [activeWorkspaceId, workspaceOrder, workspaceSnapshots]);
+  useEffect(() => {
+    if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
+      return;
+    }
+    const modal = settingsModalRef.current;
+    const width = modal?.offsetWidth ?? 860;
+    const topMargin = 20;
+    const x = Math.max(8, Math.round((window.innerWidth - width) / 2));
+    const y = Math.max(topMargin, Math.round((window.innerHeight - Math.min(820, window.innerHeight - 40)) / 2));
+    setSettingsModalPosition({ x, y });
+  }, [isAppSettingsOpen, settingsModalPosition, settingsOpenMode]);
+  useEffect(() => {
+    if (!isSettingsDragging) {
+      return;
+    }
+    const onPointerMove = (event: PointerEvent) => {
+      const dragOffset = settingsDragOffsetRef.current;
+      const modal = settingsModalRef.current;
+      if (!dragOffset || !modal) {
+        return;
+      }
+      const modalWidth = modal.offsetWidth;
+      const modalHeight = modal.offsetHeight;
+      const nextX = Math.min(
+        Math.max(8, event.clientX - dragOffset.x),
+        Math.max(8, window.innerWidth - modalWidth - 8),
+      );
+      const nextY = Math.min(
+        Math.max(8, event.clientY - dragOffset.y),
+        Math.max(8, window.innerHeight - modalHeight - 8),
+      );
+      setSettingsModalPosition({ x: Math.round(nextX), y: Math.round(nextY) });
+    };
+    const onPointerUp = () => {
+      setIsSettingsDragging(false);
+      settingsDragOffsetRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [isSettingsDragging]);
+  useEffect(() => {
+    if (isAppSettingsOpen) {
+      return;
+    }
+    setIsSettingsDragging(false);
+    settingsDragOffsetRef.current = null;
+  }, [isAppSettingsOpen]);
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_STACKED_MEDIA);
+    const apply = () => {
+      setViewportStacked(mq.matches);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+    };
+  }, []);
+  useEffect(() => {
+    if (!isStackedShell || mobileShellTab !== "hosts") {
+      return;
+    }
+    setIsSidebarVisible(true);
+  }, [isStackedShell, mobileShellTab]);
   useEffect(() => {
     if (!selectedSidebarViewId.startsWith("custom:")) {
       return;
@@ -1084,6 +2007,24 @@ export function App() {
     });
   };
 
+  const openHostMenuForHost = (host: HostConfig) => {
+    setActiveHost(host.host);
+    setCurrentHost(host);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setOpenHostMenuHostAlias(host.host);
+  };
+
+  const toggleHostSelection = (host: HostConfig) => {
+    setActiveHost((prev) => {
+      if (prev === host.host) {
+        return "";
+      }
+      setCurrentHost(host);
+      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+      return host.host;
+    });
+  };
+
   const clearPendingRemoveConfirm = useCallback(() => {
     if (removeConfirmResetTimerRef.current) {
       clearTimeout(removeConfirmResetTimerRef.current);
@@ -1199,12 +2140,7 @@ export function App() {
     }
   };
 
-  const createViewRule = (): ViewFilterRule => ({
-    id: createId(),
-    field: "host",
-    operator: "contains",
-    value: "",
-  });
+  const createViewRule = (): ViewFilterRule => createEmptyViewFilterRule();
 
   const createNewViewDraft = () => {
     setViewDraft(createDefaultViewProfile());
@@ -1395,6 +2331,53 @@ export function App() {
     setNewHostDraft(emptyHost());
   };
 
+  const openQuickConnectModal = (paneIndex: number | null = null) => {
+    const defaultUser = metadataStore.defaultUser.trim();
+    setQuickConnectDraft((prev) => ({
+      ...createQuickConnectDraft(defaultUser),
+      identityFile: prev.identityFile,
+      proxyJump: prev.proxyJump,
+      proxyCommand: prev.proxyCommand,
+    }));
+    setQuickConnectCommandInput(defaultUser ? `${defaultUser}@` : "");
+    setQuickConnectWizardStep(1);
+    setIsQuickAddMenuOpen(false);
+    setOpenHostMenuHostAlias("");
+    setPendingQuickConnectPaneIndex(paneIndex);
+    setIsQuickConnectModalOpen(true);
+  };
+
+  const closeQuickConnectModal = () => {
+    setIsQuickConnectModalOpen(false);
+    setQuickConnectDraft(createQuickConnectDraft());
+    setQuickConnectCommandInput("");
+    setQuickConnectWizardStep(1);
+    setPendingQuickConnectPaneIndex(null);
+  };
+
+  const handleSettingsHeaderPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (!isAppSettingsOpen || settingsOpenMode !== "modal") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("button")) {
+        return;
+      }
+      const modal = settingsModalRef.current;
+      if (!modal) {
+        return;
+      }
+      const modalRect = modal.getBoundingClientRect();
+      settingsDragOffsetRef.current = {
+        x: event.clientX - modalRect.left,
+        y: event.clientY - modalRect.top,
+      };
+      setIsSettingsDragging(true);
+    },
+    [isAppSettingsOpen, settingsOpenMode],
+  );
+
   const createHost = async () => {
     setError("");
     try {
@@ -1416,7 +2399,7 @@ export function App() {
     try {
       const started = await startSession(host);
       setSessions((prev) => {
-        return [...prev, { id: started.session_id, host: host.host }];
+        return [...prev, { id: started.session_id, kind: "sshSaved", hostAlias: host.host }];
       });
       setActiveSession(started.session_id);
       setActiveHost(host.host);
@@ -1440,17 +2423,227 @@ export function App() {
     }
   };
 
+  const placeSessionIntoNewOrFreePane = (sessionId: string, splitFromPaneIndex: number) => {
+    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
+    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
+    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right", splitFromPaneIndex, "empty");
+    setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
+    setActivePaneIndex(targetPaneIndex);
+    setActiveSession(sessionId);
+  };
+
   const connectToHostInNewPane = async (host: HostConfig): Promise<void> => {
+    const splitFromPaneIndex = activePaneIndex;
     const startedSessionId = await connectToHost(host);
     if (!startedSessionId) {
       return;
     }
-    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
-    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right");
-    setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, startedSessionId));
-    setActivePaneIndex(targetPaneIndex);
-    setActiveSession(startedSessionId);
+    placeSessionIntoNewOrFreePane(startedSessionId, splitFromPaneIndex);
+  };
+
+  const connectLocalShellInNewPane = async (splitFromPaneIndex: number): Promise<void> => {
+    setError("");
+    try {
+      const started = await startLocalSession();
+      setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: "Local terminal" }]);
+      placeSessionIntoNewOrFreePane(started.session_id, splitFromPaneIndex);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const connectLocalShellInPane = async (paneIndex: number): Promise<void> => {
+    setError("");
+    try {
+      const started = await startLocalSession();
+      setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: "Local terminal" }]);
+      setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, started.session_id));
+      setActivePaneIndex(paneIndex);
+      setActiveSession(started.session_id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const applyQuickConnectUser = (user: string) => {
+    setQuickConnectDraft((prev) => ({ ...prev, user }));
+  };
+
+  const shiftQuickConnectUserOption = (direction: 1 | -1) => {
+    if (quickConnectUserOptions.length === 0) {
+      return;
+    }
+    const currentUser = quickConnectDraft.user.trim();
+    const currentIndex = quickConnectUserOptions.findIndex((entry) => entry === currentUser);
+    const baseIndex = currentIndex >= 0 ? currentIndex : direction > 0 ? -1 : 0;
+    const nextRaw = baseIndex + direction;
+    const wrapped = (nextRaw + quickConnectUserOptions.length) % quickConnectUserOptions.length;
+    const user = quickConnectUserOptions[wrapped] ?? "";
+    if (!user) {
+      return;
+    }
+    applyQuickConnectUser(user);
+    if (quickConnectMode === "command") {
+      setQuickConnectCommandInput((current) => {
+        const trimmed = current.trim();
+        const atIndex = trimmed.lastIndexOf("@");
+        const hostPart = atIndex >= 0 ? trimmed.slice(atIndex + 1).trim() : trimmed;
+        return hostPart ? `${user}@${hostPart}` : `${user}@`;
+      });
+    }
+  };
+
+  const buildQuickSshRequestFromDraft = (): QuickSshSessionRequest | null => {
+    const defaultUser = metadataStore.defaultUser.trim();
+    let normalizedDraft: QuickConnectDraft = {
+      ...quickConnectDraft,
+      user: quickConnectDraft.user.trim() || defaultUser,
+      hostName: quickConnectDraft.hostName.trim(),
+      identityFile: quickConnectDraft.identityFile.trim(),
+      proxyJump: quickConnectDraft.proxyJump.trim(),
+      proxyCommand: quickConnectDraft.proxyCommand.trim(),
+    };
+    let parsedPort: number | undefined;
+    if (quickConnectMode === "command") {
+      const parsed = parseQuickConnectCommandInput(quickConnectCommandInput);
+      if (parsed.error) {
+        setError(parsed.error);
+        return null;
+      }
+      const nextHostName = parsed.hostName.trim();
+      if (!nextHostName) {
+        setError("HostName is required for quick connect.");
+        return null;
+      }
+      normalizedDraft = {
+        ...normalizedDraft,
+        hostName: nextHostName,
+        user: parsed.user.trim() || normalizedDraft.user,
+      };
+      parsedPort = parsed.port;
+    } else {
+      const parsed = parseHostPortInput(normalizedDraft.hostName);
+      if (parsed.error) {
+        setError(parsed.error);
+        return null;
+      }
+      if (!parsed.hostName.trim()) {
+        setError("HostName is required for quick connect.");
+        return null;
+      }
+      normalizedDraft = {
+        ...normalizedDraft,
+        hostName: parsed.hostName,
+      };
+      parsedPort = parsed.port;
+    }
+    setQuickConnectDraft(normalizedDraft);
+    return {
+      hostName: normalizedDraft.hostName,
+      user: normalizedDraft.user,
+      port: parsedPort,
+      identityFile: normalizedDraft.identityFile,
+      proxyJump: normalizedDraft.proxyJump,
+      proxyCommand: normalizedDraft.proxyCommand,
+    };
+  };
+
+  const proceedQuickConnectWizard = () => {
+    if (quickConnectWizardStep === 1) {
+      const parsed = parseHostPortInput(quickConnectDraft.hostName);
+      if (parsed.error) {
+        setError(parsed.error);
+        return;
+      }
+      if (!parsed.hostName.trim()) {
+        setError("HostName is required for quick connect.");
+        return;
+      }
+      setError("");
+      setQuickConnectDraft((prev) => ({
+        ...prev,
+        hostName: parsed.hostName,
+      }));
+      setQuickConnectWizardStep(2);
+      return;
+    }
+    void connectQuickSshInNewPane();
+  };
+
+  const handleQuickConnectUserInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (quickConnectMode === "wizard") {
+        proceedQuickConnectWizard();
+      } else {
+        void connectQuickSshInNewPane();
+      }
+    }
+  };
+
+  const handleQuickConnectModalKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeQuickConnectModal();
+    }
+  };
+  const handleQuickConnectCommandInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      shiftQuickConnectUserOption(-1);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void connectQuickSshInNewPane();
+    }
+  };
+
+  const connectQuickSshInNewPane = async (): Promise<void> => {
+    setError("");
+    const splitFromPaneIndex = activePaneIndex;
+    const request = buildQuickSshRequestFromDraft();
+    if (!request) {
+      return;
+    }
+    try {
+      const started = await startQuickSshSession(request);
+      const quickLabel = request.user ? `${request.user}@${request.hostName}` : request.hostName;
+      setSessions((prev) => [
+        ...prev,
+        { id: started.session_id, kind: "sshQuick", label: `Quick: ${quickLabel}`, request },
+      ]);
+      const requestedPaneIndex = pendingQuickConnectPaneIndex;
+      const canAttachToRequestedPane =
+        typeof requestedPaneIndex === "number" &&
+        requestedPaneIndex >= 0 &&
+        paneOrder.includes(requestedPaneIndex);
+      if (canAttachToRequestedPane) {
+        setSplitSlots((prev) => assignSessionToPane(prev, requestedPaneIndex, started.session_id));
+        setActivePaneIndex(requestedPaneIndex);
+        setActiveSession(started.session_id);
+      } else {
+        placeSessionIntoNewOrFreePane(started.session_id, splitFromPaneIndex);
+      }
+      closeQuickConnectModal();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const ensureSessionForHost = async (hostAlias: string): Promise<string | null> => {
@@ -1468,6 +2661,30 @@ export function App() {
       return null;
     }
     return connectToHost(host);
+  };
+
+  const spawnSessionFromExistingSession = async (sourceSession: SessionTab): Promise<string | null> => {
+    if (sourceSession.kind === "sshSaved") {
+      return spawnSessionFromHostAlias(sourceSession.hostAlias);
+    }
+    if (sourceSession.kind === "local") {
+      try {
+        const started = await startLocalSession();
+        setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: sourceSession.label }]);
+        return started.session_id;
+      } catch (error) {
+        setError(String(error));
+        return null;
+      }
+    }
+    try {
+      const started = await startQuickSshSession(sourceSession.request);
+      setSessions((prev) => [...prev, { ...sourceSession, id: started.session_id }]);
+      return started.session_id;
+    } catch (error) {
+      setError(String(error));
+      return null;
+    }
   };
 
   const setDragPayload = (event: ReactDragEvent, payload: DragPayload) => {
@@ -1507,26 +2724,7 @@ export function App() {
     if (!bounds) {
       return "center";
     }
-    const relativeX = (clientX - bounds.left) / Math.max(1, bounds.width);
-    const relativeY = (clientY - bounds.top) / Math.max(1, bounds.height);
-    const centerBandStart = 0.33;
-    const centerBandEnd = 0.67;
-    if (
-      relativeX >= centerBandStart &&
-      relativeX <= centerBandEnd &&
-      relativeY >= centerBandStart &&
-      relativeY <= centerBandEnd
-    ) {
-      return "center";
-    }
-    const centerX = bounds.left + bounds.width / 2;
-    const centerY = bounds.top + bounds.height / 2;
-    const deltaX = clientX - centerX;
-    const deltaY = clientY - centerY;
-    if (Math.abs(deltaX) >= Math.abs(deltaY)) {
-      return deltaX < 0 ? "left" : "right";
-    }
-    return deltaY < 0 ? "top" : "bottom";
+    return resolvePaneDropZoneFromOverlay(clientX, clientY, bounds);
   };
 
   const handlePaneDrop = async (event: ReactDragEvent<HTMLDivElement>, paneIndex: number) => {
@@ -1550,9 +2748,16 @@ export function App() {
       lastInternalDragPayloadRef.current = null;
       return;
     }
+    const sourcePaneIndex =
+      payload.type === "session" ? splitSlots.findIndex((slot) => slot === payload.sessionId) : -1;
+    const isSamePane = payload.type === "session" && sourcePaneIndex >= 0 && sourcePaneIndex === paneIndex;
     const resolvedDropZone = resolvePaneDropZone(dropClientX, dropClientY, dropBounds);
+    if (isSamePane && resolvedDropZone === "center") {
+      return;
+    }
     const assignSessionToZone = (sessionId: string, zone: PaneDropZone, moveExistingSession = false) => {
-      const targetPane = zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex);
+      const targetPane =
+        zone === "center" ? paneIndex : splitFocusedPane(zone, paneIndex, "empty");
       setActivePaneIndex(targetPane);
       setActiveSession(sessionId);
       setSplitSlots((prev) => {
@@ -1564,32 +2769,114 @@ export function App() {
       assignSessionToZone(sessionId, resolvedDropZone, false);
     };
     if (payload.type === "session") {
-      const shouldMoveExisting = sessionDropMode === "move";
-      if (shouldMoveExisting) {
-        assignSessionToZone(payload.sessionId, resolvedDropZone, true);
+      if (isSamePane) {
+        const sourceSession = sessions.find((session) => session.id === payload.sessionId) ?? null;
+        if (!sourceSession) return;
+        const spawnedSessionId = await spawnSessionFromExistingSession(sourceSession);
+        if (!spawnedSessionId) return;
+        placeSessionOnPane(spawnedSessionId);
+        return;
+      }
+      if (sourcePaneIndex >= 0 && sourcePaneIndex !== paneIndex) {
+        if (resolvedDropZone === "center") {
+          const targetSessionId = splitSlots[paneIndex] ?? null;
+          setActivePaneIndex(paneIndex);
+          setActiveSession(payload.sessionId);
+          setSplitSlots((prev) => {
+            const cleared = removeSessionFromSlots(prev, payload.sessionId);
+            const next = assignSessionToPane(cleared, paneIndex, payload.sessionId);
+            return targetSessionId
+              ? assignSessionToPane(next, sourcePaneIndex, targetSessionId)
+              : next;
+          });
+          if (!targetSessionId && paneOrder.length > 1) {
+            setSplitTree((prev) => {
+              const next = removePaneFromTree(prev, sourcePaneIndex);
+              if (!next) return prev;
+              const maxPaneIndex = Math.max(...collectPaneOrder(next));
+              if (nextPaneIndexRef.current <= maxPaneIndex) {
+                nextPaneIndexRef.current = maxPaneIndex + 1;
+              }
+              return next;
+            });
+            setSplitSlots((prev) => clearPaneAtIndex(prev, sourcePaneIndex));
+          }
+          return;
+        }
+        const targetPane = splitFocusedPane(resolvedDropZone, paneIndex, "empty");
+        setActivePaneIndex(targetPane);
+        setActiveSession(payload.sessionId);
+        setSplitSlots((prev) => {
+          const cleared = removeSessionFromSlots(prev, payload.sessionId);
+          return assignSessionToPane(cleared, targetPane, payload.sessionId);
+        });
+        if (paneOrder.length > 1) {
+          setSplitTree((prev) => {
+            const next = removePaneFromTree(prev, sourcePaneIndex);
+            if (!next) return prev;
+            const maxPaneIndex = Math.max(...collectPaneOrder(next));
+            if (nextPaneIndexRef.current <= maxPaneIndex) {
+              nextPaneIndexRef.current = maxPaneIndex + 1;
+            }
+            return next;
+          });
+          setSplitSlots((prev) => clearPaneAtIndex(prev, sourcePaneIndex));
+        }
         return;
       }
       const sourceSession = sessions.find((session) => session.id === payload.sessionId) ?? null;
-      if (!sourceSession) {
-        return;
-      }
-      const spawnedSessionId = await spawnSessionFromHostAlias(sourceSession.host);
-      if (!spawnedSessionId) {
-        return;
-      }
-      placeSessionOnPane(spawnedSessionId);
+      if (!sourceSession) return;
+      placeSessionOnPane(payload.sessionId);
       return;
     }
-    if (sessionDropMode === "move") {
-      const existingSession = sessions.find((session) => session.host === payload.hostAlias) ?? null;
-      if (existingSession) {
-        placeSessionOnPane(existingSession.id);
+    if (payload.type === "machine") {
+      const hostConfig = hosts.find((h) => h.host === payload.hostAlias) ?? null;
+      if (!hostConfig) {
+        setError(`Host '${payload.hostAlias}' not found.`);
+        lastInternalDragPayloadRef.current = null;
         return;
       }
-    }
-    const sessionId = await ensureSessionForHost(payload.hostAlias);
-    if (sessionId) {
-      placeSessionOnPane(sessionId);
+      const targetPaneEmpty = (splitSlots[paneIndex] ?? null) === null;
+      const machineDropZone = targetPaneEmpty ? ("center" as const) : resolvedDropZone;
+      if (machineDropZone === "center") {
+        const oldSessionId = splitSlots[paneIndex] ?? null;
+        const existingSession =
+          sessions.find((session) => session.kind === "sshSaved" && session.hostAlias === payload.hostAlias) ?? null;
+        if (existingSession) {
+          if (oldSessionId && oldSessionId !== existingSession.id) {
+            await closeSessionById(oldSessionId);
+          }
+          setSplitSlots((prev) =>
+            assignSessionToPane(removeSessionFromSlots(prev, existingSession.id), paneIndex, existingSession.id),
+          );
+          setActivePaneIndex(paneIndex);
+          setActiveSession(existingSession.id);
+          lastInternalDragPayloadRef.current = null;
+          return;
+        }
+        if (oldSessionId) {
+          await closeSessionById(oldSessionId);
+        }
+        const newSessionId = await connectToHost(hostConfig);
+        if (newSessionId) {
+          setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, newSessionId));
+          setActivePaneIndex(paneIndex);
+          setActiveSession(newSessionId);
+        }
+        lastInternalDragPayloadRef.current = null;
+        return;
+      }
+      const existingHostSession =
+        sessions.find((session) => session.kind === "sshSaved" && session.hostAlias === payload.hostAlias) ?? null;
+      if (existingHostSession) {
+        placeSessionOnPane(existingHostSession.id);
+        lastInternalDragPayloadRef.current = null;
+        return;
+      }
+      const sessionId = await ensureSessionForHost(payload.hostAlias);
+      if (sessionId) {
+        placeSessionOnPane(sessionId);
+      }
     }
     lastInternalDragPayloadRef.current = null;
   };
@@ -1601,7 +2888,7 @@ export function App() {
         missingDragPayloadLoggedRef.current = true;
       }
       if (draggingKind === "session") {
-        return sessionDropMode === "move" ? "move" : "copy";
+        return "move";
       }
       if (draggingKind === "machine") {
         return "copy";
@@ -1610,13 +2897,10 @@ export function App() {
     }
     missingDragPayloadLoggedRef.current = false;
     if (payload.type === "session") {
-      return sessionDropMode === "move" ? "move" : "copy";
+      return "move";
     }
     return "copy";
   };
-
-  const getSessionModifierModeText = (): string =>
-    sessionDropMode === "move" ? "Move existing session" : "Open new session from host";
 
   const toggleBroadcastTarget = (sessionId: string) => {
     if (!isBroadcastModeEnabled) {
@@ -1636,11 +2920,83 @@ export function App() {
     window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
   }, []);
 
+  const handleMobilePagerScroll = useCallback(() => {
+    if (skipMobilePagerScrollRef.current) {
+      return;
+    }
+    const el = mobilePagerRef.current;
+    if (!el || !isStackedShell || mobileShellTab !== "terminal") {
+      return;
+    }
+    const w = el.clientWidth;
+    if (w < 8) {
+      return;
+    }
+    const idx = Math.round(el.scrollLeft / w);
+    const clamped = Math.max(0, Math.min(paneOrder.length - 1, idx));
+    const pi = paneOrder[clamped];
+    if (pi === undefined || pi === activePaneIndex) {
+      return;
+    }
+    setActivePaneIndex(pi);
+    const sid = splitSlots[pi];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder, splitSlots, requestTerminalFocus]);
+
+  const nudgeMobilePager = useCallback((delta: number) => {
+    const el = mobilePagerRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollBy({ left: delta * el.clientWidth, behavior: "smooth" });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isStackedShell || mobileShellTab !== "terminal") {
+      return;
+    }
+    const el = mobilePagerRef.current;
+    if (!el) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    if (idx < 0) {
+      return;
+    }
+    const w = el.clientWidth;
+    if (w < 8) {
+      return;
+    }
+    const target = idx * w;
+    if (Math.abs(el.scrollLeft - target) < 3) {
+      return;
+    }
+    skipMobilePagerScrollRef.current = true;
+    el.scrollTo({ left: target, behavior: "auto" });
+    requestAnimationFrame(() => {
+      skipMobilePagerScrollRef.current = false;
+    });
+  }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder]);
+
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
     setSessions((prev) => prev.filter((session) => session.id !== sessionId));
     setActiveSession((prev) => (prev === sessionId ? "" : prev));
     setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
+    setWorkspaceSnapshots((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([workspaceId, snapshot]) => [
+          workspaceId,
+          {
+            ...snapshot,
+            splitSlots: removeSessionFromSlots(snapshot.splitSlots, sessionId),
+            activeSessionId: snapshot.activeSessionId === sessionId ? "" : snapshot.activeSessionId,
+          },
+        ]),
+      ),
+    );
     setBroadcastTargets((prev) => {
       const nextSet = new Set(prev);
       nextSet.delete(sessionId);
@@ -1668,6 +3024,18 @@ export function App() {
     setSessions([]);
     setActiveSession("");
     setSplitSlots((prev) => prev.map(() => null));
+    setWorkspaceSnapshots((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([workspaceId, snapshot]) => [
+          workspaceId,
+          {
+            ...snapshot,
+            splitSlots: snapshot.splitSlots.map(() => null),
+            activeSessionId: "",
+          },
+        ]),
+      ),
+    );
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
     if (withLayoutReset) {
@@ -1694,8 +3062,9 @@ export function App() {
       return;
     }
     try {
-      if (saveTrustHostAsDefault && activeTrustPrompt.hostAlias !== "unknown") {
-        await upsertHostMetadata(activeTrustPrompt.hostAlias, (current) => ({
+      const promptSession = sessionsRef.current.find((session) => session.id === activeTrustPrompt.sessionId) ?? null;
+      if (saveTrustHostAsDefault && promptSession?.kind === "sshSaved") {
+        await upsertHostMetadata(promptSession.hostAlias, (current) => ({
           ...current,
           trustHostDefault: true,
         }));
@@ -1705,6 +3074,25 @@ export function App() {
     } catch (e) {
       setError(String(e));
     }
+  };
+  const handleTrustPromptKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!activeTrustPrompt) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissTrustPrompt(activeTrustPrompt.sessionId);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== "NumpadEnter") {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button")) {
+      return;
+    }
+    event.preventDefault();
+    void acceptTrustPrompt();
   };
   const closePaneAndSession = async (paneIndex: number) => {
     if (paneOrder.length <= 1 || !paneOrder.includes(paneIndex)) {
@@ -1770,10 +3158,241 @@ export function App() {
       setBroadcastTargets(new Set());
     }
   };
+  const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    isApplyingWorkspaceSnapshotRef.current = true;
+    setSplitSlots([...snapshot.splitSlots]);
+    setPaneLayouts(clonePaneLayouts(snapshot.paneLayouts));
+    setSplitTree(cloneSplitTree(snapshot.splitTree));
+    setActivePaneIndex(snapshot.activePaneIndex);
+    setActiveSession(snapshot.activeSessionId);
+    queueMicrotask(() => {
+      isApplyingWorkspaceSnapshotRef.current = false;
+    });
+  }, []);
+  const switchWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === activeWorkspaceId) {
+        return;
+      }
+      const currentSnapshot: WorkspaceSnapshot = {
+        id: activeWorkspaceId,
+        name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex,
+        activeSessionId: activeSession,
+      };
+      const nextSnapshot = workspaceSnapshots[workspaceId];
+      if (!nextSnapshot) {
+        return;
+      }
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [activeWorkspaceId]: currentSnapshot,
+      }));
+      setActiveWorkspaceId(workspaceId);
+      applyWorkspaceSnapshot(nextSnapshot);
+    },
+    [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree, workspaceSnapshots],
+  );
+  const createWorkspace = useCallback(() => {
+    const workspaceId = `workspace-${createId()}`;
+    const workspaceName = `Workspace ${workspaceOrder.length + 1}`;
+    const nextSnapshot = createEmptyWorkspaceSnapshot(workspaceId, workspaceName);
+    setWorkspaceSnapshots((prev) => ({
+      ...prev,
+      [workspaceId]: nextSnapshot,
+      [activeWorkspaceId]: {
+        ...(prev[activeWorkspaceId] ?? createEmptyWorkspaceSnapshot(activeWorkspaceId, "Main")),
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex,
+        activeSessionId: activeSession,
+      },
+    }));
+    setWorkspaceOrder((prev) => [...prev, workspaceId]);
+    setActiveWorkspaceId(workspaceId);
+    applyWorkspaceSnapshot(nextSnapshot);
+  }, [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree, workspaceOrder.length]);
+  const removeWorkspace = useCallback(
+    (workspaceId: string) => {
+      if (workspaceOrder.length <= 1) {
+        setError("At least one workspace must remain.");
+        return;
+      }
+      if (!workspaceSnapshots[workspaceId]) {
+        return;
+      }
+      const nextOrder = workspaceOrder.filter((entry) => entry !== workspaceId);
+      const fallbackWorkspaceId = nextOrder[0] ?? DEFAULT_WORKSPACE_ID;
+      const nextActiveWorkspaceId = workspaceId === activeWorkspaceId ? fallbackWorkspaceId : activeWorkspaceId;
+      setWorkspaceOrder(nextOrder);
+      setWorkspaceSnapshots((prev) => {
+        const next = { ...prev };
+        delete next[workspaceId];
+        return next;
+      });
+      if (nextActiveWorkspaceId !== activeWorkspaceId) {
+        const nextSnapshot = workspaceSnapshots[nextActiveWorkspaceId];
+        if (nextSnapshot) {
+          setActiveWorkspaceId(nextActiveWorkspaceId);
+          applyWorkspaceSnapshot(nextSnapshot);
+        }
+      }
+    },
+    [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
+  );
+  const sendSessionToWorkspace = useCallback(
+    (sessionId: string, targetWorkspaceId: string) => {
+      const sourcePaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
+      const canCloseSourcePane = sourcePaneIndex >= 0 && paneOrder.includes(sourcePaneIndex) && paneOrder.length > 1;
+      if (!sessionId || !workspaceSnapshots[targetWorkspaceId]) {
+        return;
+      }
+      if (targetWorkspaceId === activeWorkspaceId) {
+        return;
+      }
+      const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
+      const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
+      const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
+      const nextTargetPaneIndex =
+        typeof firstFreePaneIndex === "number"
+          ? firstFreePaneIndex
+          : Math.max(-1, ...targetPaneOrder) + 1;
+      const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
+      const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
+      if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
+        nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+      }
+      const nextTargetSplitTree: SplitTreeNode =
+        typeof firstFreePaneIndex === "number"
+          ? cloneSplitTree(targetSnapshot.splitTree)
+          : {
+              id: `split-workspace-${createId()}`,
+              type: "split",
+              axis: "vertical",
+              ratio: splitRatioDefaultValue,
+              first: cloneSplitTree(targetSnapshot.splitTree),
+              second: createLeafNode(nextTargetPaneIndex),
+            };
+      const nextTargetSnapshot: WorkspaceSnapshot = {
+        ...cloneWorkspaceSnapshot(targetSnapshot),
+        splitSlots: nextTargetSlots,
+        paneLayouts: nextTargetPaneLayouts,
+        splitTree: nextTargetSplitTree,
+        activePaneIndex: nextTargetPaneIndex,
+        activeSessionId: sessionId,
+      };
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [targetWorkspaceId]: nextTargetSnapshot,
+      }));
+      setSplitSlots((prev) => {
+        const cleared = removeSessionFromSlots(prev, sessionId);
+        return canCloseSourcePane ? clearPaneAtIndex(cleared, sourcePaneIndex) : cleared;
+      });
+      if (canCloseSourcePane) {
+        setSplitTree((prev) => {
+          const next = removePaneFromTree(prev, sourcePaneIndex);
+          if (!next) {
+            return prev;
+          }
+          const maxPaneIndex = Math.max(...collectPaneOrder(next));
+          if (nextPaneIndexRef.current <= maxPaneIndex) {
+            nextPaneIndexRef.current = maxPaneIndex + 1;
+          }
+          return next;
+        });
+      }
+      setBroadcastTargets((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      if (activeSession === sessionId) {
+        setActiveSession("");
+      }
+    },
+    [activeSession, activeWorkspaceId, paneOrder, splitRatioDefaultValue, splitSlots, workspaceSnapshots],
+  );
 
-  const handleContextAction = async (actionId: ContextActionId, paneIndex: number) => {
+  const connectToHostInWorkspace = useCallback(
+    async (host: HostConfig, targetWorkspaceId: string): Promise<void> => {
+      const priorActiveSession = activeSession;
+      const priorActivePaneIndex = activePaneIndex;
+      const startedSessionId = await connectToHost(host);
+      if (!startedSessionId) {
+        return;
+      }
+      if (targetWorkspaceId === activeWorkspaceId) {
+        placeSessionIntoNewOrFreePane(startedSessionId, priorActivePaneIndex);
+        return;
+      }
+      const targetSnapshot = workspaceSnapshots[targetWorkspaceId];
+      if (!targetSnapshot) {
+        return;
+      }
+      const nextTargetSnapshot = appendSessionToWorkspaceSnapshot(
+        targetSnapshot,
+        startedSessionId,
+        splitRatioDefaultValue,
+      );
+      const persistedCurrentSnapshot: WorkspaceSnapshot = {
+        id: activeWorkspaceId,
+        name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        splitSlots: [...splitSlots],
+        paneLayouts: clonePaneLayouts(paneLayouts),
+        splitTree: cloneSplitTree(splitTree),
+        activePaneIndex: priorActivePaneIndex,
+        activeSessionId: priorActiveSession,
+      };
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [activeWorkspaceId]: persistedCurrentSnapshot,
+        [targetWorkspaceId]: nextTargetSnapshot,
+      }));
+      setActiveWorkspaceId(targetWorkspaceId);
+      applyWorkspaceSnapshot(nextTargetSnapshot);
+    },
+    [
+      activePaneIndex,
+      activeSession,
+      activeWorkspaceId,
+      applyWorkspaceSnapshot,
+      paneLayouts,
+      splitRatioDefaultValue,
+      splitSlots,
+      splitTree,
+      workspaceSnapshots,
+    ],
+  );
+
+  const handleContextAction = async (
+    actionId: ContextActionId,
+    paneIndex: number,
+    options?: {
+      preferredSplitMode?: SplitMode;
+      eventLike?: {
+        type?: string;
+        key?: string;
+        code?: string;
+        altKey?: boolean;
+        getModifierState?: (...args: any[]) => boolean;
+      } | null;
+    },
+  ) => {
     setActivePaneIndex(paneIndex);
+    const preferredSplitMode = options?.preferredSplitMode ?? "duplicate";
+    const splitMode: SplitMode = shouldSplitAsEmpty(options?.eventLike) ? "empty" : preferredSplitMode;
     switch (actionId) {
+      case "pane.newLocal":
+        await connectLocalShellInNewPane(paneIndex);
+        break;
+      case "pane.quickConnect":
+        openQuickConnectModal(paneIndex);
+        break;
       case "pane.clear":
         await closeSessionInPane(paneIndex);
         break;
@@ -1781,16 +3400,16 @@ export function App() {
         await closePaneAndSession(paneIndex);
         break;
       case "layout.split.left":
-        splitFocusedPane("left", paneIndex);
+        splitFocusedPane("left", paneIndex, splitMode);
         break;
       case "layout.split.right":
-        splitFocusedPane("right", paneIndex);
+        splitFocusedPane("right", paneIndex, splitMode);
         break;
       case "layout.split.top":
-        splitFocusedPane("top", paneIndex);
+        splitFocusedPane("top", paneIndex, splitMode);
         break;
       case "layout.split.bottom":
-        splitFocusedPane("bottom", paneIndex);
+        splitFocusedPane("bottom", paneIndex, splitMode);
         break;
       case "broadcast.clearTargets":
         setBroadcastTargets(new Set());
@@ -1806,6 +3425,15 @@ export function App() {
         break;
       case "broadcast.togglePaneTarget":
         togglePaneTarget(paneIndex);
+        break;
+      case "layout.freeMove.enable":
+        setAutoArrangeMode("free");
+        break;
+      case "layout.freeMove.disable":
+        setAutoArrangeMode(lastAutoArrangeBeforeFreeRef.current);
+        break;
+      case "app.openSettings":
+        setIsAppSettingsOpen(true);
         break;
       default:
         break;
@@ -1850,21 +3478,39 @@ export function App() {
       return;
     }
     clearSidebarHideTimeout();
-    hideSidebarTimeoutRef.current = window.setTimeout(() => {
+    hideSidebarTimeoutRef.current = setTimeout(() => {
       setIsSidebarVisible(false);
       hideSidebarTimeoutRef.current = null;
     }, SIDEBAR_AUTO_HIDE_DELAY_MS);
   };
 
-  const splitFocusedPane = (direction: "left" | "right" | "top" | "bottom", paneIndex = activePaneIndex) => {
+  const splitFocusedPane = (
+    direction: "left" | "right" | "top" | "bottom",
+    paneIndex = activePaneIndex,
+    splitMode: SplitMode = "duplicate",
+  ) => {
     const targetPane = paneOrder.includes(paneIndex) ? paneIndex : (paneOrder[0] ?? 0);
+    let sourceSessionId = splitSlots[targetPane] ?? null;
+    if (splitMode === "duplicate" && !sourceSessionId) {
+      const fallbackSessionId =
+        splitSlots[activePaneIndex] ??
+        paneOrder.map((pi) => splitSlots[pi]).find((sid): sid is string => Boolean(sid)) ??
+        splitSlots.find((sid): sid is string => Boolean(sid)) ??
+        sessions[0]?.id ??
+        null;
+      sourceSessionId = fallbackSessionId;
+    }
     const newPaneIndex = nextPaneIndexRef.current;
     nextPaneIndexRef.current += 1;
     const splitId = `split-${nextSplitIdRef.current}`;
     nextSplitIdRef.current += 1;
+    const optimisticDuplicateSessionId =
+      splitMode === "duplicate" && sourceSessionId ? sourceSessionId : null;
     setSplitSlots((prev) => {
-      const next = [...prev];
-      if (next[newPaneIndex] === undefined) {
+      const next = ensurePaneIndex(prev, newPaneIndex);
+      if (optimisticDuplicateSessionId != null) {
+        next[newPaneIndex] = optimisticDuplicateSessionId;
+      } else if (next[newPaneIndex] === undefined) {
         next[newPaneIndex] = null;
       }
       return next;
@@ -1879,47 +3525,63 @@ export function App() {
     setSplitTree((prev) =>
       replacePaneInTree(prev, targetPane, (leaf) => {
         const insertedLeaf = createLeafNode(newPaneIndex);
+        let splitNode;
         if (direction === "left") {
-          return {
+          splitNode = {
             id: splitId,
             type: "split",
             axis: "horizontal",
-            ratio: DEFAULT_SPLIT_RATIO,
+            ratio: splitRatioDefaultValue,
             first: insertedLeaf,
             second: leaf,
           };
-        }
-        if (direction === "right") {
-          return {
+        } else if (direction === "right") {
+          splitNode = {
             id: splitId,
             type: "split",
             axis: "horizontal",
-            ratio: DEFAULT_SPLIT_RATIO,
+            ratio: splitRatioDefaultValue,
+            first: leaf,
+            second: insertedLeaf,
+          };
+        } else if (direction === "top") {
+          splitNode = {
+            id: splitId,
+            type: "split",
+            axis: "vertical",
+            ratio: splitRatioDefaultValue,
+            first: insertedLeaf,
+            second: leaf,
+          };
+        } else {
+          splitNode = {
+            id: splitId,
+            type: "split",
+            axis: "vertical",
+            ratio: splitRatioDefaultValue,
             first: leaf,
             second: insertedLeaf,
           };
         }
-        if (direction === "top") {
-          return {
-            id: splitId,
-            type: "split",
-            axis: "vertical",
-            ratio: DEFAULT_SPLIT_RATIO,
-            first: insertedLeaf,
-            second: leaf,
-          };
-        }
-        return {
-          id: splitId,
-          type: "split",
-          axis: "vertical",
-          ratio: DEFAULT_SPLIT_RATIO,
-          first: leaf,
-          second: insertedLeaf,
-        };
+        return splitNode as SplitTreeNode;
       }),
     );
     setActivePaneIndex(newPaneIndex);
+    if (splitMode === "duplicate" && sourceSessionId) {
+      const sourceSession = sessions.find((session) => session.id === sourceSessionId) ?? null;
+      if (!sourceSession) {
+        setSplitSlots((prev) => clearPaneAtIndex(prev, newPaneIndex));
+      } else {
+        void spawnSessionFromExistingSession(sourceSession).then((spawnedSessionId) => {
+          if (!spawnedSessionId) {
+            setSplitSlots((prev) => clearPaneAtIndex(prev, newPaneIndex));
+            return;
+          }
+          setSplitSlots((prev) => assignSessionToPane(prev, newPaneIndex, spawnedSessionId));
+          setActiveSession(spawnedSessionId);
+        });
+      }
+    }
     return newPaneIndex;
   };
 
@@ -1953,11 +3615,36 @@ export function App() {
       panes: paneOrder.map((paneIndex) => {
         const pane = paneLayouts[paneIndex] ?? createPaneLayoutItem();
         const sessionId = splitSlots[paneIndex] ?? null;
-        const hostAlias = sessionId ? sessions.find((session) => session.id === sessionId)?.host ?? null : null;
+        const paneSession = sessionId ? sessionById.get(sessionId) ?? null : null;
+        if (!saveLayoutWithHosts || !paneSession) {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+          };
+        }
+        if (paneSession.kind === "sshSaved") {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: paneSession.hostAlias,
+            sessionKind: "sshSaved" as const,
+          };
+        }
+        if (paneSession.kind === "local") {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+            sessionKind: "local" as const,
+          };
+        }
         return {
           width: pane.width,
           height: pane.height,
-          hostAlias: saveLayoutWithHosts ? hostAlias : null,
+          hostAlias: null,
+          sessionKind: "sshQuick" as const,
+          quickSsh: { ...paneSession.request },
         };
       }),
       splitTree: serializeSplitTree(splitTree),
@@ -1987,16 +3674,51 @@ export function App() {
       const pane = selectedLayoutProfile.panes[index];
       const paneIndex = profilePaneOrder[index] ?? index;
       let sessionId: string | null = null;
-      if (selectedLayoutProfile.withHosts && pane.hostAlias) {
-        const existingSession = sessions.find(
-          (session) => session.host === pane.hostAlias && !consumedSessionIds.has(session.id),
-        );
-        if (existingSession) {
-          sessionId = existingSession.id;
-        } else if (hosts.some((host) => host.host === pane.hostAlias)) {
-          const hostConfig = hosts.find((host) => host.host === pane.hostAlias) ?? null;
-          if (hostConfig) {
-            sessionId = await connectToHost(hostConfig);
+      if (selectedLayoutProfile.withHosts) {
+        const restoreKind =
+          pane.sessionKind ?? (pane.hostAlias ? ("sshSaved" as const) : null);
+        if (restoreKind === "sshSaved" && pane.hostAlias) {
+          const existingSession = sessions.find(
+            (session) =>
+              session.kind === "sshSaved" &&
+              session.hostAlias === pane.hostAlias &&
+              !consumedSessionIds.has(session.id),
+          );
+          if (existingSession) {
+            sessionId = existingSession.id;
+          } else if (hosts.some((host) => host.host === pane.hostAlias)) {
+            const hostConfig = hosts.find((host) => host.host === pane.hostAlias) ?? null;
+            if (hostConfig) {
+              sessionId = await connectToHost(hostConfig);
+            }
+          }
+        } else if (restoreKind === "local") {
+          try {
+            const started = await startLocalSession();
+            setSessions((prev) => [...prev, { id: started.session_id, kind: "local", label: "Local terminal" }]);
+            sessionId = started.session_id;
+          } catch (e) {
+            setError(String(e));
+            sessionId = null;
+          }
+        } else if (restoreKind === "sshQuick" && pane.quickSsh && pane.quickSsh.hostName.trim().length > 0) {
+          try {
+            const req = pane.quickSsh;
+            const started = await startQuickSshSession(req);
+            const quickLabel = req.user ? `${req.user}@${req.hostName}` : req.hostName;
+            setSessions((prev) => [
+              ...prev,
+              {
+                id: started.session_id,
+                kind: "sshQuick",
+                label: `Quick: ${quickLabel}`,
+                request: { ...req },
+              },
+            ]);
+            sessionId = started.session_id;
+          } catch (e) {
+            setError(String(e));
+            sessionId = null;
           }
         }
         if (sessionId) {
@@ -2028,6 +3750,23 @@ export function App() {
     nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
   };
 
+  const applyLayoutPresetTree = (serialized: LayoutSplitTreeNode) => {
+    const parsed = parseSplitTree(serialized);
+    if (!parsed) {
+      return;
+    }
+    const nextPaneOrder = collectPaneOrder(parsed);
+    const maxPaneIndex = Math.max(0, ...nextPaneOrder);
+    const newSlots = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
+    setSplitTree(parsed);
+    setSplitSlots(newSlots);
+    setPaneLayouts(createPaneLayoutsFromSlots(newSlots));
+    setActivePaneIndex(nextPaneOrder[0] ?? 0);
+    setActiveSession("");
+    nextPaneIndexRef.current = maxPaneIndex + 1;
+    nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
+  };
+
   const deleteSelectedLayoutProfile = async () => {
     if (!selectedLayoutProfileId) {
       return;
@@ -2053,12 +3792,16 @@ export function App() {
       const paneIndex = node.paneIndex;
       const paneSessionId = splitSlots[paneIndex] ?? null;
       const paneIdentity = resolvePaneIdentity(paneIndex);
-      const isHoverTarget = hoveredHostPaneIndices.has(paneIndex);
-      const isHoverDimmed = hasHoveredHostTargets && !isHoverTarget;
+      const isHoverTarget = highlightedHostPaneIndices.has(paneIndex);
+      const isHoverDimmed = hasHighlightedHostTargets && !isHoverTarget;
       const isDropOverlayVisible =
         (draggingKind === "machine" || draggingKind === "session") &&
         dragOverPaneIndex === paneIndex &&
         activeDropZonePaneIndex === paneIndex;
+      const isSelfPaneDrop =
+        draggingKind === "session" &&
+        draggingSessionIdRef.current != null &&
+        splitSlots.findIndex((s) => s === draggingSessionIdRef.current) === paneIndex;
       const hasPaneSession = Boolean(paneSessionId);
       const canClosePane = paneOrder.length > 1;
       const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
@@ -2075,9 +3818,7 @@ export function App() {
             dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
           } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
             isHoverDimmed ? "is-host-hover-dimmed" : ""
-          } ${
-            hoveredHostAlias ? "is-host-hovering" : ""
-          }`}
+          } ${highlightedHostAlias ? "is-host-hovering" : ""}`}
           draggable={false}
           onClick={() => {
             setActivePaneIndex(paneIndex);
@@ -2086,20 +3827,26 @@ export function App() {
               requestTerminalFocus(paneSessionId);
             }
           }}
-          onDragOver={(event) => {
+          onDragOverCapture={(event) => {
             event.preventDefault();
             event.dataTransfer.dropEffect = resolveDropEffect(event);
             const bounds = event.currentTarget.getBoundingClientRect();
             setDragOverPaneIndex(paneIndex);
             setActiveDropZonePaneIndex(paneIndex);
-            setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
+            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
+            setActiveDropZone(
+              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
+            );
           }}
-          onDragEnter={(event) => {
+          onDragEnterCapture={(event) => {
             event.preventDefault();
             setDragOverPaneIndex(paneIndex);
             const bounds = event.currentTarget.getBoundingClientRect();
             setActiveDropZonePaneIndex(paneIndex);
-            setActiveDropZone(resolvePaneDropZone(event.clientX, event.clientY, bounds));
+            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
+            setActiveDropZone(
+              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
+            );
           }}
           onDragLeave={(event) => {
             if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -2109,27 +3856,41 @@ export function App() {
             setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
             setActiveDropZone(null);
           }}
-          onDrop={(event) => {
+          onDropCapture={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
             void handlePaneDrop(event, paneIndex);
           }}
           onContextMenu={(event) => {
             event.preventDefault();
+            setHostContextMenu(null);
+            const initialSplitMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
             setContextMenu({
               visible: true,
               x: event.clientX,
               y: event.clientY,
               paneIndex,
+              splitMode: initialSplitMode,
             });
           }}
         >
-          {isDropOverlayVisible && (
+          {isDropOverlayVisible && draggingKind === "machine" && !hasPaneSession && (
+            <div className="pane-drop-zones pane-drop-zones-host-empty" aria-hidden="true">
+              <span className="pane-drop-host-empty-label">Drop to open here</span>
+            </div>
+          )}
+          {isDropOverlayVisible && !(draggingKind === "machine" && !hasPaneSession) && (
             <div className="pane-drop-zones" aria-hidden="true">
               <div className={`pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`}>Top</div>
               <div className={`pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`}>Left</div>
               <div
                 className={`pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`}
               >
-                Replace
+                {draggingKind === "machine"
+                  ? "Replace"
+                  : isSelfPaneDrop
+                    ? "–"
+                    : "Swap"}
               </div>
               <div className={`pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`}>
                 Right
@@ -2145,6 +3906,24 @@ export function App() {
             className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${
               isToolbarExpanded ? "is-toolbar-expanded" : ""
             }`}
+            draggable={Boolean(paneSessionId)}
+            onDragStart={(event) => {
+              if (!paneSessionId) {
+                return;
+              }
+              draggingSessionIdRef.current = paneSessionId;
+              setDragPayload(event, { type: "session", sessionId: paneSessionId });
+              setDraggingKind("session");
+              missingDragPayloadLoggedRef.current = false;
+            }}
+            onDragEnd={() => {
+              draggingSessionIdRef.current = null;
+              setDraggingKind(null);
+              setDragOverPaneIndex(null);
+              setActiveDropZonePaneIndex(null);
+              setActiveDropZone(null);
+              missingDragPayloadLoggedRef.current = false;
+            }}
           >
             <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
               <span className="split-pane-label-title" title={paneIdentity}>
@@ -2182,7 +3961,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.left", paneIndex);
+                  void handleContextAction("layout.split.left", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-vertical split-icon-vertical-normal" aria-hidden="true" />
@@ -2194,7 +3973,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.right", paneIndex);
+                  void handleContextAction("layout.split.right", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-vertical split-icon-vertical-inverse" aria-hidden="true" />
@@ -2206,7 +3985,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.top", paneIndex);
+                  void handleContextAction("layout.split.top", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-normal" aria-hidden="true" />
@@ -2218,7 +3997,7 @@ export function App() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void handleContextAction("layout.split.bottom", paneIndex);
+                  void handleContextAction("layout.split.bottom", paneIndex, { eventLike: event });
                 }}
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
@@ -2228,8 +4007,14 @@ export function App() {
             <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
               <button
                 className={`btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
-                title={`Broadcast ${isBroadcastModeEnabled ? "ON" : "OFF"}`}
-                aria-label={`Broadcast ${isBroadcastModeEnabled ? "on" : "off"}`}
+                title={
+                  isBroadcastModeEnabled
+                    ? "Broadcast enabled — click to turn off"
+                    : "Broadcast disabled — click to send keyboard to multiple panes"
+                }
+                aria-label={
+                  isBroadcastModeEnabled ? "Turn off broadcast to multiple panes" : "Turn on broadcast to multiple panes"
+                }
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -2319,16 +4104,33 @@ export function App() {
             </div>
           </div>
           {paneSessionId ? (
-            <TerminalPane sessionId={paneSessionId} onUserInput={handleTerminalInput} fontSize={terminalFontSize} />
+            <Suspense
+              fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
+            >
+              <TerminalPane
+                sessionId={paneSessionId}
+                onUserInput={handleTerminalInput}
+                fontSize={terminalFontSize}
+                fontFamily={terminalFontFamily}
+              />
+            </Suspense>
           ) : (
             <div className="empty-pane split-empty-pane">
-              <img src={logoTransparent} alt="NoSuckShell drop hint" className="split-empty-pane-image" />
-              <p>Come on, drop that button right here - I'm waiting</p>
-              {draggingKind === "session" && (
-                <span className={`split-empty-pane-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`}>
-                  <strong>Mode:</strong> {getSessionModifierModeText()}
-                </span>
-              )}
+              <p className="split-empty-pane-copy">One click and we both get what we want</p>
+              <button
+                type="button"
+                className="split-empty-pane-logo-btn"
+                title="Open local terminal in this pane"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void connectLocalShellInPane(paneIndex);
+                }}
+              >
+                <img src={logoTransparent} alt="Open local terminal in this pane" className="split-empty-pane-image" />
+              </button>
+              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
+                Or drop that host right here - I&apos;m waiting
+              </p>
             </div>
           )}
         </div>
@@ -2364,51 +4166,103 @@ export function App() {
   };
 
   const renderHostRow = (row: HostRowViewModel, key: string) => (
-    <div key={key} className="host-row">
-      <button
-        className={`host-favorite-btn host-favorite-btn-inline ${row.metadata.favorite ? "is-active" : ""}`}
-        aria-label={`Toggle favorite for ${row.host.host}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          void toggleFavoriteForHost(row.host.host);
-        }}
+    <div
+      key={key}
+      className="host-row"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+        setHostContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          host: row.host,
+        });
+      }}
+    >
+      <div
+        className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
+          activeHost === row.host.host ? "is-active" : ""
+        } ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`}
       >
-        ★
-      </button>
-      <button
-        className={`host-item ${row.connected ? "is-connected" : "is-disconnected"}`}
-        onMouseEnter={() => setHoveredHostAlias(row.host.host)}
-        onMouseLeave={() => setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev))}
-        onDoubleClick={() => {
-          void connectToHostInNewPane(row.host);
-        }}
-        draggable
-        onDragStart={(event) => {
-          setDragPayload(event, { type: "machine", hostAlias: row.host.host });
-          setDraggingKind("machine");
-          missingDragPayloadLoggedRef.current = false;
-        }}
-        onDragEnd={() => {
-          setDraggingKind(null);
-          setDragOverPaneIndex(null);
-          missingDragPayloadLoggedRef.current = false;
-        }}
-      >
-        <span className="host-item-main">{row.host.host}</span>
-        <span className="host-user-badge">{row.displayUser}</span>
-      </button>
-      <div className="host-row-actions">
         <button
-          className={`host-gear-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
-          aria-label={`Open host settings for ${row.host.host}`}
-          title={`Open host settings for ${row.host.host}`}
+          className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
+            row.metadata.favorite ? "is-active" : ""
+          }`}
+          aria-label={`Toggle favorite for ${row.host.host}`}
           onClick={(event) => {
             event.stopPropagation();
-            toggleHostMenu(row.host);
+            void toggleFavoriteForHost(row.host.host);
           }}
         >
-          ⋯
+          ★
         </button>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`SSH host ${row.host.host}`}
+          className="host-item"
+          onClick={() => {
+            if (suppressHostClickAliasRef.current) {
+              const suppressedAlias = suppressHostClickAliasRef.current;
+              suppressHostClickAliasRef.current = null;
+              if (suppressedAlias === row.host.host) {
+                return;
+              }
+            }
+            toggleHostSelection(row.host);
+          }}
+          onMouseEnter={() => {
+            // Only enable hover affordances for connected hosts to avoid flicker on disconnected rows
+            if (row.connected) {
+              setHoveredHostAlias(row.host.host);
+            }
+          }}
+          onMouseLeave={() => {
+            if (row.connected) {
+              setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
+            }
+          }}
+          onDoubleClick={() => {
+            void connectToHostInNewPane(row.host);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              if (activeHost !== row.host.host) {
+                setActiveHost(row.host.host);
+              }
+              void connectToHostInNewPane(row.host);
+            }
+          }}
+          draggable
+          onDragStart={(event) => {
+            suppressHostClickAliasRef.current = row.host.host;
+            setDragPayload(event, { type: "machine", hostAlias: row.host.host });
+            setDraggingKind("machine");
+            missingDragPayloadLoggedRef.current = false;
+          }}
+          onDragEnd={() => {
+            setDraggingKind(null);
+            setDragOverPaneIndex(null);
+            missingDragPayloadLoggedRef.current = false;
+          }}
+        >
+          <span className="host-item-main">{row.host.host}</span>
+          <span className="host-user-badge">{row.displayUser}</span>
+        </div>
+        <div className="host-row-actions">
+          <button
+            className={`host-settings-inline-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
+            aria-label={`Open host settings for ${row.host.host}`}
+            title={`Open host settings for ${row.host.host}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleHostMenu(row.host);
+            }}
+          >
+            ⋮
+          </button>
+        </div>
       </div>
       <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
         {openHostMenuHostAlias === row.host.host && (
@@ -2486,17 +4340,40 @@ export function App() {
   const appShellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
+    "--shell-grid-gap": isSidebarOpen ? "var(--space-2)" : "var(--space-1)",
+    "--sidebar-resize-track-width": isSidebarOpen ? "8px" : "0px",
   } as CSSProperties;
+  const contextMenuPaneSessionId =
+    contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
+  const workspaceSendTargets =
+    contextMenuPaneSessionId && workspaceTabs.length > 1
+      ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
+      : [];
+  const workspaceSendPlaceholder =
+    Boolean(contextMenuPaneSessionId) && workspaceTabs.length === 1;
 
   return (
     <main
       className={`app-shell ${isSidebarResizing ? "is-resizing" : ""} ${
         isSidebarOpen ? "is-sidebar-open" : "is-sidebar-hidden"
-      } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}`}
+      } ${isSidebarPinned ? "is-sidebar-pinned" : "is-sidebar-unpinned"}${
+        layoutMode === "wide" ? " app-shell--layout-wide" : ""
+      }${layoutMode === "compact" ? " app-shell--layout-compact" : ""}${
+        isStackedShell ? " app-shell--stacked-mobile" : ""
+      }${isStackedShell && mobileShellTab === "hosts" ? " app-shell--mobile-panel-hosts" : ""}${
+        isStackedShell && mobileShellTab === "terminal" ? " app-shell--mobile-panel-terminal" : ""
+      }`}
       data-density={densityProfile}
       data-list-tone={listTonePreset}
       data-frame-mode={frameModePreset}
+      data-ui-font={uiFontPreset}
       style={appShellStyle}
+      onContextMenuCapture={(event) => {
+        if (allowNativeBrowserContextMenu(event.target)) {
+          return;
+        }
+        event.preventDefault();
+      }}
     >
       <button
         type="button"
@@ -2517,73 +4394,49 @@ export function App() {
         onMouseLeave={maybeHideSidebar}
       >
         <header className="brand">
-          <div className="brand-logo-card">
-            <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
-          </div>
-          <div className="brand-utility-stack">
-            <div className="brand-utility-row">
-              <button
-                className={`btn sidebar-pin-btn sidebar-header-icon-btn mono-header-btn ${isSidebarPinned ? "is-active" : ""}`}
-                aria-pressed={isSidebarPinned}
-                aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
-                title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
-                onClick={toggleSidebarPinned}
-              >
-                <svg className={`header-icon-svg pin-icon-svg ${isSidebarPinned ? "is-active" : ""}`} viewBox="0 0 24 24" aria-hidden="true">
-                  {isSidebarPinned ? (
-                    <>
-                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
-                      <path d="M12 14.4v7.1" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M5 4.5h14l-2 6.2 3.8 3.8H3.2l3.8-3.8L5 4.5Z" />
-                      <path d="M12 14.4v7.1" />
-                      <path d="M4.3 4.3l15.4 15.4" />
-                    </>
-                  )}
-                </svg>
-              </button>
-              <button
-                className="app-gear-btn sidebar-header-icon-btn mono-header-btn"
-                aria-label="Open app settings"
-                title="Open app settings"
-                onClick={() => setIsAppSettingsOpen((prev) => !prev)}
-              >
-                <svg className="header-icon-svg settings-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3.2" />
-                  <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6Z" />
-                </svg>
-              </button>
+          <div
+            className={`brand-bar${isQuickAddMenuOpen ? " is-quick-add-open" : ""}`}
+            ref={quickAddMenuRef}
+          >
+            <div className="brand-logo-area">
+              <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
             </div>
-            <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap" ref={quickAddMenuRef}>
-              <button
-                className="btn host-plus-btn"
-                aria-label="Open add menu"
-                title="Add host"
-                onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
-              >
-                <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 6v12M6 12h12" />
-                </svg>
-              </button>
-              {isQuickAddMenuOpen && (
-                <div className="quick-add-menu" role="menu">
-                  <button className="quick-add-menu-item" onClick={openAddHostModal}>
-                    Add host
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add group
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add user
-                  </button>
-                  <button className="quick-add-menu-item" disabled>
-                    Add key
-                  </button>
-                </div>
-              )}
+            <div className="brand-add-column">
+              <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-wrap">
+                <button
+                  className="btn host-plus-btn"
+                  aria-label="Open add menu"
+                  title="Add host"
+                  onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
+                >
+                  <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 6v12M6 12h12" />
+                  </svg>
+                </button>
+              </div>
             </div>
+            {isQuickAddMenuOpen && (
+              <div className="quick-add-menu" role="menu">
+                <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane(activePaneIndex)}>
+                  New local terminal
+                </button>
+                <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
+                  Quick connect terminal
+                </button>
+                <button className="quick-add-menu-item" onClick={openAddHostModal}>
+                  Add host
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add group
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add user
+                </button>
+                <button className="quick-add-menu-item" disabled>
+                  Add key
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -2690,547 +4543,261 @@ export function App() {
       />
 
       <section className="right-dock panel">
+        <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
+          {workspaceTabs.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              role="tab"
+              aria-selected={workspace.id === activeWorkspaceId}
+              className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
+              onClick={() => switchWorkspace(workspace.id)}
+              onDragOver={(event) => {
+                const payload = parseDragPayload(event);
+                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                if (shouldReject) {
+                  return;
+                }
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                const payload = parseDragPayload(event);
+                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
+                if (shouldReject) {
+                  return;
+                }
+                event.preventDefault();
+                sendSessionToWorkspace(payload.sessionId, workspace.id);
+              }}
+            >
+              {workspace.name}
+            </button>
+          ))}
+          <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
+            + Workspace
+          </button>
+          {workspaceTabs.length > 1 && (
+            <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
+              Remove current
+            </button>
+          )}
+        </div>
         <div className="sessions-workspace">
           <div className="sessions-zone">
-            {draggingKind === "machine" && (
-              <div className={`session-dnd-mode-hint ${sessionDropMode === "move" ? "is-move" : "is-spawn"}`} role="status" aria-live="polite">
-                <span className="session-dnd-mode-key">Host drop mode</span>
-                <span className="session-dnd-mode-text">
-                  {sessionDropMode === "move" ? "Move existing host session" : "Spawn new session from host"}
-                </span>
-              </div>
-            )}
-
             <div className="session-pane-canvas">
               <div
-                className={`terminal-grid ${splitResizeState ? "is-pane-resizing is-pane-resizing-${splitResizeState.axis}" : ""}`}
+                className={`terminal-grid ${splitResizeState ? `is-pane-resizing is-pane-resizing-${splitResizeState.axis}` : ""}${
+                  isStackedShell && mobileShellTab === "terminal" ? " is-mobile-terminal-pager" : ""
+                }`}
               >
-                {renderSplitNode(splitTree)}
+                {isStackedShell && mobileShellTab === "terminal" ? (
+                  <div className="mobile-terminal-pager">
+                    {paneOrder.length > 1 ? (
+                      <div className="mobile-terminal-pager-controls" role="toolbar" aria-label="Terminal pager">
+                        <button
+                          type="button"
+                          className="btn mobile-terminal-pager-nav"
+                          onClick={() => nudgeMobilePager(-1)}
+                          aria-label="Previous terminal"
+                        >
+                          ‹
+                        </button>
+                        <span className="mobile-terminal-pager-status" aria-live="polite">
+                          {(() => {
+                            const pos = paneOrder.indexOf(activePaneIndex);
+                            return `${pos >= 0 ? pos + 1 : 1} / ${paneOrder.length}`;
+                          })()}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn mobile-terminal-pager-nav"
+                          onClick={() => nudgeMobilePager(1)}
+                          aria-label="Next terminal"
+                        >
+                          ›
+                        </button>
+                      </div>
+                    ) : null}
+                    <div
+                      ref={mobilePagerRef}
+                      className="mobile-terminal-pager-viewport"
+                      onScroll={handleMobilePagerScroll}
+                    >
+                      {paneOrder.map((paneIndex) => (
+                        <div key={paneIndex} className="mobile-terminal-slide">
+                          {renderSplitNode(createLeafNode(paneIndex))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  renderSplitNode(splitTree)
+                )}
               </div>
             </div>
             <div className="sessions-footer" role="status">
               <div className="sessions-footer-meta">
                 <div className="footer-layout-controls">
                   <button
-                    className={`btn footer-layout-btn footer-action-btn ${
-                      pendingCloseAllIntent === "close" ? "btn-danger-confirm" : "btn-danger"
-                    }`}
-                    onClick={() => void handleCloseAllIntent(false)}
-                    disabled={sessions.length === 0}
-                    aria-label={pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions"}
-                    title={pendingCloseAllIntent === "close" ? "Confirm close all sessions" : "Close all sessions"}
-                  >
-                    {pendingCloseAllIntent === "close" ? "Confirm close all" : "Close all"}
-                  </button>
-                  <button
-                    className={`btn footer-layout-btn footer-action-btn ${
-                      pendingCloseAllIntent === "reset" ? "btn-danger-confirm" : "btn-danger"
-                    }`}
-                    onClick={() => void handleCloseAllIntent(true)}
-                    disabled={sessions.length === 0}
-                    aria-label={
-                      pendingCloseAllIntent === "reset"
-                        ? "Confirm close all sessions and reset layout"
-                        : "Close all sessions and reset layout"
-                    }
-                    title={
-                      pendingCloseAllIntent === "reset"
-                        ? "Confirm close all sessions and reset layout"
-                        : "Close all sessions and reset layout"
-                    }
-                  >
-                    {pendingCloseAllIntent === "reset" ? "Confirm close+reset" : "Close + reset"}
-                  </button>
-                  <div className="session-drop-mode-toggle" role="group" aria-label="Host drop mode">
-                    <button
-                      type="button"
-                      className={`btn session-drop-mode-btn ${sessionDropMode === "spawn" ? "is-active" : ""}`}
-                      aria-pressed={sessionDropMode === "spawn"}
-                      onClick={() => setSessionDropMode("spawn")}
-                      title="Host drop opens a new session"
-                    >
-                      Spawn
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn session-drop-mode-btn ${sessionDropMode === "move" ? "is-active" : ""}`}
-                      aria-pressed={sessionDropMode === "move"}
-                      onClick={() => setSessionDropMode("move")}
-                      title="Host drop moves an existing session"
-                    >
-                      Move
-                    </button>
-                  </div>
-                  <select
-                    className="input split-profile-select footer-layout-select"
-                    value={selectedLayoutProfileId}
-                    onChange={(event) => {
-                      setSelectedLayoutProfileId(event.target.value);
-                      setPendingLayoutProfileDeleteId("");
-                    }}
-                    aria-label="Select layout profile"
-                  >
-                    <option value="">Select profile</option>
-                    {layoutProfiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {profile.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn footer-layout-btn footer-icon-btn"
-                    onClick={() => void loadSelectedLayoutProfile()}
-                    disabled={!selectedLayoutProfileId}
-                    aria-label="Load selected layout profile"
-                    title="Load selected layout profile"
-                  >
-                    ✓
-                  </button>
-                  <button
                     type="button"
-                    className={`btn footer-layout-btn footer-icon-btn footer-layout-toggle ${isFooterLayoutPanelOpen ? "is-open" : ""}`}
-                    onClick={toggleFooterLayoutPanel}
-                    aria-expanded={isFooterLayoutPanelOpen}
-                    aria-controls="footer-layout-advanced-controls"
-                    aria-label={isFooterLayoutPanelOpen ? "Collapse layout actions" : "Expand layout actions"}
-                    title={isFooterLayoutPanelOpen ? "Collapse layout actions" : "Expand layout actions"}
+                    className="btn btn-primary footer-layout-command-btn"
+                    onClick={() => setIsLayoutCommandCenterOpen(true)}
+                    aria-label="Open layout command center"
+                    title="Layouts, templates, session cleanup"
                   >
-                    {isFooterLayoutPanelOpen ? "⌃" : "⌄"}
+                    Layouts
                   </button>
-                </div>
-                <div
-                  id="footer-layout-advanced-controls"
-                  className={`footer-layout-slide ${isFooterLayoutPanelOpen ? "is-open" : ""}`}
-                  aria-hidden={!isFooterLayoutPanelOpen}
-                >
-                  <div className="layout-profile-controls footer-layout-advanced">
-                    <input
-                      className="input split-profile-name"
-                      value={layoutProfileName}
-                      onChange={(event) => setLayoutProfileName(event.target.value)}
-                      placeholder="Layout profile name"
-                    />
-                    <button
-                      type="button"
-                      className={`btn split-profile-toggle-btn ${saveLayoutWithHosts ? "is-active" : ""}`}
-                      onClick={() => setSaveLayoutWithHosts((prev) => !prev)}
-                      aria-pressed={saveLayoutWithHosts}
-                      title={`With hosts ${saveLayoutWithHosts ? "on" : "off"}`}
-                    >
-                      {saveLayoutWithHosts ? "with hosts: on" : "with hosts: off"}
-                    </button>
-                    <button
-                      className="btn footer-layout-btn footer-action-btn"
-                      onClick={() => void saveCurrentLayoutProfile()}
-                      aria-label="Save current layout profile"
-                      title="Save current layout profile"
-                    >
-                      Save
-                    </button>
-                    <button
-                      className={`btn btn-danger footer-layout-btn footer-action-btn ${
-                        pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
-                          ? "btn-danger-confirm"
-                          : ""
-                      }`}
-                      onClick={() => void handleDeleteSelectedLayoutProfileIntent()}
-                      disabled={!selectedLayoutProfileId}
-                      aria-label={
-                        pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
-                          ? "Confirm delete selected layout profile"
-                          : "Delete selected layout profile"
-                      }
-                      title={
-                        pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
-                          ? "Confirm delete selected layout profile"
-                          : "Delete selected layout profile"
-                      }
-                    >
-                      {pendingLayoutProfileDeleteId === selectedLayoutProfileId && selectedLayoutProfileId
-                        ? "Confirm"
-                        : "Delete"}
-                    </button>
-                  </div>
-                </div>
-                {!isFooterLayoutPanelOpen && (
                   <div className="sessions-footer-status">
                     <span className={`context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`}>
-                      Broadcast: {isBroadcastModeEnabled ? "ON" : "OFF"} ({broadcastTargets.size})
+                      Broadcast: {isBroadcastModeEnabled ? "enabled" : "disabled"} ({broadcastTargets.size} targets)
                     </span>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
       {isAppSettingsOpen && (
-        <div className="app-settings-overlay" onClick={() => setIsAppSettingsOpen(false)}>
-          <section className="app-settings-modal panel" onClick={(event) => event.stopPropagation()}>
-            <header className="panel-header">
-              <h2>App settings</h2>
-              <button className="btn" onClick={() => setIsAppSettingsOpen(false)}>
-                Close
-              </button>
-            </header>
-            <div className="app-settings-tabs">
-              {appSettingsTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  className={`tab-pill ${activeAppSettingsTab === tab.id ? "is-active" : ""}`}
-                  onClick={() => setActiveAppSettingsTab(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="app-settings-content">
-              {activeAppSettingsTab === "general" && (
-                <div className="host-form-grid">
-                  <label className="field field-span-2">
-                    <span className="field-label">Default login user</span>
-                    <input
-                      className="input"
-                      value={metadataStore.defaultUser}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setMetadataStore((prev) => ({ ...prev, defaultUser: nextValue }));
-                      }}
-                      onBlur={(event) => {
-                        void applyDefaultUser(event.target.value).catch((e: unknown) => setError(String(e)));
-                      }}
-                      placeholder="ubuntu"
-                    />
-                    <span className="field-help">Used when a host does not define a user.</span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Density profile</span>
-                    <select
-                      className="input density-profile-select"
-                      value={densityProfile}
-                      onChange={(event) => setDensityProfile(event.target.value as DensityProfile)}
-                    >
-                      <option value="aggressive">Aggressive compact</option>
-                      <option value="balanced">Balanced compact</option>
-                      <option value="safe">Safe compact</option>
-                    </select>
-                    <span className="field-help">Controls spacing and font density across the entire app.</span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Terminal font offset</span>
-                    <input
-                      className="input"
-                      type="number"
-                      value={terminalFontOffset}
-                      min={TERMINAL_FONT_OFFSET_MIN}
-                      max={TERMINAL_FONT_OFFSET_MAX}
-                      onChange={(event) => {
-                        const parsed = Number(event.target.value);
-                        if (!Number.isFinite(parsed)) {
-                          return;
-                        }
-                        setTerminalFontOffset(
-                          Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
-                        );
-                      }}
-                    />
-                    <span className="field-help">
-                      Final terminal size: {terminalFontSize}px (profile base + offset, saved separately).
-                    </span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">List tone intensity</span>
-                    <select
-                      className="input density-profile-select"
-                      value={listTonePreset}
-                      onChange={(event) => setListTonePreset(event.target.value as ListTonePreset)}
-                    >
-                      <option value="subtle">Subtle</option>
-                      <option value="strong">Strong</option>
-                    </select>
-                    <span className="field-help">
-                      Controls color intensity for hosts, sessions, chips and context pills.
-                    </span>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Frame mode</span>
-                    <select
-                      className="input density-profile-select"
-                      value={frameModePreset}
-                      onChange={(event) => setFrameModePreset(event.target.value as FrameModePreset)}
-                    >
-                      <option value="cleaner">Cleaner (lighter hover frames)</option>
-                      <option value="balanced">Balanced</option>
-                      <option value="clearer">Clearer (stronger focus/drag frames)</option>
-                    </select>
-                    <span className="field-help">
-                      Controls how strongly frames appear in hover, focus and drag states.
-                    </span>
-                  </label>
-                </div>
-              )}
-              {activeAppSettingsTab === "views" && (
-                <section className="backup-panel view-manager-panel">
-                  <div className="field">
-                    <span className="field-label">Saved custom views</span>
-                    <div className="view-manager-list">
-                      {sortedViewProfiles.length === 0 ? (
-                        <p className="muted-copy">No custom views yet.</p>
-                      ) : (
-                        sortedViewProfiles.map((profile) => (
-                          <button
-                            key={profile.id}
-                            className={`btn ${selectedViewProfileIdInSettings === profile.id ? "btn-primary" : ""}`}
-                            onClick={() => selectViewProfileForSettings(profile.id)}
-                          >
-                            {profile.name}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                  <div className="action-row">
-                    <button className="btn" onClick={createNewViewDraft}>
-                      New view
-                    </button>
-                    <button className="btn" onClick={() => void reorderView("up")} disabled={!selectedViewProfileIdInSettings}>
-                      Move up
-                    </button>
-                    <button className="btn" onClick={() => void reorderView("down")} disabled={!selectedViewProfileIdInSettings}>
-                      Move down
-                    </button>
-                    <button className="btn btn-danger" onClick={() => void deleteCurrentViewDraft()} disabled={!selectedViewProfileIdInSettings}>
-                      Delete
-                    </button>
-                  </div>
-                  <label className="field">
-                    <span className="field-label">View name</span>
-                    <input
-                      className="input"
-                      value={viewDraft.name}
-                      onChange={(event) => setViewDraft((prev) => ({ ...prev, name: event.target.value }))}
-                      placeholder="Production hosts"
-                    />
-                  </label>
-                  <div className="filter-row">
-                    <label className="field">
-                      <span className="field-label">Rule mode</span>
-                      <select
-                        className="input"
-                        value={viewDraft.filterGroup.mode}
-                        onChange={(event) =>
-                          setViewDraft((prev) => ({
-                            ...prev,
-                            filterGroup: { ...prev.filterGroup, mode: event.target.value as "and" | "or" },
-                          }))
-                        }
-                      >
-                        <option value="and">All rules (AND)</option>
-                        <option value="or">Any rule (OR)</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div className="view-rule-list">
-                    {viewDraft.filterGroup.rules.map((rule) => (
-                      <div className="filter-row" key={rule.id}>
-                        <select
-                          className="input"
-                          value={rule.field}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, field: event.target.value as ViewFilterField } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                        >
-                          <option value="host">Alias</option>
-                          <option value="hostName">Hostname</option>
-                          <option value="user">User</option>
-                          <option value="port">Port</option>
-                          <option value="status">Status</option>
-                          <option value="favorite">Favorite</option>
-                          <option value="recent">Recent</option>
-                          <option value="tag">Tag</option>
-                        </select>
-                        <select
-                          className="input"
-                          value={rule.operator}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, operator: event.target.value as ViewFilterOperator } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                        >
-                          <option value="contains">contains</option>
-                          <option value="equals">equals</option>
-                          <option value="not_equals">not equals</option>
-                          <option value="starts_with">starts with</option>
-                          <option value="ends_with">ends with</option>
-                          <option value="greater_than">greater than</option>
-                          <option value="less_than">less than</option>
-                          <option value="in">in (comma separated)</option>
-                        </select>
-                        <input
-                          className="input"
-                          value={rule.value}
-                          onChange={(event) =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.map((entry) =>
-                                  entry.id === rule.id ? { ...entry, value: event.target.value } : entry,
-                                ),
-                              },
-                            }))
-                          }
-                          placeholder="value"
-                        />
-                        <button
-                          className="btn btn-danger"
-                          onClick={() =>
-                            setViewDraft((prev) => ({
-                              ...prev,
-                              filterGroup: {
-                                ...prev.filterGroup,
-                                rules: prev.filterGroup.rules.filter((entry) => entry.id !== rule.id),
-                              },
-                            }))
-                          }
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="action-row">
-                    <button
-                      className="btn"
-                      onClick={() =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          filterGroup: { ...prev.filterGroup, rules: [...prev.filterGroup.rules, createViewRule()] },
-                        }))
-                      }
-                    >
-                      Add rule
-                    </button>
-                  </div>
-                  <div className="filter-row">
-                    <select
-                      className="input"
-                      value={viewDraft.sortRules[0]?.field ?? "host"}
-                      onChange={(event) =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          sortRules: [{ field: event.target.value as ViewSortField, direction: prev.sortRules[0]?.direction ?? "asc" }],
-                        }))
-                      }
-                    >
-                      <option value="host">Sort by alias</option>
-                      <option value="hostName">Sort by hostname</option>
-                      <option value="user">Sort by user</option>
-                      <option value="port">Sort by port</option>
-                      <option value="lastUsedAt">Sort by last used</option>
-                      <option value="status">Sort by status</option>
-                      <option value="favorite">Sort by favorite</option>
-                    </select>
-                    <select
-                      className="input"
-                      value={viewDraft.sortRules[0]?.direction ?? "asc"}
-                      onChange={(event) =>
-                        setViewDraft((prev) => ({
-                          ...prev,
-                          sortRules: [{ field: prev.sortRules[0]?.field ?? "host", direction: event.target.value as "asc" | "desc" }],
-                        }))
-                      }
-                    >
-                      <option value="asc">Ascending</option>
-                      <option value="desc">Descending</option>
-                    </select>
-                    <button className="btn btn-primary" onClick={() => void saveCurrentViewDraft()}>
-                      Save view
-                    </button>
-                  </div>
-                  <p className="muted-copy">
-                    Built-in views are fixed (`Alle`, `Favoriten`). Custom views are persisted and shown as sidebar tabs.
-                  </p>
-                </section>
-              )}
-              {activeAppSettingsTab === "backup" && (
-                <div className="backup-panel">
-                  <label className="field">
-                    <span className="field-label">Export path</span>
-                    <input
-                      className="input"
-                      value={backupExportPath}
-                      onChange={(event) => setBackupExportPath(event.target.value)}
-                      placeholder={DEFAULT_BACKUP_PATH}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Export password</span>
-                    <input
-                      className="input"
-                      type="password"
-                      value={backupExportPassword}
-                      onChange={(event) => setBackupExportPassword(event.target.value)}
-                      placeholder="Enter backup password"
-                      autoComplete="new-password"
-                    />
-                  </label>
-                  <button className="btn" onClick={() => void handleExportBackup()} disabled={!backupExportPassword}>
-                    Export backup
-                  </button>
-                  <label className="field">
-                    <span className="field-label">Import path</span>
-                    <input
-                      className="input"
-                      value={backupImportPath}
-                      onChange={(event) => setBackupImportPath(event.target.value)}
-                      placeholder={DEFAULT_BACKUP_PATH}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Import password</span>
-                    <input
-                      className="input"
-                      type="password"
-                      value={backupImportPassword}
-                      onChange={(event) => setBackupImportPassword(event.target.value)}
-                      placeholder="Enter backup password"
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  <button className="btn" onClick={() => void handleImportBackup()} disabled={!backupImportPassword}>
-                    Import backup
-                  </button>
-                  <p className="muted-copy">Backups are always encrypted. Passwords are never stored.</p>
-                  {backupMessage && <p className="muted-copy">{backupMessage}</p>}
-                </div>
-              )}
-              {activeAppSettingsTab === "extras" && <p className="muted-copy">Extras settings placeholder.</p>}
-              {activeAppSettingsTab === "help" && <p className="muted-copy">Help settings placeholder.</p>}
-              {activeAppSettingsTab === "about" && (
-                <section className="about-hero">
-                  <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
-                  <p className="muted-copy">NoSuckShell helps you manage SSH hosts and sessions in one clean desktop workspace.</p>
-                </section>
-              )}
-            </div>
-          </section>
-        </div>
+        <AppSettingsPanel
+          settingsOpenMode={settingsOpenMode}
+          setSettingsOpenMode={setSettingsOpenMode}
+          onCloseSettings={() => setIsAppSettingsOpen(false)}
+          settingsSectionRef={settingsModalRef}
+          onSettingsHeaderPointerDown={handleSettingsHeaderPointerDown}
+          isSettingsDragging={isSettingsDragging}
+          settingsModalPosition={settingsModalPosition}
+          activeAppSettingsTab={activeAppSettingsTab}
+          setActiveAppSettingsTab={setActiveAppSettingsTab}
+          densityProfile={densityProfile}
+          setDensityProfile={setDensityProfile}
+          uiFontPreset={uiFontPreset}
+          setUiFontPreset={setUiFontPreset}
+          terminalFontPreset={terminalFontPreset}
+          setTerminalFontPreset={setTerminalFontPreset}
+          terminalFontOffset={terminalFontOffset}
+          setTerminalFontOffset={setTerminalFontOffset}
+          terminalFontSize={terminalFontSize}
+          listTonePreset={listTonePreset}
+          setListTonePreset={setListTonePreset}
+          frameModePreset={frameModePreset}
+          setFrameModePreset={setFrameModePreset}
+          layoutMode={layoutMode}
+          setLayoutMode={setLayoutMode}
+          splitRatioPreset={splitRatioPreset}
+          setSplitRatioPreset={setSplitRatioPreset}
+          autoArrangeMode={autoArrangeMode}
+          setAutoArrangeMode={setAutoArrangeMode}
+          isBroadcastModeEnabled={isBroadcastModeEnabled}
+          setBroadcastMode={setBroadcastMode}
+          isSidebarPinned={isSidebarPinned}
+          setSidebarPinned={setIsSidebarPinned}
+          metadataStore={metadataStore}
+          setMetadataStore={setMetadataStore}
+          applyDefaultUser={applyDefaultUser}
+          setError={setError}
+          quickConnectMode={quickConnectMode}
+          setQuickConnectMode={setQuickConnectMode}
+          quickConnectAutoTrust={quickConnectAutoTrust}
+          setQuickConnectAutoTrust={setQuickConnectAutoTrust}
+          sortedViewProfiles={sortedViewProfiles}
+          selectedViewProfileIdInSettings={selectedViewProfileIdInSettings}
+          selectViewProfileForSettings={selectViewProfileForSettings}
+          createNewViewDraft={createNewViewDraft}
+          reorderView={reorderView}
+          deleteCurrentViewDraft={deleteCurrentViewDraft}
+          viewDraft={viewDraft}
+          setViewDraft={setViewDraft}
+          createViewRule={createViewRule}
+          saveCurrentViewDraft={saveCurrentViewDraft}
+          defaultBackupPath={DEFAULT_BACKUP_PATH}
+          backupExportPath={backupExportPath}
+          setBackupExportPath={setBackupExportPath}
+          backupExportPassword={backupExportPassword}
+          setBackupExportPassword={setBackupExportPassword}
+          handleExportBackup={handleExportBackup}
+          backupImportPath={backupImportPath}
+          setBackupImportPath={setBackupImportPath}
+          backupImportPassword={backupImportPassword}
+          setBackupImportPassword={setBackupImportPassword}
+          handleImportBackup={handleImportBackup}
+          backupMessage={backupMessage}
+          storePassphrase={storePassphrase}
+          setStorePassphrase={setStorePassphrase}
+          storeUsers={storeUsers}
+          storeGroups={storeGroups}
+          storeTags={storeTags}
+          storeKeys={storeKeys}
+          hosts={hosts}
+          storeUserDraft={storeUserDraft}
+          setStoreUserDraft={setStoreUserDraft}
+          addStoreUser={addStoreUser}
+          storeGroupDraft={storeGroupDraft}
+          setStoreGroupDraft={setStoreGroupDraft}
+          addStoreGroup={addStoreGroup}
+          storeTagDraft={storeTagDraft}
+          setStoreTagDraft={setStoreTagDraft}
+          addStoreTag={addStoreTag}
+          storePathKeyNameDraft={storePathKeyNameDraft}
+          setStorePathKeyNameDraft={setStorePathKeyNameDraft}
+          storePathKeyPathDraft={storePathKeyPathDraft}
+          setStorePathKeyPathDraft={setStorePathKeyPathDraft}
+          addStorePathKey={addStorePathKey}
+          storeEncryptedKeyNameDraft={storeEncryptedKeyNameDraft}
+          setStoreEncryptedKeyNameDraft={setStoreEncryptedKeyNameDraft}
+          storeEncryptedPublicKeyDraft={storeEncryptedPublicKeyDraft}
+          setStoreEncryptedPublicKeyDraft={setStoreEncryptedPublicKeyDraft}
+          storeEncryptedPrivateKeyDraft={storeEncryptedPrivateKeyDraft}
+          setStoreEncryptedPrivateKeyDraft={setStoreEncryptedPrivateKeyDraft}
+          addStoreEncryptedKey={addStoreEncryptedKey}
+          unlockStoreKey={unlockStoreKey}
+          removeStoreKey={removeStoreKey}
+          storeSelectedHostForBinding={storeSelectedHostForBinding}
+          setStoreSelectedHostForBinding={setStoreSelectedHostForBinding}
+          storeBindingDraft={storeBindingDraft}
+          setStoreBindingDraft={setStoreBindingDraft}
+          saveHostBindingDraft={saveHostBindingDraft}
+        />
+      )}
+      {isLayoutCommandCenterOpen && (
+        <Suspense fallback={null}>
+          <LayoutCommandCenter
+            open={isLayoutCommandCenterOpen}
+            onClose={() => setIsLayoutCommandCenterOpen(false)}
+            layoutPresets={LAYOUT_PRESET_DEFINITIONS}
+            profiles={layoutProfiles}
+            selectedProfileId={selectedLayoutProfileId}
+            onSelectProfileId={(id) => {
+              setSelectedLayoutProfileId(id);
+              setPendingLayoutProfileDeleteId("");
+              const nextProfile = layoutProfiles.find((profile) => profile.id === id) ?? null;
+              if (nextProfile) {
+                setLayoutProfileName(nextProfile.name);
+              }
+            }}
+            profileName={layoutProfileName}
+            onProfileNameChange={setLayoutProfileName}
+            restoreSessions={saveLayoutWithHosts}
+            onRestoreSessionsChange={setSaveLayoutWithHosts}
+            onApplyProfile={() => {
+              void loadSelectedLayoutProfile().then(() => setIsLayoutCommandCenterOpen(false));
+            }}
+            onSaveProfile={() => void saveCurrentLayoutProfile()}
+            pendingDeleteProfileId={pendingLayoutProfileDeleteId}
+            onDeleteProfileIntent={() => void handleDeleteSelectedLayoutProfileIntent()}
+            onApplyPreset={(tree) => {
+              applyLayoutPresetTree(tree);
+              setIsLayoutCommandCenterOpen(false);
+            }}
+            onCloseAllIntent={(withLayoutReset) => void handleCloseAllIntent(withLayoutReset)}
+            pendingCloseAllIntent={pendingCloseAllIntent}
+            previewTree={layoutCommandCenterPreviewTree}
+            applyProfileDisabled={!selectedLayoutProfileId}
+            saveDisabled={false}
+            closeActionsDisabled={sessions.length === 0}
+          />
+        </Suspense>
       )}
       {isAddHostModalOpen && (
         <div className="app-settings-overlay" onClick={closeAddHostModal}>
@@ -3256,9 +4823,230 @@ export function App() {
           </section>
         </div>
       )}
+      {isQuickConnectModalOpen && (
+        <div className="app-settings-overlay" onClick={closeQuickConnectModal}>
+          <section
+            className="app-settings-modal panel add-host-modal"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={handleQuickConnectModalKeyDown}
+          >
+            <header className="panel-header">
+              <h2>Quick connect</h2>
+              <button className="btn" onClick={closeQuickConnectModal}>
+                Cancel
+              </button>
+            </header>
+            <div className="app-settings-content">
+              <p className="muted-copy quick-connect-shortcuts">
+                Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users.
+              </p>
+              {quickConnectMode === "wizard" && (
+                <div className="quick-connect-mode-wrap">
+                  <p className="field-help">
+                    Step {quickConnectWizardStep}/2 -{" "}
+                    {quickConnectWizardStep === 1 ? "Provide host target" : "Choose or type user"}
+                  </p>
+                  {quickConnectWizardStep === 1 && (
+                    <label className="field">
+                      <span className="field-label">Host</span>
+                      <input
+                        className="input"
+                        value={quickConnectDraft.hostName}
+                        onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            proceedQuickConnectWizard();
+                          }
+                        }}
+                        placeholder="server.local:2222 or [2001:db8::1]:2200"
+                        autoFocus
+                      />
+                    </label>
+                  )}
+                  {quickConnectWizardStep === 2 && (
+                    <>
+                      <label className="field">
+                        <span className="field-label">User</span>
+                        <input
+                          className="input"
+                          value={quickConnectDraft.user}
+                          onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
+                          onKeyDown={handleQuickConnectUserInputKeyDown}
+                          placeholder="Default or custom user"
+                          autoFocus
+                        />
+                      </label>
+                      {quickConnectUserOptions.length > 0 && (
+                        <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                          {quickConnectUserOptions.map((user) => (
+                            <button
+                              key={user}
+                              type="button"
+                              className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
+                              onClick={() => {
+                                applyQuickConnectUser(user);
+                              }}
+                            >
+                              {user}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {quickConnectMode === "smart" && (
+                <div className="quick-connect-mode-wrap">
+                  <label className="field">
+                    <span className="field-label">Host</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.hostName}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void connectQuickSshInNewPane();
+                        }
+                      }}
+                      placeholder="example.com or 10.0.0.8:2222"
+                      autoFocus
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">User</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.user}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
+                      onKeyDown={handleQuickConnectUserInputKeyDown}
+                      placeholder="Default or custom user"
+                    />
+                  </label>
+                  {quickConnectUserOptions.length > 0 && (
+                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                      {quickConnectUserOptions.map((user) => (
+                        <button
+                          key={user}
+                          type="button"
+                          className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
+                          onClick={() => {
+                            applyQuickConnectUser(user);
+                          }}
+                        >
+                          {user}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {quickConnectMode === "command" && (
+                <div className="quick-connect-mode-wrap">
+                  <label className="field">
+                    <span className="field-label">Target command</span>
+                    <input
+                      className="input"
+                      value={quickConnectCommandInput}
+                      onChange={(event) => setQuickConnectCommandInput(event.target.value)}
+                      onKeyDown={handleQuickConnectCommandInputKeyDown}
+                      placeholder="user@host:22"
+                      autoFocus
+                    />
+                  </label>
+                  {quickConnectUserOptions.length > 0 && (
+                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
+                      {quickConnectUserOptions.map((user) => (
+                        <button
+                          key={user}
+                          type="button"
+                          className={`btn ${quickConnectCommandInput.trim().startsWith(`${user}@`) ? "btn-primary" : ""}`}
+                          onClick={() => {
+                            const targetPart = quickConnectCommandInput.includes("@")
+                              ? quickConnectCommandInput.slice(quickConnectCommandInput.indexOf("@"))
+                              : "@";
+                            setQuickConnectCommandInput(`${user}${targetPart}`);
+                          }}
+                        >
+                          {user}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="field-help">
+                    Supports `user@host`, `user@host:port`, and `user@[2001:db8::1]:2200`.
+                  </p>
+                </div>
+              )}
+              {(quickConnectMode !== "wizard" || quickConnectWizardStep === 2) && (
+                <>
+                  <label className="field">
+                    <span className="field-label">Identity file</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.identityFile}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, identityFile: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Proxy jump</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.proxyJump}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyJump: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Proxy command</span>
+                    <input
+                      className="input"
+                      value={quickConnectDraft.proxyCommand}
+                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyCommand: event.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </>
+              )}
+              <div className="action-row">
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
+                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
+                    Back
+                  </button>
+                )}
+                <button className="btn" onClick={closeQuickConnectModal}>
+                  Cancel
+                </button>
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 1 ? (
+                  <button className="btn btn-primary" onClick={proceedQuickConnectWizard}>
+                    Next
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => void connectQuickSshInNewPane()}>
+                    Connect
+                  </button>
+                )}
+                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
+                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
+                    Back
+                  </button>
+                )}
+              </div>
+              {error && <p className="error-text">{error}</p>}
+            </div>
+          </section>
+        </div>
+      )}
       {activeTrustPrompt && (
         <div className="app-settings-overlay" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-          <section className="app-settings-modal panel trust-host-modal" onClick={(event) => event.stopPropagation()}>
+          <section
+            className="app-settings-modal panel trust-host-modal"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={handleTrustPromptKeyDown}
+          >
             <header className="panel-header">
               <h2>Trust host key</h2>
               <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
@@ -3283,7 +5071,7 @@ export function App() {
                 <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
                   Dismiss
                 </button>
-                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()}>
+                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()} autoFocus>
                   Trust host
                 </button>
               </div>
@@ -3292,23 +5080,111 @@ export function App() {
         </div>
       )}
       {contextMenu.visible && contextMenu.paneIndex !== null && (
-        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          role="menu"
+          onContextMenuCapture={(event) => {
+            event.preventDefault();
+          }}
+        >
           {buildPaneContextActions({
             paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
             canClosePane: paneOrder.length > 1,
             broadcastModeEnabled: isBroadcastModeEnabled,
             broadcastCount: broadcastTargets.size,
+            splitMode: contextMenu.splitMode,
+            freeMoveEnabled: autoArrangeMode === "free",
           }).map((action) => (
             <button
               key={action.id}
               className={`context-menu-item ${action.separatorAbove ? "separator-above" : ""}`}
               disabled={action.disabled}
-              onClick={() => void handleContextAction(action.id, contextMenu.paneIndex ?? 0)}
+              onClick={(event) =>
+                void handleContextAction(action.id, contextMenu.paneIndex ?? 0, {
+                  preferredSplitMode: contextMenu.splitMode,
+                  eventLike: event,
+                })
+              }
             >
               {action.label}
             </button>
           ))}
+          {workspaceSendTargets.map((workspace, index) => (
+            <button
+              key={`send-${workspace.id}`}
+              className={`context-menu-item ${index === 0 ? "separator-above" : ""}`}
+              onClick={() => {
+                if (!contextMenuPaneSessionId) {
+                  return;
+                }
+                sendSessionToWorkspace(contextMenuPaneSessionId, workspace.id);
+                setContextMenu((prev) => ({ ...prev, visible: false }));
+              }}
+            >
+              Send to {workspace.name}
+            </button>
+          ))}
+          {workspaceSendPlaceholder && (
+            <button type="button" className="context-menu-item separator-above" disabled>
+              Send to other workspace (add another workspace tab)
+            </button>
+          )}
         </div>
+      )}
+      {hostContextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: hostContextMenu.x, top: hostContextMenu.y }}
+          role="menu"
+          onContextMenuCapture={(event) => {
+            event.preventDefault();
+          }}
+        >
+          {workspaceTabs.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                void connectToHostInWorkspace(hostContextMenu.host, workspace.id);
+                setHostContextMenu(null);
+              }}
+            >
+              Connect in {workspace.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="context-menu-item separator-above"
+            onClick={() => {
+              openHostMenuForHost(hostContextMenu.host);
+              setHostContextMenu(null);
+            }}
+          >
+            Edit host
+          </button>
+        </div>
+      )}
+      {isStackedShell && (
+        <nav className="mobile-shell-tabbar" aria-label="Mobile workspace">
+          <button
+            type="button"
+            className={`mobile-shell-tabbar-btn ${mobileShellTab === "hosts" ? "is-active" : ""}`}
+            aria-current={mobileShellTab === "hosts" ? "page" : undefined}
+            onClick={() => setMobileShellTab("hosts")}
+          >
+            Hosts
+          </button>
+          <button
+            type="button"
+            className={`mobile-shell-tabbar-btn ${mobileShellTab === "terminal" ? "is-active" : ""}`}
+            aria-current={mobileShellTab === "terminal" ? "page" : undefined}
+            onClick={() => setMobileShellTab("terminal")}
+          >
+            Terminal
+          </button>
+        </nav>
       )}
     </main>
   );

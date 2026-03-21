@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "NoSuckShell",
-  "version": "0.1.0",
+  "version": "1.0.0-beta.1",
   "identifier": "dev.nosuckshell.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -14,7 +14,8 @@
       {
         "title": "NoSuckShell",
         "width": 1400,
-        "height": 900
+        "height": 900,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -24,6 +25,23 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "headerImage": "windows/nsis-header.bmp",
+        "sidebarImage": "windows/nsis-sidebar.bmp",
+        "installerIcon": "icons/icon.ico"
+      },
+      "wix": {
+        "bannerPath": "windows/wix-banner.bmp",
+        "dialogImagePath": "windows/wix-dialog.bmp"
+      }
+    }
   }
 }

@@ -1,0 +1,23 @@
+{
+  "name": "nosuckshell",
+  "private": true,
+  "description": "Monorepo root — desktop app lives in apps/desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d0dg3r/NoSuckShell.git"
+  },
+  "bugs": {
+    "url": "https://github.com/d0dg3r/NoSuckShell/issues"
+  },
+  "homepage": "https://github.com/d0dg3r/NoSuckShell#readme",
+  "scripts": {
+    "tauri:dev": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run tauri:dev",
+    "tauri:build": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run tauri:build",
+    "desktop:dev": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run dev",
+    "desktop:build": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run build",
+    "desktop:test": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run test",
+    "desktop:e2e": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run test:e2e",
+    "desktop:install": "npm --prefix apps/desktop install",
+    "screenshots": "npm --prefix apps/desktop run screenshots"
+  }
+}

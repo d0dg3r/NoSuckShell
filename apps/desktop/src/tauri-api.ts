@@ -1,5 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { HostConfig, HostMetadataStore, LayoutProfile, SessionStarted, ViewProfile } from "./types";
+import type {
+  EntityStore,
+  GroupObject,
+  HostBinding,
+  HostConfig,
+  HostMetadataStore,
+  LayoutProfile,
+  QuickSshSessionRequest,
+  SessionStarted,
+  SshKeyObject,
+  TagObject,
+  UserObject,
+  ViewProfile,
+} from "./types";
 
 const sendInputQueueBySession = new Map<string, Array<{ data: string; resolves: Array<() => void>; rejects: Array<(reason?: unknown) => void> }>>();
 const sendInputDrainingSessions = new Set<string>();
@@ -71,6 +84,12 @@ export const deleteHost = (hostName: string): Promise<void> =>
 export const startSession = (host: HostConfig): Promise<SessionStarted> =>
   invoke("start_session", { host });
 
+export const startLocalSession = (): Promise<SessionStarted> =>
+  invoke("start_local_session");
+
+export const startQuickSshSession = (request: QuickSshSessionRequest): Promise<SessionStarted> =>
+  invoke("start_quick_ssh_session", { request });
+
 export const sendInput = (sessionId: string, data: string): Promise<void> => {
   return new Promise<void>((resolve, reject) => {
     enqueueSessionInput(sessionId, data, resolve, reject);
@@ -122,3 +141,35 @@ export const deleteViewProfile = (profileId: string): Promise<void> =>
 
 export const reorderViewProfiles = (ids: string[]): Promise<void> =>
   invoke("reorder_view_profiles", { ids });
+
+export const listStoreObjects = (): Promise<EntityStore> =>
+  invoke("list_store_objects");
+
+export const saveStoreObjects = (store: EntityStore): Promise<void> =>
+  invoke("save_store_objects", { store });
+
+export const assignHostBinding = (hostAlias: string, binding: HostBinding): Promise<void> =>
+  invoke("assign_host_binding", { hostAlias, binding });
+
+export const listUsers = (): Promise<UserObject[]> =>
+  invoke("list_users");
+
+export const listGroups = (): Promise<GroupObject[]> =>
+  invoke("list_groups");
+
+export const listTags = (): Promise<TagObject[]> =>
+  invoke("list_tags");
+
+export const createEncryptedKey = (
+  name: string,
+  privateKeyPem: string,
+  publicKey: string,
+  passphrase?: string,
+): Promise<SshKeyObject> =>
+  invoke("create_encrypted_key", { name, privateKeyPem, publicKey, passphrase });
+
+export const unlockKeyMaterial = (keyId: string, passphrase?: string): Promise<string> =>
+  invoke("unlock_key_material", { keyId, passphrase });
+
+export const deleteKeyById = (keyId: string): Promise<void> =>
+  invoke("delete_key", { keyId });

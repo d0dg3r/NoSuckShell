@@ -5,7 +5,7 @@ This repository publishes desktop releases from Git tags via GitHub Actions.
 ## Tag convention
 
 - Final release: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v0.1.0-beta.1`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v1.0.0-beta.1`)
 - Accepted prerelease token format: dot-separated `[0-9A-Za-z-]+` parts.
 
 Validation regex in workflow:
@@ -24,6 +24,12 @@ Workflow file: `.github/workflows/release.yml`
 Trigger:
 
 - Push tag matching `v*`
+
+Pipeline order:
+
+1. **Validate tag** — SemVer format and prerelease flag.
+2. **Test (Ubuntu only)** — `npm test` (Vitest) and `cargo test` in `apps/desktop/src-tauri`. If this job fails, **no** platform builds or GitHub release are produced.
+3. **Build matrix** — only runs after tests pass.
 
 Build matrix:
 
@@ -64,12 +70,16 @@ git push origin v0.2.0
 git tag v0.3.0-rc.1
 git push origin v0.3.0-rc.1
 
-# beta prerelease
-git tag v0.1.0-beta.1
-git push origin v0.1.0-beta.1
+# beta prerelease (current planned public beta)
+git tag v1.0.0-beta.1
+git push origin v1.0.0-beta.1
 ```
 
-For this rollout, use `v0.1.0-beta.1` to publish a prerelease and verify all platform bundles in one workflow run.
+## Current beta (planned)
+
+- **Target tag:** `v1.0.0-beta.1` — push when you are ready; until then, in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` are already set to `1.0.0-beta.1` so local builds match the upcoming prerelease.
+- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `1.0.0-beta.1`.
+- The release workflow still **overwrites** those files from the tag at build time; keeping them in sync now avoids a confusing `0.1.0` / `1.0.0` split during development.
 
 ## Common pitfalls checklist
 

@@ -20,6 +20,85 @@ export type HostMetadataStore = {
   hosts: Record<string, HostMetadata>;
 };
 
+export type StoreSchemaVersion = 1;
+export type KeyKdf = "argon2id";
+
+export type UserObject = {
+  id: string;
+  name: string;
+  username: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type GroupObject = {
+  id: string;
+  name: string;
+  memberUserIds: string[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type TagObject = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type PathSshKeyObject = {
+  type: "path";
+  id: string;
+  name: string;
+  identityFilePath: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type EncryptedSshKeyObject = {
+  type: "encrypted";
+  id: string;
+  name: string;
+  ciphertext: string;
+  kdf: KeyKdf;
+  salt: string;
+  nonce: string;
+  fingerprint: string;
+  publicKey: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SshKeyObject = PathSshKeyObject | EncryptedSshKeyObject;
+
+export type HostKeyRef = {
+  keyId: string;
+  usage: "primary" | "proxy" | string;
+};
+
+export type HostBinding = {
+  userId?: string;
+  groupIds: string[];
+  tagIds: string[];
+  keyRefs: HostKeyRef[];
+  proxyJump: string;
+  legacyUser: string;
+  legacyTags: string[];
+  legacyIdentityFile: string;
+  legacyProxyJump: string;
+  legacyProxyCommand: string;
+};
+
+export type EntityStore = {
+  schemaVersion: StoreSchemaVersion | number;
+  updatedAt: number;
+  users: Record<string, UserObject>;
+  groups: Record<string, GroupObject>;
+  keys: Record<string, SshKeyObject>;
+  tags: Record<string, TagObject>;
+  hostBindings: Record<string, HostBinding>;
+};
+
 export type BackupPayload = {
   sshConfig: string;
   metadata: HostMetadataStore;
@@ -36,16 +115,31 @@ export type SessionStarted = {
   session_id: string;
 };
 
+export type QuickSshSessionRequest = {
+  hostName: string;
+  user: string;
+  port?: number;
+  identityFile: string;
+  proxyJump: string;
+  proxyCommand: string;
+};
+
 export type PaneLayoutItem = {
   id: string;
   width: number;
   height: number;
 };
 
+export type LayoutPaneSessionKind = "sshSaved" | "local" | "sshQuick";
+
 export type LayoutPaneSnapshot = {
   width: number;
   height: number;
   hostAlias: string | null;
+  /** Present in saved layouts v2; omitted in older files (infer from hostAlias). */
+  sessionKind?: LayoutPaneSessionKind | null;
+  /** Required when sessionKind is sshQuick. */
+  quickSsh?: QuickSshSessionRequest | null;
 };
 
 export type LayoutSplitTreeNode =

@@ -1,30 +1,22 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { resizeSession } from "../tauri-api";
+import { subscribeSessionOutput } from "../session-output-bridge";
 import type { SessionOutputEvent } from "../types";
 
 type Props = {
   sessionId: string;
   onUserInput: (sessionId: string, data: string) => void;
   fontSize: number;
+  fontFamily: string;
 };
 
 const sessionBuffers = new Map<string, string>();
 const MAX_BUFFER_CHARS = 250_000;
 const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
 const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
-const hasTauriTransformCallback = (): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { transformCallback?: unknown } })
-    .__TAURI_INTERNALS__;
-  return typeof tauriInternals?.transformCallback === "function";
-};
-
-export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
+export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -47,7 +39,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     const terminal = new Terminal({
       convertEol: true,
       cursorBlink: true,
-      fontFamily: "monospace",
+      fontFamily,
       fontSize,
       theme: {
         background: "#0b0d10",
@@ -120,30 +112,15 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       return true;
     });
 
-    let unlisten: UnlistenFn | null = null;
-    if (hasTauriTransformCallback()) {
-      void listen<SessionOutputEvent>("session-output", (event) => {
-        if (event.payload.session_id !== sessionId) {
-          return;
-        }
-
-        const existing = sessionBuffers.get(sessionId) ?? "";
-        const next = (existing + event.payload.chunk).slice(-MAX_BUFFER_CHARS);
-        sessionBuffers.set(sessionId, next);
-        terminal.write(event.payload.chunk);
-        if (event.payload.host_key_prompt) {
-          terminal.writeln("\r\n[Known host prompt detected. Press 'Trust host'.]");
-        }
-      }).then((fn) => {
-        if (disposed) {
-          void fn();
-        } else {
-          unlisten = fn;
-        }
-      }).catch(() => {
-        // Tauri event bridge can be temporarily unavailable during dev reload.
-      });
-    }
+    const unsubscribeOutput = subscribeSessionOutput(sessionId, (payload: SessionOutputEvent) => {
+      const existing = sessionBuffers.get(sessionId) ?? "";
+      const next = (existing + payload.chunk).slice(-MAX_BUFFER_CHARS);
+      sessionBuffers.set(sessionId, next);
+      terminal.write(payload.chunk);
+      if (payload.host_key_prompt) {
+        terminal.writeln("\r\n[Known host prompt detected. Press 'Trust host'.]");
+      }
+    });
 
     const fitAndResize = () => {
       const root = rootRef.current;
@@ -209,6 +186,14 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
     window.addEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
     window.addEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
     scheduleFitAndResize();
+    const fontFaceSet = typeof document !== "undefined" ? document.fonts : null;
+    if (fontFaceSet) {
+      void fontFaceSet.ready.then(() => {
+        if (!disposed) {
+          scheduleFitAndResize();
+        }
+      });
+    }
 
     return () => {
       disposed = true;
@@ -224,12 +209,10 @@ export function TerminalPane({ sessionId, onUserInput, fontSize }: Props) {
       if (fitFrameRef.current !== null) {
         window.cancelAnimationFrame(fitFrameRef.current);
       }
-      if (unlisten) {
-        void unlisten();
-      }
+      unsubscribeOutput();
       terminal.dispose();
     };
-  }, [fontSize, sessionId]);
+  }, [fontFamily, fontSize, sessionId]);
 
   return (
     <div ref={rootRef} className="terminal-root">
