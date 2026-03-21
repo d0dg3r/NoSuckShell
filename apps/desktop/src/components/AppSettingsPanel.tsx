@@ -161,7 +161,7 @@ export type AppSettingsPanelProps = {
   importStoreUsersFromHosts: () => Promise<void>;
   updateStoreUser: (
     userId: string,
-    patch: Partial<Pick<UserObject, "name" | "username" | "keyRefs" | "tagIds">>,
+    patch: Partial<Pick<UserObject, "name" | "username" | "hostName" | "proxyJump" | "keyRefs" | "tagIds">>,
   ) => Promise<void>;
   deleteStoreUser: (userId: string) => Promise<void>;
   setStoreUserGroupMembership: (userId: string, groupIds: string[]) => Promise<void>;
@@ -446,19 +446,21 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               <div className="app-settings-header-actions">
                 <div className="app-settings-mode-switch" role="group" aria-label="Settings display mode">
                   <button
-                    className={`btn ${settingsOpenMode === "modal" ? "btn-primary" : ""}`}
+                    type="button"
+                    className={`btn btn-settings-mode ${settingsOpenMode === "modal" ? "is-active" : ""}`}
                     onClick={() => setSettingsOpenMode("modal")}
                   >
                     Window
                   </button>
                   <button
-                    className={`btn ${settingsOpenMode === "docked" ? "btn-primary" : ""}`}
+                    type="button"
+                    className={`btn btn-settings-mode ${settingsOpenMode === "docked" ? "is-active" : ""}`}
                     onClick={() => setSettingsOpenMode("docked")}
                   >
                     Docked
                   </button>
                 </div>
-                <button className="btn" onClick={onCloseSettings}>
+                <button type="button" className="btn btn-settings-tool" onClick={onCloseSettings}>
                   Close
                 </button>
               </div>
@@ -742,12 +744,12 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         </div>
                       )}
                       <div className="view-manager-toolbar">
-                        <button type="button" className="btn btn-view-tool" onClick={createNewViewDraft}>
+                        <button type="button" className="btn btn-settings-tool" onClick={createNewViewDraft}>
                           New view
                         </button>
                         <button
                           type="button"
-                          className="btn btn-view-tool"
+                          className="btn btn-settings-tool"
                           onClick={() => void reorderView("up")}
                           disabled={!selectedViewProfileIdInSettings}
                         >
@@ -755,7 +757,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-view-tool"
+                          className="btn btn-settings-tool"
                           onClick={() => void reorderView("down")}
                           disabled={!selectedViewProfileIdInSettings}
                         >
@@ -763,7 +765,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-view-tool btn-view-tool-danger"
+                          className="btn btn-settings-tool btn-settings-danger"
                           onClick={() => void deleteCurrentViewDraft()}
                           disabled={!selectedViewProfileIdInSettings}
                         >
@@ -875,7 +877,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                               />
                               <button
                                 type="button"
-                                className="btn btn-view-tool btn-view-tool-danger"
+                                className="btn btn-settings-tool btn-settings-danger"
                                 onClick={() =>
                                   setViewDraft((prev) => ({
                                     ...prev,
@@ -894,7 +896,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                         <div className="action-row action-row--view-manager">
                           <button
                             type="button"
-                            className="btn btn-view-tool"
+                            className="btn btn-settings-tool"
                             onClick={() =>
                               setViewDraft((prev) => ({
                                 ...prev,
@@ -950,7 +952,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                             <option value="asc">Ascending</option>
                             <option value="desc">Descending</option>
                           </select>
-                          <button type="button" className="btn btn-view-save" onClick={() => void saveCurrentViewDraft()}>
+                          <button type="button" className="btn btn-settings-commit" onClick={() => void saveCurrentViewDraft()}>
                             Save view
                           </button>
                         </div>
@@ -968,6 +970,13 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               {activeAppSettingsTab === "data" && (
                 <div className="settings-stack">
                   <section className="settings-card backup-panel">
+                    <header className="settings-card-head">
+                      <h3>Backup &amp; restore</h3>
+                      <p className="muted-copy">
+                        Export encrypts your workspace data; keep the password safe. Import replaces matching data — use a
+                        recent export when recovering.
+                      </p>
+                    </header>
                   <label className="field">
                     <span className="field-label">Export path</span>
                     <input
@@ -988,7 +997,12 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       autoComplete="new-password"
                     />
                   </label>
-                  <button className="btn" onClick={() => void handleExportBackup()} disabled={!backupExportPassword}>
+                  <button
+                    type="button"
+                    className="btn btn-settings-commit"
+                    onClick={() => void handleExportBackup()}
+                    disabled={!backupExportPassword}
+                  >
                     Export backup
                   </button>
                   <label className="field">
@@ -1011,7 +1025,12 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       autoComplete="current-password"
                     />
                   </label>
-                  <button className="btn" onClick={() => void handleImportBackup()} disabled={!backupImportPassword}>
+                  <button
+                    type="button"
+                    className="btn btn-settings-commit"
+                    onClick={() => void handleImportBackup()}
+                    disabled={!backupImportPassword}
+                  >
                     Import backup
                   </button>
                   <p className="muted-copy">Backups are always encrypted. Passwords are never stored.</p>
@@ -1061,10 +1080,10 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       />
                     </label>
                     <div className="action-row">
-                      <button type="button" className="btn btn-primary" onClick={() => void onApplySshDirOverride()}>
+                      <button type="button" className="btn btn-settings-commit" onClick={() => void onApplySshDirOverride()}>
                         Apply SSH directory
                       </button>
-                      <button type="button" className="btn" onClick={() => void onResetSshDirOverride()}>
+                      <button type="button" className="btn btn-settings-tool" onClick={() => void onResetSshDirOverride()}>
                         Use default
                       </button>
                     </div>
@@ -1087,7 +1106,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       aria-label="SSH config file contents"
                     />
                     <div className="action-row">
-                      <button type="button" className="btn btn-primary" onClick={() => void onSaveSshConfig()}>
+                      <button type="button" className="btn btn-settings-commit" onClick={() => void onSaveSshConfig()}>
                         Save SSH config
                       </button>
                     </div>
@@ -1156,7 +1175,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                       </label>
                     </div>
                     <div className="action-row">
-                      <button type="button" className="btn" onClick={applyHostStarBlockToBuffer}>
+                      <button type="button" className="btn btn-settings-tool" onClick={applyHostStarBlockToBuffer}>
                         Apply to config buffer
                       </button>
                     </div>
@@ -1211,7 +1230,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                           </span>
                         </label>
                         <div className="store-inline">
-                          <button type="button" className="btn" onClick={() => void importStoreUsersFromHosts()}>
+                          <button type="button" className="btn btn-settings-tool" onClick={() => void importStoreUsersFromHosts()}>
                             Import from SSH hosts
                           </button>
                         </div>
@@ -1235,7 +1254,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                 </span>
                                 <button
                                   type="button"
-                                  className="btn btn-danger"
+                                  className="btn btn-settings-tool btn-settings-danger"
                                   onClick={() => {
                                     setExpandedStoreUserId((prev) => (prev === user.id ? null : prev));
                                     void deleteStoreUser(user.id);
@@ -1274,6 +1293,44 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                       }}
                                     />
                                   </label>
+                                  <label className="field">
+                                    <span className="field-label">HostName (optional)</span>
+                                    <input
+                                      key={`${user.id}-hostName`}
+                                      className="input"
+                                      defaultValue={user.hostName}
+                                      onBlur={(event) => {
+                                        const v = event.target.value.trim();
+                                        if (v !== user.hostName) {
+                                          void updateStoreUser(user.id, { hostName: v });
+                                        }
+                                      }}
+                                      placeholder="10.0.1.25"
+                                    />
+                                    <span className="field-help">
+                                      When this user is linked on a host, overrides the SSH HostName for that session.
+                                      Leave empty to use the host entry from your config.
+                                    </span>
+                                  </label>
+                                  <label className="field">
+                                    <span className="field-label">ProxyJump (optional)</span>
+                                    <input
+                                      key={`${user.id}-proxyJump`}
+                                      className="input"
+                                      defaultValue={user.proxyJump}
+                                      onBlur={(event) => {
+                                        const v = event.target.value.trim();
+                                        if (v !== user.proxyJump) {
+                                          void updateStoreUser(user.id, { proxyJump: v });
+                                        }
+                                      }}
+                                      placeholder="bastion"
+                                    />
+                                    <span className="field-help">
+                                      Used when this user is linked on a host and the host binding has no ProxyJump set.
+                                      Per-host ProxyJump in the Hosts tab still wins.
+                                    </span>
+                                  </label>
                                   <div className="field">
                                     <span className="field-label">SSH keys (first = primary for sessions)</span>
                                     <div className="store-checkbox-grid">
@@ -1310,7 +1367,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                                 <span className="store-inline">
                                                   <button
                                                     type="button"
-                                                    className="btn"
+                                                    className="btn btn-settings-tool"
                                                     disabled={idx === 0}
                                                     onClick={() => void reorderUserStoreKeys(user.id, idx, "up")}
                                                   >
@@ -1318,7 +1375,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                                   </button>
                                                   <button
                                                     type="button"
-                                                    className="btn"
+                                                    className="btn btn-settings-tool"
                                                     disabled={idx === user.keyRefs.length - 1}
                                                     onClick={() => void reorderUserStoreKeys(user.id, idx, "down")}
                                                   >
@@ -1386,7 +1443,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                             onChange={(event) => setStoreUserDraft(event.target.value)}
                             placeholder="New user (display / SSH name)"
                           />
-                          <button type="button" className="btn" onClick={() => void addStoreUser()}>
+                          <button type="button" className="btn btn-settings-tool" onClick={() => void addStoreUser()}>
                             Add
                           </button>
                         </div>
@@ -1412,7 +1469,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                 />
                                 <button
                                   type="button"
-                                  className="btn btn-danger"
+                                  className="btn btn-settings-tool btn-settings-danger"
                                   onClick={() => void deleteStoreGroup(group.id)}
                                 >
                                   Delete
@@ -1471,7 +1528,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                             onChange={(event) => setStoreGroupDraft(event.target.value)}
                             placeholder="New group name"
                           />
-                          <button type="button" className="btn" onClick={() => void addStoreGroup()}>
+                          <button type="button" className="btn btn-settings-tool" onClick={() => void addStoreGroup()}>
                             Add
                           </button>
                         </div>
@@ -1494,7 +1551,11 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                   }
                                 }}
                               />
-                              <button type="button" className="btn btn-danger" onClick={() => void deleteStoreTag(tag.id)}>
+                              <button
+                                type="button"
+                                className="btn btn-settings-tool btn-settings-danger"
+                                onClick={() => void deleteStoreTag(tag.id)}
+                              >
                                 Delete
                               </button>
                             </div>
@@ -1507,7 +1568,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                             onChange={(event) => setStoreTagDraft(event.target.value)}
                             placeholder="New tag name"
                           />
-                          <button type="button" className="btn" onClick={() => void addStoreTag()}>
+                          <button type="button" className="btn btn-settings-tool" onClick={() => void addStoreTag()}>
                             Add
                           </button>
                         </div>
@@ -1532,7 +1593,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                 onChange={(event) => setStorePathKeyPathDraft(event.target.value)}
                                 placeholder="~/.ssh/id_ed25519"
                               />
-                              <button className="btn" onClick={() => void addStorePathKey()}>
+                              <button type="button" className="btn btn-settings-tool" onClick={() => void addStorePathKey()}>
                                 Add path key
                               </button>
                             </div>
@@ -1557,7 +1618,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                               placeholder="-----BEGIN PRIVATE KEY-----"
                             />
                             <div className="store-inline">
-                              <button className="btn" onClick={() => void addStoreEncryptedKey()}>
+                              <button type="button" className="btn btn-settings-tool" onClick={() => void addStoreEncryptedKey()}>
                                 Add encrypted key
                               </button>
                             </div>
@@ -1571,12 +1632,12 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                                   {key.name} ({key.type})
                                 </span>
                                 <div className="store-inline">
-                                  <button type="button" className="btn" onClick={() => void unlockStoreKey(key.id)}>
+                                  <button type="button" className="btn btn-settings-tool" onClick={() => void unlockStoreKey(key.id)}>
                                     Unlock
                                   </button>
                                   <button
                                     type="button"
-                                    className="btn btn-danger"
+                                    className="btn btn-settings-tool btn-settings-danger"
                                     onClick={() => void removeStoreKey(key.id)}
                                   >
                                     Delete
@@ -1717,7 +1778,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                             }
                             placeholder="ProxyJump override"
                           />
-                          <button type="button" className="btn btn-primary" onClick={() => void saveHostBindingDraft()}>
+                          <button type="button" className="btn btn-settings-commit" onClick={() => void saveHostBindingDraft()}>
                             Save host binding
                           </button>
                         </div>
@@ -1727,15 +1788,27 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
                 </div>
               )}
               {activeAppSettingsTab === "help" && (
-                <Suspense fallback={null}>
-                  <HelpPanel />
-                </Suspense>
+                <div className="settings-stack">
+                  <section className="settings-card settings-help-wrap">
+                    <Suspense fallback={null}>
+                      <HelpPanel />
+                    </Suspense>
+                  </section>
+                </div>
               )}
               {activeAppSettingsTab === "about" && (
-                <section className="about-hero">
-                  <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
-                  <p className="muted-copy">NoSuckShell helps you manage SSH hosts and sessions in one clean desktop workspace.</p>
-                </section>
+                <div className="settings-stack">
+                  <section className="settings-card about-hero">
+                    <header className="settings-card-head">
+                      <h3>About</h3>
+                      <p className="muted-copy">NoSuckShell — SSH hosts and sessions in one workspace.</p>
+                    </header>
+                    <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
+                    <p className="muted-copy">
+                      Manage connections, split panes, and optional keyboard broadcast without a cluttered UI.
+                    </p>
+                  </section>
+                </div>
               )}
             </div>
           </section>

@@ -3342,10 +3342,10 @@ body,
 }
 
 .app-settings-content {
-  border: 1px solid rgba(150, 170, 161, 0.24);
-  border-radius: 16px;
+  border: 1px solid rgba(150, 170, 161, 0.14);
+  border-radius: 12px;
   padding: var(--space-5);
-  background: rgba(13, 18, 21, 0.72);
+  background: rgba(10, 14, 17, 0.5);
 }
 
 /* Compact selects; columns align; full-width fields stay full where needed */
@@ -3389,6 +3389,7 @@ body,
 
 .app-settings-content .view-manager-panel .filter-row.view-rule-row {
   margin-top: 0;
+  align-items: center;
 }
 
 .app-settings-content .view-manager-panel .filter-row .field {
@@ -3413,6 +3414,15 @@ body,
   max-width: 100%;
 }
 
+.app-settings-content .identity-store-section .input,
+.app-settings-content .identity-store-section select.input {
+  border-radius: 6px;
+}
+
+.settings-help-wrap .help-panel {
+  gap: var(--space-4);
+}
+
 .app-settings-modal:not(.add-host-modal):not(.trust-host-modal) .app-settings-content {
   flex: 1 1 auto;
   min-height: 0;
@@ -3429,29 +3439,71 @@ body,
   gap: var(--space-4);
 }
 
+/* Flat panels (same language as custom Views editor) */
 .settings-card {
-  border: 1px solid rgba(150, 170, 161, 0.24);
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(12, 17, 21, 0.86), rgba(10, 14, 17, 0.82));
-  padding: var(--space-5);
+  border: 1px solid rgba(150, 170, 161, 0.14);
+  border-radius: 10px;
+  background: var(--tone-host-list-bg);
+  padding: var(--space-4) var(--space-5);
   display: grid;
   gap: var(--space-4);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  box-shadow: none;
 }
 
 .settings-card-head {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid rgba(150, 170, 161, 0.12);
 }
 
 .settings-card-head h3 {
   margin: 0;
-  font-size: calc(var(--font-lg) + 1px);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(184, 204, 194, 0.92);
 }
 
 .settings-card-head .muted-copy {
   margin: 0;
-  font-size: var(--font-base);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.app-settings-content .settings-card .input:not(.ssh-config-textarea),
+.app-settings-content .settings-card textarea.input {
+  border-radius: 6px;
+}
+
+.app-settings-content .settings-card .action-row {
+  margin-top: var(--space-2);
+}
+
+.app-settings-mode-switch .btn-settings-mode {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border-width: 1px;
+  border-color: rgba(150, 170, 161, 0.3);
+  background: rgba(18, 24, 28, 0.5);
+  color: rgba(210, 225, 216, 0.88);
+}
+
+.app-settings-mode-switch .btn-settings-mode:hover:not(:disabled) {
+  border-color: rgba(130, 184, 152, 0.4);
+  background: rgba(26, 34, 40, 0.75);
+  color: #f0faf4;
+}
+
+.app-settings-mode-switch .btn-settings-mode.is-active {
+  background: rgba(130, 184, 152, 0.12);
+  border-color: rgba(130, 184, 152, 0.45);
+  color: #f2faf5;
+  box-shadow: inset 0 -2px 0 0 rgba(130, 184, 152, 0.65);
 }
 
 .store-panel {
@@ -3695,8 +3747,9 @@ body,
 
 .about-hero-image {
   width: 100%;
-  border-radius: var(--radius-panel);
-  border: 2px solid rgba(130, 184, 152, 0.28);
+  max-width: 28rem;
+  border-radius: 8px;
+  border: 1px solid rgba(150, 170, 161, 0.18);
 }
 
 .help-panel {
@@ -3706,7 +3759,11 @@ body,
 
 .help-panel-header h3 {
   margin: 0 0 var(--space-2);
-  font-size: var(--font-xl);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(184, 204, 194, 0.92);
 }
 
 .help-panel-header .muted-copy {
@@ -3720,15 +3777,18 @@ body,
 
 .help-section h4 {
   margin: 0;
-  font-size: var(--font-md);
-  color: #ffe6b8;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(184, 204, 194, 0.88);
 }
 
 .help-table-wrap {
   overflow: auto;
-  border: 1px solid rgba(160, 140, 108, 0.28);
-  border-radius: var(--radius-control);
-  background: rgba(9, 12, 14, 0.56);
+  border: 1px solid rgba(150, 170, 161, 0.16);
+  border-radius: 8px;
+  background: var(--tone-host-list-bg);
 }
 
 .help-table {
@@ -3743,20 +3803,20 @@ body,
   padding: var(--space-3) var(--space-4);
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid rgba(142, 126, 98, 0.22);
+  border-bottom: 1px solid rgba(150, 170, 161, 0.12);
   word-break: break-word;
 }
 
 .help-table th {
   font-size: var(--font-xs);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #ffd8a1;
-  background: rgba(22, 18, 12, 0.42);
+  letter-spacing: 0.05em;
+  color: rgba(200, 218, 208, 0.88);
+  background: rgba(14, 20, 24, 0.55);
 }
 
 .help-table td {
-  color: #ece2d1;
+  color: rgba(228, 236, 232, 0.92);
   font-size: var(--font-sm);
 }
 
@@ -4303,10 +4363,18 @@ body,
   gap: var(--space-2);
 }
 
+.btn-settings-tool,
 .btn-view-tool {
-  padding: 5px 12px;
-  font-size: 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  height: var(--control-height-lg);
+  padding: 0 var(--space-5);
+  font-size: var(--font-base);
   font-weight: 600;
+  line-height: 1.2;
   border-radius: 6px;
   border-width: 1px;
   border-color: rgba(150, 170, 161, 0.35);
@@ -4314,49 +4382,65 @@ body,
   color: rgba(210, 225, 216, 0.92);
 }
 
+.btn-settings-tool:hover:not(:disabled),
 .btn-view-tool:hover:not(:disabled) {
   border-color: rgba(130, 184, 152, 0.45);
   background: rgba(26, 34, 40, 0.85);
   color: #f0faf4;
 }
 
-.view-manager-panel .btn-view-tool:disabled,
-.view-manager-panel .btn-view-save:disabled {
+.app-settings-modal .btn-settings-tool:disabled,
+.app-settings-modal .btn-settings-commit:disabled,
+.app-settings-modal .btn-view-tool:disabled,
+.app-settings-modal .btn-view-save:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.view-manager-panel .settings-tab:focus-visible {
+.app-settings-modal .settings-tab:focus-visible {
   outline: 2px solid rgba(130, 184, 152, 0.55);
   outline-offset: 2px;
 }
 
-.view-manager-panel .btn-view-tool:focus-visible,
-.view-manager-panel .btn-view-save:focus-visible {
+.app-settings-modal .btn-settings-tool:focus-visible,
+.app-settings-modal .btn-settings-commit:focus-visible,
+.app-settings-modal .btn-view-tool:focus-visible,
+.app-settings-modal .btn-view-save:focus-visible {
   outline: 2px solid rgba(130, 184, 152, 0.45);
   outline-offset: 2px;
 }
 
+.btn-settings-danger,
 .btn-view-tool-danger {
   border-color: rgba(180, 100, 95, 0.45);
   color: rgba(230, 190, 186, 0.92);
 }
 
+.btn-settings-danger:hover:not(:disabled),
 .btn-view-tool-danger:hover:not(:disabled) {
   border-color: rgba(210, 120, 108, 0.55);
   color: #fde8e4;
 }
 
+.btn-settings-commit,
 .btn-view-save {
-  padding: 6px 16px;
-  font-size: 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  height: var(--control-height-lg);
+  padding: 0 var(--space-7);
+  font-size: var(--font-base);
   font-weight: 600;
+  line-height: 1.2;
   border-radius: 6px;
   background: rgba(36, 72, 54, 0.75);
   border: 1px solid rgba(110, 168, 138, 0.5);
   color: #e8f6ee;
 }
 
+.btn-settings-commit:hover:not(:disabled),
 .btn-view-save:hover:not(:disabled) {
   background: rgba(44, 88, 66, 0.88);
   border-color: rgba(130, 190, 155, 0.6);
@@ -4431,10 +4515,16 @@ body,
   flex: 0 0 auto;
 }
 
+.app-settings-content .view-manager-panel .view-rule-row .btn-settings-tool {
+  flex: 0 0 auto;
+}
+
 .app-settings-content .view-manager-panel .view-rule-value-input {
   flex: 1 1 10rem;
   min-width: min(100%, 8rem);
   max-width: 100%;
+  min-height: var(--control-height-lg);
+  box-sizing: border-box;
 }
 
 .app-settings-content .view-manager-panel .action-row--view-manager {
@@ -4453,6 +4543,11 @@ body,
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.app-settings-content .view-manager-panel .view-manager-sort-row .btn-settings-commit {
+  flex: 0 0 auto;
+  min-width: min(100%, 11rem);
 }
 
 .view-manager-after {

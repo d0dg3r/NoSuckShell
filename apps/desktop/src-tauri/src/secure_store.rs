@@ -230,8 +230,7 @@ fn resolved_identity_file_for_key_id(store: &EntityStore, key_id: &str) -> Resul
     }
 }
 
-pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> {
-    let store = load_or_migrate_store()?;
+fn resolve_host_config_with_store(host: &HostConfig, store: &EntityStore) -> Result<HostConfig> {
     let Some(binding) = store.host_bindings.get(&host.host) else {
         return Ok(host.clone());
     };
@@ -242,14 +241,27 @@ pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> 
             if !user.username.trim().is_empty() {
                 resolved.user = user.username.clone();
             }
+            if !user.host_name.trim().is_empty() {
+                resolved.host_name = user.host_name.clone();
+            }
         }
     } else if !binding.legacy_user.trim().is_empty() {
         resolved.user = binding.legacy_user.clone();
     }
     if !binding.proxy_jump.trim().is_empty() {
         resolved.proxy_jump = binding.proxy_jump.clone();
-    } else if !binding.legacy_proxy_jump.trim().is_empty() {
-        resolved.proxy_jump = binding.legacy_proxy_jump.clone();
+    } else {
+        let mut from_user = String::new();
+        if let Some(user_id) = &binding.user_id {
+            if let Some(user) = store.users.get(user_id) {
+                from_user = user.proxy_jump.clone();
+            }
+        }
+        if !from_user.trim().is_empty() {
+            resolved.proxy_jump = from_user;
+        } else if !binding.legacy_proxy_jump.trim().is_empty() {
+            resolved.proxy_jump = binding.legacy_proxy_jump.clone();
+        }
     }
     if !binding.legacy_proxy_command.trim().is_empty() {
         resolved.proxy_command = binding.legacy_proxy_command.clone();
@@ -262,7 +274,7 @@ pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> 
         .find(|entry| entry.usage == "primary")
         .or_else(|| binding.key_refs.first())
     {
-        identity_from_keys = resolved_identity_file_for_key_id(&store, &primary_ref.key_id)?;
+        identity_from_keys = resolved_identity_file_for_key_id(store, &primary_ref.key_id)?;
     }
     if identity_from_keys.is_none() {
         if let Some(user_id) = &binding.user_id {
@@ -273,7 +285,7 @@ pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> 
                     .find(|entry| entry.usage == "primary")
                     .or_else(|| user.key_refs.first())
                 {
-                    identity_from_keys = resolved_identity_file_for_key_id(&store, &uk.key_id)?;
+                    identity_from_keys = resolved_identity_file_for_key_id(store, &uk.key_id)?;
                 }
             }
         }
@@ -285,6 +297,11 @@ pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> 
     }
 
     Ok(resolved)
+}
+
+pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> {
+    let store = load_or_migrate_store()?;
+    resolve_host_config_with_store(host, &store)
 }
 
 fn write_runtime_private_key(key_id: &str, private_key: &str) -> Result<PathBuf> {
@@ -370,6 +387,8 @@ fn migrate_from_legacy_sources() -> Result<EntityStore> {
                 id: user_id,
                 name: host.user.clone(),
                 username: host.user.clone(),
+                host_name: String::new(),
+                proxy_jump: String::new(),
                 key_refs: vec![],
                 tag_ids: vec![],
                 created_at: ts,
@@ -401,8 +420,9 @@ fn migrate_from_legacy_sources() -> Result<EntityStore> {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_from_legacy_sources, resolve_host_config_for_session};
+    use super::{migrate_from_legacy_sources, resolve_host_config_for_session, resolve_host_config_with_store};
     use crate::ssh_config::HostConfig;
+    use crate::store_models::{EntityStore, HostBinding, UserObject};
 
     #[test]
     fn migration_produces_schema_version() {
@@ -423,5 +443,159 @@ mod tests {
         };
         let resolved = resolve_host_config_for_session(&host).expect("resolve");
         assert_eq!(resolved.host_name, host.host_name);
+    }
+
+    #[test]
+    fn user_proxy_jump_used_when_binding_empty() {
+        let host = HostConfig {
+            host: "app".to_string(),
+            host_name: "10.0.0.1".to_string(),
+            user: "legacy".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let uid = "user-a".to_string();
+        let mut store = EntityStore::default();
+        store.users.insert(
+            uid.clone(),
+            UserObject {
+                id: uid.clone(),
+                name: "Alice".to_string(),
+                username: "alice".to_string(),
+                host_name: String::new(),
+                proxy_jump: "bastion".to_string(),
+                key_refs: vec![],
+                tag_ids: vec![],
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+        store.host_bindings.insert(
+            "app".to_string(),
+            HostBinding {
+                user_id: Some(uid),
+                ..HostBinding::default()
+            },
+        );
+        let resolved = resolve_host_config_with_store(&host, &store).expect("resolve");
+        assert_eq!(resolved.proxy_jump, "bastion");
+    }
+
+    #[test]
+    fn binding_proxy_jump_wins_over_user() {
+        let host = HostConfig {
+            host: "app".to_string(),
+            host_name: "10.0.0.1".to_string(),
+            user: "legacy".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let uid = "user-b".to_string();
+        let mut store = EntityStore::default();
+        store.users.insert(
+            uid.clone(),
+            UserObject {
+                id: uid.clone(),
+                name: "Bob".to_string(),
+                username: "bob".to_string(),
+                host_name: String::new(),
+                proxy_jump: "user-jump".to_string(),
+                key_refs: vec![],
+                tag_ids: vec![],
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+        store.host_bindings.insert(
+            "app".to_string(),
+            HostBinding {
+                user_id: Some(uid),
+                proxy_jump: "per-host".to_string(),
+                ..HostBinding::default()
+            },
+        );
+        let resolved = resolve_host_config_with_store(&host, &store).expect("resolve");
+        assert_eq!(resolved.proxy_jump, "per-host");
+    }
+
+    #[test]
+    fn legacy_proxy_jump_still_applies_without_user_jump() {
+        let host = HostConfig {
+            host: "app".to_string(),
+            host_name: "10.0.0.1".to_string(),
+            user: "legacy".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let uid = "user-d".to_string();
+        let mut store = EntityStore::default();
+        store.users.insert(
+            uid.clone(),
+            UserObject {
+                id: uid.clone(),
+                name: "Dan".to_string(),
+                username: "dan".to_string(),
+                host_name: String::new(),
+                proxy_jump: String::new(),
+                key_refs: vec![],
+                tag_ids: vec![],
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+        store.host_bindings.insert(
+            "app".to_string(),
+            HostBinding {
+                user_id: Some(uid),
+                legacy_proxy_jump: "bastion".to_string(),
+                ..HostBinding::default()
+            },
+        );
+        let resolved = resolve_host_config_with_store(&host, &store).expect("resolve");
+        assert_eq!(resolved.proxy_jump, "bastion");
+    }
+
+    #[test]
+    fn user_host_name_applies_when_linked() {
+        let host = HostConfig {
+            host: "app".to_string(),
+            host_name: "10.0.0.1".to_string(),
+            user: "legacy".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let uid = "user-c".to_string();
+        let mut store = EntityStore::default();
+        store.users.insert(
+            uid.clone(),
+            UserObject {
+                id: uid.clone(),
+                name: "Carol".to_string(),
+                username: "carol".to_string(),
+                host_name: "192.168.1.50".to_string(),
+                proxy_jump: String::new(),
+                key_refs: vec![],
+                tag_ids: vec![],
+                created_at: 0,
+                updated_at: 0,
+            },
+        );
+        store.host_bindings.insert(
+            "app".to_string(),
+            HostBinding {
+                user_id: Some(uid),
+                ..HostBinding::default()
+            },
+        );
+        let resolved = resolve_host_config_with_store(&host, &store).expect("resolve");
+        assert_eq!(resolved.host_name, "192.168.1.50");
     }
 }

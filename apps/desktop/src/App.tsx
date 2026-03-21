@@ -337,6 +337,20 @@ const createDefaultEntityStore = (): EntityStore => ({
   tags: {},
   hostBindings: {},
 });
+
+const normalizeEntityStore = (store: EntityStore): EntityStore => ({
+  ...store,
+  users: Object.fromEntries(
+    Object.entries(store.users).map(([id, u]) => [
+      id,
+      {
+        ...u,
+        hostName: u.hostName ?? "",
+        proxyJump: u.proxyJump ?? "",
+      },
+    ]),
+  ),
+});
 const createDefaultHostMetadata = (): HostMetadata => ({ favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false });
 const createLeafNode = (paneIndex: number): SplitLeafNode => ({ id: `leaf-${paneIndex}`, type: "leaf", paneIndex });
 const cloneSplitTree = (node: SplitTreeNode): SplitTreeNode =>
@@ -1166,7 +1180,7 @@ export function App() {
     setMetadataStore(loadedMetadata);
     setLayoutProfiles(loadedProfiles);
     setViewProfiles(loadedViewProfiles);
-    setEntityStore(loadedStore);
+    setEntityStore(normalizeEntityStore(loadedStore));
     setSelectedLayoutProfileId((prev) => {
       if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
         return prev;
@@ -1369,7 +1383,17 @@ export function App() {
       ...entityStore,
       users: {
         ...entityStore.users,
-        [id]: { id, name: username, username, keyRefs: [], tagIds: [], createdAt: now, updatedAt: now },
+        [id]: {
+          id,
+          name: username,
+          username,
+          hostName: "",
+          proxyJump: "",
+          keyRefs: [],
+          tagIds: [],
+          createdAt: now,
+          updatedAt: now,
+        },
       },
       updatedAt: now,
     };
@@ -1437,6 +1461,8 @@ export function App() {
         id,
         name: u,
         username: u,
+        hostName: "",
+        proxyJump: "",
         keyRefs: [],
         tagIds: [],
         createdAt: now,
@@ -1452,7 +1478,10 @@ export function App() {
   }, [entityStore, hosts, persistEntityStore, storeUsers]);
 
   const updateStoreUser = useCallback(
-    async (userId: string, patch: Partial<Pick<UserObject, "name" | "username" | "keyRefs" | "tagIds">>) => {
+    async (
+      userId: string,
+      patch: Partial<Pick<UserObject, "name" | "username" | "hostName" | "proxyJump" | "keyRefs" | "tagIds">>,
+    ) => {
       const cur = entityStore.users[userId];
       if (!cur) {
         return;

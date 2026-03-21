@@ -32,6 +32,10 @@ export type UserObject = {
   id: string;
   name: string;
   username: string;
+  /** When set and this user is linked on a host binding, overrides SSH HostName for the session. */
+  hostName: string;
+  /** When set and the host binding has no ProxyJump, used as ProxyJump for the session. */
+  proxyJump: string;
   keyRefs: HostKeyRef[];
   tagIds: string[];
   createdAt: number;

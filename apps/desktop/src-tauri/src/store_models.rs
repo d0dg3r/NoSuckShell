@@ -16,6 +16,12 @@ pub struct UserObject {
     pub name: String,
     #[serde(default)]
     pub username: String,
+    /// When set and this user is linked on a host binding, overrides SSH `HostName` for the session.
+    #[serde(default, rename = "hostName")]
+    pub host_name: String,
+    /// When set and the host binding does not specify `proxyJump`, used as `ProxyJump` for the session.
+    #[serde(default, rename = "proxyJump")]
+    pub proxy_jump: String,
     /// SSH keys linked to this user (used when the host binding does not specify keys).
     #[serde(default, rename = "keyRefs")]
     pub key_refs: Vec<HostKeyRef>,
