@@ -1,6 +1,11 @@
+//! On Windows, the default console subsystem spawns a second (blank) window next to the WebView.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod backup;
 mod host_metadata;
 mod key_crypto;
+mod quick_ssh;
+mod sftp;
 #[cfg(test)]
 mod testutil;
 mod layout_profiles;
@@ -17,11 +22,19 @@ use layout_profiles::{
     delete_layout_profile as delete_layout_profile_backend, load_layout_profiles,
     save_layout_profile as save_layout_profile_backend, LayoutProfile,
 };
+use quick_ssh::QuickSshSessionRequest;
 use secure_store::{
     assign_host_binding as assign_host_binding_backend, create_encrypted_key as create_encrypted_key_backend,
     delete_key as delete_key_backend, list_groups as list_groups_backend, list_store_objects as list_store_objects_backend,
     list_tags as list_tags_backend, list_users as list_users_backend, resolve_host_config_for_session,
     save_store_objects as save_store_objects_backend, unlock_key_material as unlock_key_material_backend,
+};
+use sftp::{
+    download_remote_file as sftp_download_remote_file_backend,
+    get_local_home_canonical_path as sftp_get_local_home_canonical_path_backend,
+    list_local_dir as sftp_list_local_dir_backend,
+    list_remote_dir as sftp_list_remote_dir_backend,
+    RemoteSshSpec,
 };
 use session::SessionState;
 use ssh_home::SshDirInfo;
@@ -48,43 +61,6 @@ struct BackupIpcArgs {
 #[derive(serde::Serialize)]
 struct SessionStarted {
     session_id: String,
-}
-
-#[derive(serde::Deserialize)]
-struct QuickSshSessionRequest {
-    #[serde(rename = "hostName")]
-    host_name: String,
-    #[serde(default)]
-    user: String,
-    #[serde(default)]
-    port: Option<u16>,
-    #[serde(rename = "identityFile", default)]
-    identity_file: String,
-    #[serde(rename = "proxyJump", default)]
-    proxy_jump: String,
-    #[serde(rename = "proxyCommand", default)]
-    proxy_command: String,
-}
-
-fn normalize_quick_ssh_request(request: QuickSshSessionRequest) -> Result<HostConfig, String> {
-    let host_name = request.host_name.trim();
-    if host_name.is_empty() {
-        return Err("HostName is required for quick connect.".to_string());
-    }
-    let port = request.port.unwrap_or(22);
-    if port == 0 {
-        return Err("Port must be between 1 and 65535.".to_string());
-    }
-    let user = request.user.trim();
-    Ok(HostConfig {
-        host: format!("quick-{host_name}"),
-        host_name: host_name.to_string(),
-        user: user.to_string(),
-        port,
-        identity_file: request.identity_file.trim().to_string(),
-        proxy_jump: request.proxy_jump.trim().to_string(),
-        proxy_command: request.proxy_command.trim().to_string(),
-    })
 }
 
 #[tauri::command]
@@ -163,9 +139,29 @@ fn start_quick_ssh_session(
     sessions: State<'_, SessionState>,
     request: QuickSshSessionRequest,
 ) -> Result<SessionStarted, String> {
-    let host = normalize_quick_ssh_request(request)?;
+    let host = quick_ssh::normalize_quick_ssh_request(request)?;
     let session_id = sessions.start(app, host).map_err(|err| err.to_string())?;
     Ok(SessionStarted { session_id })
+}
+
+#[tauri::command]
+fn sftp_list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<sftp::SftpDirEntry>, String> {
+    sftp_list_remote_dir_backend(spec, path)
+}
+
+#[tauri::command]
+fn list_local_dir(path: String) -> Result<Vec<sftp::LocalDirEntry>, String> {
+    sftp_list_local_dir_backend(path)
+}
+
+#[tauri::command]
+fn get_local_home_canonical_path() -> Result<String, String> {
+    sftp_get_local_home_canonical_path_backend()
+}
+
+#[tauri::command]
+fn sftp_download_file(spec: RemoteSshSpec, remote_file_path: String, dest_dir_under_home: String) -> Result<String, String> {
+    sftp_download_remote_file_backend(spec, remote_file_path, dest_dir_under_home)
 }
 
 #[tauri::command]
@@ -311,6 +307,10 @@ fn main() {
             start_session,
             start_local_session,
             start_quick_ssh_session,
+            sftp_list_remote_dir,
+            list_local_dir,
+            get_local_home_canonical_path,
+            sftp_download_file,
             send_input,
             resize_session,
             close_session,
@@ -339,7 +339,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_quick_ssh_request, QuickSshSessionRequest};
+    use crate::quick_ssh::{normalize_quick_ssh_request, QuickSshSessionRequest};
 
     #[test]
     fn normalizes_quick_ssh_request_with_defaults() {

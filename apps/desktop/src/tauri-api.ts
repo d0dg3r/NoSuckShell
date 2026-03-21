@@ -6,8 +6,11 @@ import type {
   HostConfig,
   HostMetadataStore,
   LayoutProfile,
+  LocalDirEntry,
   QuickSshSessionRequest,
+  RemoteSshSpec,
   SessionStarted,
+  SftpDirEntry,
   SshDirInfo,
   SshKeyObject,
   TagObject,
@@ -184,3 +187,18 @@ export const unlockKeyMaterial = (keyId: string, passphrase?: string): Promise<s
 
 export const deleteKeyById = (keyId: string): Promise<void> =>
   invoke("delete_key", { keyId });
+
+export const sftpListRemoteDir = (spec: RemoteSshSpec, path: string): Promise<SftpDirEntry[]> =>
+  invoke("sftp_list_remote_dir", { spec, path });
+
+export const listLocalDir = (path: string): Promise<LocalDirEntry[]> =>
+  invoke("list_local_dir", { path });
+
+export const getLocalHomeCanonicalPath = (): Promise<string> =>
+  invoke("get_local_home_canonical_path");
+
+export const sftpDownloadFile = (
+  spec: RemoteSshSpec,
+  remoteFilePath: string,
+  destDirUnderHome: string,
+): Promise<string> => invoke("sftp_download_file", { spec, remoteFilePath, destDirUnderHome });

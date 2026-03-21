@@ -141,6 +141,24 @@ export type QuickSshSessionRequest = {
   proxyCommand: string;
 };
 
+export type SftpDirEntry = {
+  name: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+};
+
+export type LocalDirEntry = {
+  name: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+};
+
+export type RemoteSshSpec =
+  | { kind: "saved"; host: HostConfig }
+  | { kind: "quick"; request: QuickSshSessionRequest };
+
 export type PaneLayoutItem = {
   id: string;
   width: number;

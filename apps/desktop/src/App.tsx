@@ -75,7 +75,7 @@ const LayoutCommandCenter = lazy(async () => {
 });
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { type ContextActionId } from "./features/context-actions";
+import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -116,6 +116,7 @@ import type {
   LayoutSplitTreeNode,
   PaneLayoutItem,
   QuickSshSessionRequest,
+  RemoteSshSpec,
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
@@ -181,8 +182,10 @@ import {
 import {
   cloneSplitTree,
   collectPaneOrder,
+  createEqualGridSplitTree,
   createLeafNode,
   createTreeFromPaneCount,
+  isLayoutGridDimensionsValid,
   parseSplitTree,
   rebalanceSplitTree,
   removePaneFromTree,
@@ -272,6 +275,8 @@ export function App() {
   const [trustPromptQueue, setTrustPromptQueue] = useState<TrustPromptRequest[]>([]);
   const [saveTrustHostAsDefault, setSaveTrustHostAsDefault] = useState<boolean>(true);
   const [splitSlots, setSplitSlots] = useState<Array<string | null>>(() => createInitialPaneState());
+  /** Per SSH/local session: file browser vs terminal (keyed by session id so layout changes do not remap views). */
+  const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -297,6 +302,10 @@ export function App() {
   const [layoutProfileName, setLayoutProfileName] = useState<string>("");
   const [saveLayoutWithHosts, setSaveLayoutWithHosts] = useState<boolean>(false);
   const [isLayoutCommandCenterOpen, setIsLayoutCommandCenterOpen] = useState<boolean>(false);
+  const [layoutTargetWorkspaceId, setLayoutTargetWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
+  const [layoutSwitchToTargetAfterApply, setLayoutSwitchToTargetAfterApply] = useState<boolean>(false);
+  const [layoutMirrorWorkspaceIdOnSave, setLayoutMirrorWorkspaceIdOnSave] = useState<string>("");
+  const layoutCommandCenterWasOpenRef = useRef<boolean>(false);
   const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
@@ -518,6 +527,24 @@ export function App() {
         .filter((workspace): workspace is WorkspaceSnapshot => Boolean(workspace)),
     [workspaceOrder, workspaceSnapshots],
   );
+  const layoutCommandWorkspaceOptions = useMemo(
+    () => workspaceTabs.map((workspace) => ({ id: workspace.id, name: workspace.name })),
+    [workspaceTabs],
+  );
+  const resolvedLayoutTargetWorkspaceId = useMemo(() => {
+    if (workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)) {
+      return layoutTargetWorkspaceId;
+    }
+    return activeWorkspaceId;
+  }, [activeWorkspaceId, layoutTargetWorkspaceId, workspaceTabs]);
+  useEffect(() => {
+    if (isLayoutCommandCenterOpen && !layoutCommandCenterWasOpenRef.current) {
+      setLayoutTargetWorkspaceId(activeWorkspaceId);
+      setLayoutSwitchToTargetAfterApply(false);
+      setLayoutMirrorWorkspaceIdOnSave("");
+    }
+    layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
+  }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
   const activeHostMetadata = useMemo(() => {
@@ -1345,6 +1372,27 @@ export function App() {
     setBroadcastTargets((prev) => sanitizeBroadcastTargets(prev, sessionIds));
     setTrustPromptQueue((prev) => prev.filter((entry) => sessionIds.includes(entry.sessionId)));
   }, [sessionIds]);
+
+  useEffect(() => {
+    setSessionFileViews((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [sid, view] of Object.entries(prev)) {
+        if (view !== "remote") {
+          continue;
+        }
+        const session = sessions.find((s) => s.id === sid);
+        if (!session || session.kind !== "sshSaved") {
+          continue;
+        }
+        if (!hosts.some((h) => h.host === session.hostAlias)) {
+          delete next[sid];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [hosts, sessions]);
 
   useEffect(() => {
     const assignedSessionIds = new Set<string>([
@@ -2802,6 +2850,14 @@ export function App() {
 
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
+    setSessionFileViews((prev) => {
+      if (!(sessionId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     setSessions((prev) => prev.filter((session) => session.id !== sessionId));
     setActiveSession((prev) => (prev === sessionId ? "" : prev));
     setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
@@ -2858,6 +2914,7 @@ export function App() {
     );
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
+    setSessionFileViews({});
     if (withLayoutReset) {
       resetPaneLayout();
     }
@@ -2936,6 +2993,7 @@ export function App() {
     setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
   };
   const resetPaneLayout = () => {
+    setSessionFileViews({});
     const resetSlots: Array<string | null> = [null];
     setSplitSlots(resetSlots);
     setPaneLayouts(createPaneLayoutsFromSlots(resetSlots));
@@ -2980,6 +3038,7 @@ export function App() {
   };
   const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
     isApplyingWorkspaceSnapshotRef.current = true;
+    setSessionFileViews({});
     setSplitSlots([...snapshot.splitSlots]);
     setPaneLayouts(clonePaneLayouts(snapshot.paneLayouts));
     setSplitTree(cloneSplitTree(snapshot.splitTree));
@@ -3064,6 +3123,97 @@ export function App() {
     },
     [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
   );
+
+  const applyRuntimeSplitTreeToWorkspace = useCallback(
+    (workspaceId: string, tree: SplitTreeNode) => {
+      const nextTree = cloneSplitTree(tree);
+      const nextPaneOrder = collectPaneOrder(nextTree);
+      const maxPaneIndex = Math.max(0, ...nextPaneOrder);
+      const newSlots = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
+      const nextLayouts = createPaneLayoutsFromSlots(newSlots);
+
+      if (workspaceId === activeWorkspaceId) {
+        setSplitTree(nextTree);
+        setSplitSlots(newSlots);
+        setPaneLayouts(nextLayouts);
+        setActivePaneIndex(nextPaneOrder[0] ?? 0);
+        setActiveSession("");
+        nextPaneIndexRef.current = maxPaneIndex + 1;
+        nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
+        return;
+      }
+
+      setWorkspaceSnapshots((prev) => {
+        const snap = prev[workspaceId];
+        if (!snap) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [workspaceId]: {
+            ...snap,
+            splitTree: nextTree,
+            splitSlots: newSlots,
+            paneLayouts: nextLayouts,
+            activePaneIndex: nextPaneOrder[0] ?? 0,
+            activeSessionId: "",
+          },
+        };
+      });
+    },
+    [activeWorkspaceId],
+  );
+
+  const handleApplyLayoutPresetFromCommandCenter = useCallback(
+    (serialized: LayoutSplitTreeNode) => {
+      const parsed = parseSplitTree(serialized);
+      if (!parsed) {
+        return;
+      }
+      const targetWorkspaceId = workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)
+        ? layoutTargetWorkspaceId
+        : activeWorkspaceId;
+      applyRuntimeSplitTreeToWorkspace(targetWorkspaceId, parsed);
+      if (layoutSwitchToTargetAfterApply && targetWorkspaceId !== activeWorkspaceId) {
+        switchWorkspace(targetWorkspaceId);
+      }
+      setIsLayoutCommandCenterOpen(false);
+    },
+    [
+      activeWorkspaceId,
+      applyRuntimeSplitTreeToWorkspace,
+      layoutSwitchToTargetAfterApply,
+      layoutTargetWorkspaceId,
+      switchWorkspace,
+      workspaceTabs,
+    ],
+  );
+
+  const handleApplyCustomGridFromCommandCenter = useCallback(
+    (rows: number, cols: number) => {
+      if (!isLayoutGridDimensionsValid(rows, cols)) {
+        return;
+      }
+      const tree = createEqualGridSplitTree(rows, cols);
+      const targetWorkspaceId = workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)
+        ? layoutTargetWorkspaceId
+        : activeWorkspaceId;
+      applyRuntimeSplitTreeToWorkspace(targetWorkspaceId, tree);
+      if (layoutSwitchToTargetAfterApply && targetWorkspaceId !== activeWorkspaceId) {
+        switchWorkspace(targetWorkspaceId);
+      }
+      setIsLayoutCommandCenterOpen(false);
+    },
+    [
+      activeWorkspaceId,
+      applyRuntimeSplitTreeToWorkspace,
+      layoutSwitchToTargetAfterApply,
+      layoutTargetWorkspaceId,
+      switchWorkspace,
+      workspaceTabs,
+    ],
+  );
+
   const sendSessionToWorkspace = useCallback(
     (sessionId: string, targetWorkspaceId: string) => {
       const sourcePaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
@@ -3213,6 +3363,53 @@ export function App() {
       case "pane.quickConnect":
         openQuickConnectModal(paneIndex);
         break;
+      case "pane.toggleRemoteFiles": {
+        const sid = splitSlots[paneIndex] ?? null;
+        if (!sid) {
+          break;
+        }
+        const session = sessions.find((s) => s.id === sid);
+        if (!session || (session.kind !== "sshSaved" && session.kind !== "sshQuick")) {
+          break;
+        }
+        setSessionFileViews((prev) => {
+          const cur = prev[sid] ?? "terminal";
+          if (cur === "remote") {
+            const next = { ...prev };
+            delete next[sid];
+            return next;
+          }
+          if (session.kind === "sshSaved") {
+            const hostEntry = hosts.find((h) => h.host === session.hostAlias);
+            if (!hostEntry) {
+              queueMicrotask(() => setError(`Host '${session.hostAlias}' not found.`));
+              return prev;
+            }
+          }
+          return { ...prev, [sid]: "remote" };
+        });
+        break;
+      }
+      case "pane.toggleLocalFiles": {
+        const sidLocal = splitSlots[paneIndex] ?? null;
+        if (!sidLocal) {
+          break;
+        }
+        const sessionLocal = sessions.find((s) => s.id === sidLocal);
+        if (!sessionLocal || sessionLocal.kind !== "local") {
+          break;
+        }
+        setSessionFileViews((prev) => {
+          const cur = prev[sidLocal] ?? "terminal";
+          if (cur === "local") {
+            const next = { ...prev };
+            delete next[sidLocal];
+            return next;
+          }
+          return { ...prev, [sidLocal]: "local" };
+        });
+        break;
+      }
       case "pane.clear":
         await closeSessionInPane(paneIndex);
         break;
@@ -3418,6 +3615,9 @@ export function App() {
   };
 
   const saveCurrentLayoutProfile = async () => {
+    const structureSnapshot = cloneSplitTree(splitTree);
+    const mirrorWorkspaceId = layoutMirrorWorkspaceIdOnSave;
+    const mirrorFromWorkspaceId = activeWorkspaceId;
     const trimmedName = layoutProfileName.trim();
     const fallbackName = selectedLayoutProfile?.name ?? `Layout ${new Date().toLocaleString()}`;
     const name = trimmedName.length > 0 ? trimmedName : fallbackName;
@@ -3478,6 +3678,13 @@ export function App() {
     setLayoutProfileName(profile.name);
     if (!next.some((entry) => entry.id === profile.id)) {
       setSelectedLayoutProfileId(next[0]?.id ?? "");
+    }
+    if (
+      mirrorWorkspaceId &&
+      mirrorWorkspaceId !== mirrorFromWorkspaceId &&
+      workspaceSnapshots[mirrorWorkspaceId]
+    ) {
+      applyRuntimeSplitTreeToWorkspace(mirrorWorkspaceId, structureSnapshot);
     }
   };
 
@@ -3570,23 +3777,6 @@ export function App() {
     nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
   };
 
-  const applyLayoutPresetTree = (serialized: LayoutSplitTreeNode) => {
-    const parsed = parseSplitTree(serialized);
-    if (!parsed) {
-      return;
-    }
-    const nextPaneOrder = collectPaneOrder(parsed);
-    const maxPaneIndex = Math.max(0, ...nextPaneOrder);
-    const newSlots = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
-    setSplitTree(parsed);
-    setSplitSlots(newSlots);
-    setPaneLayouts(createPaneLayoutsFromSlots(newSlots));
-    setActivePaneIndex(nextPaneOrder[0] ?? 0);
-    setActiveSession("");
-    nextPaneIndexRef.current = maxPaneIndex + 1;
-    nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
-  };
-
   const deleteSelectedLayoutProfile = async () => {
     if (!selectedLayoutProfileId) {
       return;
@@ -3606,6 +3796,54 @@ export function App() {
     }
     await deleteSelectedLayoutProfile();
   };
+
+  const paneFileViewForPane = useCallback(
+    (paneIndex: number) => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return "terminal";
+      }
+      return sessionFileViews[sid] ?? "terminal";
+    },
+    [splitSlots, sessionFileViews],
+  );
+
+  const paneContextSessionKindForPane = useCallback(
+    (paneIndex: number): PaneContextSessionKind => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return "empty";
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session) {
+        return "empty";
+      }
+      return session.kind === "local" ? "local" : "ssh";
+    },
+    [splitSlots, sessions],
+  );
+
+  const remoteSshSpecForPane = useCallback(
+    (paneIndex: number): RemoteSshSpec | null => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind === "local") {
+        return null;
+      }
+      if (session.kind === "sshSaved") {
+        const hostEntry = hosts.find((h) => h.host === session.hostAlias);
+        if (!hostEntry) {
+          return null;
+        }
+        return { kind: "saved", host: hostEntry };
+      }
+      return { kind: "quick", request: session.request };
+    },
+    [splitSlots, sessions, hosts],
+  );
 
   const renderSplitNode = createSplitPaneRenderer({
     splitSlots,
@@ -3649,6 +3887,9 @@ export function App() {
     setDragPayload,
     setDraggingKind,
     missingDragPayloadLoggedRef,
+    paneFileViewForPane,
+    paneContextSessionKindForPane,
+    remoteSshSpecForPane,
   });
 
   const appShellStyle = {
@@ -3659,6 +3900,19 @@ export function App() {
   } as CSSProperties;
   const contextMenuPaneSessionId =
     contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
+  const contextPaneSessionKindForMenu: PaneContextSessionKind = (() => {
+    if (!contextMenuPaneSessionId) {
+      return "empty";
+    }
+    const session = sessions.find((s) => s.id === contextMenuPaneSessionId);
+    if (!session) {
+      return "empty";
+    }
+    return session.kind === "local" ? "local" : "ssh";
+  })();
+  const contextPaneFileViewForMenu = contextMenuPaneSessionId
+    ? sessionFileViews[contextMenuPaneSessionId] ?? "terminal"
+    : "terminal";
   const workspaceSendTargets =
     contextMenuPaneSessionId && workspaceTabs.length > 1
       ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
@@ -3941,16 +4195,22 @@ export function App() {
             onSaveProfile={() => void saveCurrentLayoutProfile()}
             pendingDeleteProfileId={pendingLayoutProfileDeleteId}
             onDeleteProfileIntent={() => void handleDeleteSelectedLayoutProfileIntent()}
-            onApplyPreset={(tree) => {
-              applyLayoutPresetTree(tree);
-              setIsLayoutCommandCenterOpen(false);
-            }}
+            onApplyPreset={handleApplyLayoutPresetFromCommandCenter}
+            onApplyCustomGrid={handleApplyCustomGridFromCommandCenter}
             onCloseAllIntent={(withLayoutReset) => void handleCloseAllIntent(withLayoutReset)}
             pendingCloseAllIntent={pendingCloseAllIntent}
             previewTree={layoutCommandCenterPreviewTree}
             applyProfileDisabled={!selectedLayoutProfileId}
             saveDisabled={false}
             closeActionsDisabled={sessions.length === 0}
+            workspaceOptions={layoutCommandWorkspaceOptions}
+            activeWorkspaceId={activeWorkspaceId}
+            layoutTargetWorkspaceId={resolvedLayoutTargetWorkspaceId}
+            onLayoutTargetWorkspaceChange={setLayoutTargetWorkspaceId}
+            layoutSwitchToTargetAfterApply={layoutSwitchToTargetAfterApply}
+            onLayoutSwitchToTargetAfterApplyChange={setLayoutSwitchToTargetAfterApply}
+            layoutMirrorWorkspaceIdOnSave={layoutMirrorWorkspaceIdOnSave}
+            onLayoutMirrorWorkspaceIdOnSaveChange={setLayoutMirrorWorkspaceIdOnSave}
           />
         </Suspense>
       )}
@@ -4001,6 +4261,8 @@ export function App() {
           paneIndex={contextMenu.paneIndex}
           splitMode={contextMenu.splitMode}
           paneSessionId={splitSlots[contextMenu.paneIndex] ?? null}
+          paneSessionKind={contextPaneSessionKindForMenu}
+          paneFileView={contextPaneFileViewForMenu}
           canClosePane={paneOrder.length > 1}
           broadcastModeEnabled={isBroadcastModeEnabled}
           broadcastCount={broadcastTargets.size}

@@ -1,5 +1,9 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { buildPaneContextActions, type ContextActionId } from "../features/context-actions";
+import {
+  buildPaneContextActions,
+  type ContextActionId,
+  type PaneContextSessionKind,
+} from "../features/context-actions";
 import type { SplitMode } from "../features/session-model";
 
 export type WorkspaceTabLite = { id: string; name: string };
@@ -10,6 +14,8 @@ export type PaneContextMenuProps = {
   paneIndex: number;
   splitMode: SplitMode;
   paneSessionId: string | null;
+  paneSessionKind: PaneContextSessionKind;
+  paneFileView: "terminal" | "remote" | "local";
   canClosePane: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
@@ -31,6 +37,8 @@ export function PaneContextMenu({
   paneIndex,
   splitMode,
   paneSessionId,
+  paneSessionKind,
+  paneFileView,
   canClosePane,
   broadcastModeEnabled,
   broadcastCount,
@@ -52,6 +60,8 @@ export function PaneContextMenu({
     >
       {buildPaneContextActions({
         paneSessionId,
+        paneSessionKind,
+        paneFileView,
         canClosePane,
         broadcastModeEnabled,
         broadcastCount,

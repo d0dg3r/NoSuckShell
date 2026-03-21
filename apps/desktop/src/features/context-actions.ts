@@ -1,6 +1,8 @@
 export type ContextActionId =
   | "pane.newLocal"
   | "pane.quickConnect"
+  | "pane.toggleRemoteFiles"
+  | "pane.toggleLocalFiles"
   | "pane.clear"
   | "pane.close"
   | "layout.split.left"
@@ -23,8 +25,12 @@ export type ContextAction = {
   separatorAbove?: boolean;
 };
 
+export type PaneContextSessionKind = "empty" | "ssh" | "local";
+
 type BuildArgs = {
   paneSessionId: string | null;
+  paneSessionKind: PaneContextSessionKind;
+  paneFileView: "terminal" | "remote" | "local";
   canClosePane?: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
@@ -52,6 +58,8 @@ const buildSplitLabels = (splitMode: "duplicate" | "empty") => {
 
 export const buildPaneContextActions = ({
   paneSessionId,
+  paneSessionKind,
+  paneFileView,
   canClosePane = true,
   broadcastModeEnabled,
   splitMode = "duplicate",
@@ -82,9 +90,29 @@ export const buildPaneContextActions = ({
         separatorAbove: true,
       };
 
+  const remoteFilesAction: ContextAction | null =
+    paneSessionKind === "ssh"
+      ? {
+          id: "pane.toggleRemoteFiles",
+          label: paneFileView === "remote" ? "Back to terminal" : "Browse remote files (SFTP)",
+          disabled: !hasPaneSession,
+        }
+      : null;
+
+  const localFilesAction: ContextAction | null =
+    paneSessionKind === "local"
+      ? {
+          id: "pane.toggleLocalFiles",
+          label: paneFileView === "local" ? "Back to terminal" : "Browse local files",
+          disabled: !hasPaneSession,
+        }
+      : null;
+
   return [
     { id: "pane.newLocal", label: "New local terminal" },
     { id: "pane.quickConnect", label: "Quick connect" },
+    ...(remoteFilesAction ? [remoteFilesAction] : []),
+    ...(localFilesAction ? [localFilesAction] : []),
     {
       id: "layout.split.top",
       label: splitLabels.top,

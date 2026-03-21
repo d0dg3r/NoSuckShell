@@ -1,4 +1,10 @@
 import type { LayoutSplitTreeNode } from "../types";
+import { createId } from "./app-id";
+
+/** Limits for Layout Command Center custom grid UI. */
+export const LAYOUT_GRID_MAX_ROWS = 12;
+export const LAYOUT_GRID_MAX_COLS = 12;
+export const LAYOUT_GRID_MAX_PANES = 48;
 
 export type SplitAxis = "horizontal" | "vertical";
 export type SplitLeafNode = { id: string; type: "leaf"; paneIndex: number };
@@ -115,6 +121,54 @@ export const createTreeFromPaneCount = (paneCount: number): SplitTreeNode => {
     };
   }
   return tree;
+};
+
+const buildEqualGridRow = (cols: number, startPane: number, idPrefix: string): SplitTreeNode => {
+  if (cols <= 1) {
+    return createLeafNode(startPane);
+  }
+  return {
+    id: `${idPrefix}-h-${startPane}`,
+    type: "split",
+    axis: "horizontal",
+    ratio: 1 / cols,
+    first: createLeafNode(startPane),
+    second: buildEqualGridRow(cols - 1, startPane + 1, idPrefix),
+  };
+};
+
+const buildEqualGrid = (rows: number, cols: number, startPane: number, idPrefix: string): SplitTreeNode => {
+  if (rows <= 1) {
+    return buildEqualGridRow(cols, startPane, idPrefix);
+  }
+  return {
+    id: `${idPrefix}-v-${startPane}`,
+    type: "split",
+    axis: "vertical",
+    ratio: 1 / rows,
+    first: buildEqualGridRow(cols, startPane, idPrefix),
+    second: buildEqualGrid(rows - 1, cols, startPane + cols, idPrefix),
+  };
+};
+
+/** Equal M×N pane grid as a binary split tree (row-major pane indices). Ratios may be below MIN_SPLIT_RATIO for many columns/rows. */
+export const createEqualGridSplitTree = (rows: number, cols: number): SplitTreeNode => {
+  const r = Math.max(1, Math.floor(rows));
+  const c = Math.max(1, Math.floor(cols));
+  const idPrefix = `grid-${createId()}`;
+  return buildEqualGrid(r, c, 0, idPrefix);
+};
+
+export const isLayoutGridDimensionsValid = (rows: number, cols: number): boolean => {
+  const r = Math.floor(rows);
+  const c = Math.floor(cols);
+  if (!Number.isFinite(r) || !Number.isFinite(c)) {
+    return false;
+  }
+  if (r < 1 || c < 1 || r > LAYOUT_GRID_MAX_ROWS || c > LAYOUT_GRID_MAX_COLS) {
+    return false;
+  }
+  return r * c <= LAYOUT_GRID_MAX_PANES;
 };
 
 export const serializeSplitTree = (node: SplitTreeNode): LayoutSplitTreeNode => {

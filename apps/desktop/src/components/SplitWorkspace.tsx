@@ -1,13 +1,23 @@
 import { Suspense, lazy, type Dispatch, type DragEvent as ReactDragEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction } from "react";
-import type { ContextActionId } from "../features/context-actions";
+import type { ContextActionId, PaneContextSessionKind } from "../features/context-actions";
 import type { DragPayload, PaneDropZone } from "../features/pane-dnd";
 import type { ContextMenuState, SplitMode } from "../features/session-model";
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO, type SplitAxis, type SplitTreeNode } from "../features/split-tree";
-import type { HostConfig } from "../types";
+import type { HostConfig, RemoteSshSpec } from "../types";
 
 const TerminalPane = lazy(async () => {
   const m = await import("./TerminalPane");
   return { default: m.TerminalPane };
+});
+
+const RemoteFilePane = lazy(async () => {
+  const m = await import("./RemoteFilePane");
+  return { default: m.RemoteFilePane };
+});
+
+const LocalFilePane = lazy(async () => {
+  const m = await import("./LocalFilePane");
+  return { default: m.LocalFilePane };
 });
 
 export type SplitPaneRendererBridge = {
@@ -58,6 +68,9 @@ export type SplitPaneRendererBridge = {
   setDragPayload: (event: ReactDragEvent, payload: DragPayload) => void;
   setDraggingKind: (kind: DragPayload["type"] | null) => void;
   missingDragPayloadLoggedRef: MutableRefObject<boolean>;
+  paneFileViewForPane: (paneIndex: number) => "terminal" | "remote" | "local";
+  paneContextSessionKindForPane: (paneIndex: number) => PaneContextSessionKind;
+  remoteSshSpecForPane: (paneIndex: number) => RemoteSshSpec | null;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -84,6 +97,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
         b.isBroadcastModeEnabled &&
         b.visiblePaneSessionIds.length > 0 &&
         b.visiblePaneSessionIds.every((sessionId) => b.broadcastTargets.has(sessionId));
+      const paneFileView = b.paneFileViewForPane(paneIndex);
+      const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
+      const remoteSpec = b.remoteSshSpecForPane(paneIndex);
       return (
         <div
           key={`pane-${paneIndex}`}
@@ -343,6 +359,75 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               </button>
             </div>
             <span className="pane-toolbar-separator" aria-hidden="true" />
+            <div className="split-pane-toolbar-group split-pane-toolbar-group-files">
+              {paneCtxKind === "ssh" && hasPaneSession && paneFileView === "terminal" ? (
+                <button
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Browse remote files (SFTP)"
+                  aria-label={`Browse remote files in pane ${paneIndex + 1}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleRemoteFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  </svg>
+                </button>
+              ) : null}
+              {paneCtxKind === "ssh" && hasPaneSession && paneFileView === "remote" ? (
+                <button
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Back to terminal"
+                  aria-label={`Return to terminal in pane ${paneIndex + 1}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleRemoteFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="5" y="5" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
+                  </svg>
+                </button>
+              ) : null}
+              {paneCtxKind === "local" && hasPaneSession && paneFileView === "terminal" ? (
+                <button
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Browse local files"
+                  aria-label={`Browse local files in pane ${paneIndex + 1}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleLocalFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 4.5l7.5 5.2v9.3a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V9.7L12 4.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  </svg>
+                </button>
+              ) : null}
+              {paneCtxKind === "local" && hasPaneSession && paneFileView === "local" ? (
+                <button
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Back to terminal"
+                  aria-label={`Return to terminal in pane ${paneIndex + 1}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleLocalFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="5" y="5" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+            <span className="pane-toolbar-separator" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
               <button
                 className="btn action-icon-btn pane-toolbar-btn"
@@ -378,16 +463,33 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
             </div>
           </div>
           {paneSessionId ? (
-            <Suspense
-              fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
-            >
-              <TerminalPane
-                sessionId={paneSessionId}
-                onUserInput={b.handleTerminalInput}
-                fontSize={b.terminalFontSize}
-                fontFamily={b.terminalFontFamily}
-              />
-            </Suspense>
+            paneFileView === "remote" && remoteSpec ? (
+              <Suspense
+                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+              >
+                <RemoteFilePane
+                  spec={remoteSpec}
+                  onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
+                />
+              </Suspense>
+            ) : paneFileView === "local" ? (
+              <Suspense
+                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+              >
+                <LocalFilePane onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)} />
+              </Suspense>
+            ) : (
+              <Suspense
+                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
+              >
+                <TerminalPane
+                  sessionId={paneSessionId}
+                  onUserInput={b.handleTerminalInput}
+                  fontSize={b.terminalFontSize}
+                  fontFamily={b.terminalFontFamily}
+                />
+              </Suspense>
+            )
           ) : (
             <div className="empty-pane split-empty-pane">
               <p className="split-empty-pane-copy">One click and we both get what we want</p>

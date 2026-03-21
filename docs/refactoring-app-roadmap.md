@@ -56,7 +56,7 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 ## 4. Optional next steps (not required)
 
-- **Component smoke tests:** [`HostListRow.test.tsx`](../apps/desktop/src/components/HostListRow.test.tsx) covers render, favorite / selection clicks, and open slide + `HostForm` (bridge props via `noopBridge()` helper).
+- **Component smoke tests:** shared bridge fixtures in [`host-list-row-fixtures.ts`](../apps/desktop/src/test/host-list-row-fixtures.ts); [`HostListRow.test.tsx`](../apps/desktop/src/components/HostListRow.test.tsx) (row UI), [`HostSidebar.test.tsx`](../apps/desktop/src/components/HostSidebar.test.tsx) (empty list, one row, settings click via `minimalHostSidebarProps()`).
 - **`useReducer` / context** for workspace or split state: defer until interaction bugs or review pain justify a single owner for that subgraph; current hooks + props remain easier to follow for most changes.
 - **Further shrink `App`:** [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) renders [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) via a typed `hostListRowBridge` (no `renderHostRow` callback in `App`). Right-dock workspace UI lives in [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx).
 

@@ -220,6 +220,21 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return [] as GroupObject[];
     case "list_tags":
       return [] as TagObject[];
+    case "sftp_list_remote_dir":
+      return [
+        { name: "etc", isDir: true, size: 0, mtime: null },
+        { name: "home", isDir: true, size: 0, mtime: null },
+        { name: "README.txt", isDir: false, size: 12, mtime: Math.floor(Date.now() / 1000) },
+      ];
+    case "list_local_dir":
+      return [
+        { name: "Documents", isDir: true, size: 0, mtime: null },
+        { name: "notes.md", isDir: false, size: 8, mtime: Math.floor(Date.now() / 1000) },
+      ];
+    case "get_local_home_canonical_path":
+      return "/home/e2e";
+    case "sftp_download_file":
+      return "/home/e2e/Downloads/mock-download.bin";
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);
   }
