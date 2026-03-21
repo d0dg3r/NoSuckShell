@@ -19,16 +19,18 @@ If none of these apply and releases are stable, **defer** large splits; use the 
 
 ## 2. Mini-audit: `App.tsx` structure
 
-Line ranges are approximate (file size changes over time). Use them as **navigation hints**, not rigid contracts.
+Line ranges are approximate (~**4280** lines as of the last decoupling pass). Use them as **navigation hints**, not rigid contracts.
 
 | Region (lines) | Content |
 | --- | --- |
-| **~1–661** | Imports; module-level **types** (`SessionTab`, `WorkspaceSnapshot`, `SplitTreeNode`, …); **constants** (storage keys, layout presets, `MOBILE_STACKED_MEDIA`); **pure helpers** (split-tree clone/rebalance, pane drop overlay math, …). View filters: [`features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts). |
-| **~662–~3750** | `export function App()`: **state** (hosts, sessions, entity store, workspaces, layout profiles, UI chrome, modals); **refs**; **effects** (persistence, listeners, focus); **handlers** (connect, save host, backup, layout apply, …). |
-| **~3751–~4283** | **Render helpers** scoped inside `App`: e.g. `renderSplitNode` (pane chrome, drop zones, `TerminalPane`), host row / slide-menu rendering with `HostForm`. Heavy prop closure on parent state. |
-| **~4295–end** | **Root JSX**: `app-shell`, sidebar (`aside`), filters, session tabs, split container, context menu, **app settings** (modal/docked), quick-connect / add-host modals, mobile stacked shell. |
+| **~1–~220** | Imports; lazy `LayoutCommandCenter`; re-exports from [`features/`](../apps/desktop/src/features/) (split-tree, workspace snapshot, pane DnD, preferences, session model, bootstrap, …). |
+| **~220–~3650** | `export function App()`: **state**, **refs**, **effects** (many persisted in `hooks/` — workspace bootstrap/persist, ref sync, session-output trust listener), **handlers** (connect, backup, layout, DnD, …). |
+| **~3650–~3950** | `createSplitPaneRenderer` bridge + **`renderHostRow`** (host row + slide UI); still heavy. |
+| **~3950–end** | **Root JSX**: `app-shell`, [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx), workspace tabs, terminal grid (via `renderSplitNode` from [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx)), context menus, settings, modals ([`AddHostModal`](../apps/desktop/src/components/AddHostModal.tsx), [`QuickConnectModal`](../apps/desktop/src/components/QuickConnectModal.tsx), [`TrustHostModal`](../apps/desktop/src/components/TrustHostModal.tsx)), mobile shell. |
 
-**Effect / listener clusters:** search within `App()` for `useEffect` and `listen(` — most side effects live in the middle third of the component; extracting UI without moving the owning effect first tends to create stale closures or duplicate subscriptions.
+**Pure logic (no React)** now also lives in: [`split-tree.ts`](../apps/desktop/src/features/split-tree.ts), [`workspace-snapshot.ts`](../apps/desktop/src/features/workspace-snapshot.ts), [`pane-dnd.ts`](../apps/desktop/src/features/pane-dnd.ts), [`app-preferences.ts`](../apps/desktop/src/features/app-preferences.ts), [`app-bootstrap.ts`](../apps/desktop/src/features/app-bootstrap.ts), [`session-model.ts`](../apps/desktop/src/features/session-model.ts), [`app-id.ts`](../apps/desktop/src/features/app-id.ts), [`tauri-runtime.ts`](../apps/desktop/src/features/tauri-runtime.ts) (with Vitest where noted in repo).
+
+**Hooks:** [`useAppRefSync`](../apps/desktop/src/hooks/useAppRefSync.ts), [`useSessionOutputTrustListener`](../apps/desktop/src/hooks/useSessionOutputTrustListener.ts), [`useWorkspaceLocalStorage`](../apps/desktop/src/hooks/useWorkspaceLocalStorage.ts) (`useWorkspaceBootstrapFromStorage`, `useWorkspacePersistToStorage`).
 
 ## 3. Three incremental extractions (order: low risk → larger)
 
@@ -36,36 +38,27 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 ### A) Pure view-profile / filter logic → `features/`
 
-**Scope:** Functions and small types at module top that only need `types.ts` / `ViewFilterRule` / `HostRowViewModel`-shaped rows — e.g. `parseBooleanRuleValue`, `getRuleFieldValue`, `evaluateRule`, `evaluateGroup`, and related helpers, plus `createEmptyFilterGroup` / `createDefaultViewProfile` if kept pure.
-
-**Target:** e.g. [`apps/desktop/src/features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts) (name can vary).
+**Target:** [`apps/desktop/src/features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts).
 
 **Status:** Done — logic + `ViewFilterHostRow` live in that module; Vitest in `view-profile-filters.test.ts`; `App.tsx` wires `evaluateGroup`, `createDefaultViewProfile`, and `createEmptyViewFilterRule`.
 
-**Risk:** Low — no React; easy to unit test beside existing `features/*.test.ts`.
-
-**Benefit:** Readability + testability; shrinks `App.tsx` without prop drilling.
-
 ### B) App settings panel body → `components/`
 
-**Scope:** The large block that renders tabs (`appearance`, `layout`, `connections`, `data`, `views`, `store`, …) when `isAppSettingsOpen` is true — **presentational** subtree first, still driven by props/callbacks from `App`.
+**Target:** [`apps/desktop/src/components/AppSettingsPanel.tsx`](../apps/desktop/src/components/AppSettingsPanel.tsx).
 
-**Target:** e.g. [`apps/desktop/src/components/AppSettingsPanel.tsx`](../apps/desktop/src/components/AppSettingsPanel.tsx).
-
-**Risk:** Medium — many props or a single “settings model” object; avoid passing entire `App` state; consider a narrow typed props interface.
-
-**Benefit:** Reviews focus on settings UX; parallel work on sidebar vs settings becomes easier.
+**Status:** Done (panel body extracted earlier; still driven by props from `App`).
 
 ### C) Sidebar host list + filters → `components/`
 
-**Scope:** `aside` content: search, status/favorite/tag filters, host list rows, quick-add affordances — **not** necessarily all session/workspace logic on first pass.
+**Target:** [`apps/desktop/src/components/HostSidebar.tsx`](../apps/desktop/src/components/HostSidebar.tsx).
 
-**Target:** e.g. [`apps/desktop/src/components/HostSidebar.tsx`](../apps/desktop/src/components/HostSidebar.tsx).
+**Status:** Done — sidebar chrome, filters, and host list call back into `App` via props; host-row rendering stays `renderHostRow` in `App` until a further slice.
 
-**Risk:** Medium–high — DnD (`setDragPayload`, hover highlights) and host slide-menu tie into global state; extract in slices (list-only first, then drag).
+## 4. Optional next steps (not required)
 
-**Benefit:** Parallel development (hosts vs terminal area); clearer boundary for future features.
+- **`useReducer` / context** for workspace or split state: defer until interaction bugs or review pain justify a single owner for that subgraph; current hooks + props remain easier to follow for most changes.
+- **Further shrink `App`:** extract `renderHostRow` + host slide panel into `HostRow` / `HostSlidePanel` components; move more DnD host-list logic into `HostSidebar` incrementally.
 
-## 4. TypeScript output (`noEmit`)
+## 5. TypeScript output (`noEmit`)
 
 Compiler output next to sources (duplicate `.js` files) is avoided by `"noEmit": true` in [`apps/desktop/tsconfig.json`](../apps/desktop/tsconfig.json). `npm run build` remains `tsc && vite build`: **typecheck only** from `tsc`, bundling from Vite.

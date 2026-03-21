@@ -12,7 +12,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   closeSession,
   deleteHost,
@@ -44,7 +43,17 @@ import {
   startSession,
   touchHostLastUsed,
 } from "./tauri-api";
+import { AddHostModal } from "./components/AddHostModal";
+import { HostContextMenu } from "./components/HostContextMenu";
 import { HostForm } from "./components/HostForm";
+import { HostSidebar } from "./components/HostSidebar";
+import { PaneContextMenu } from "./components/PaneContextMenu";
+import { QuickConnectModal } from "./components/QuickConnectModal";
+import { createSplitPaneRenderer } from "./components/SplitWorkspace";
+import { useAppRefSync } from "./hooks/useAppRefSync";
+import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
+import { useWorkspaceBootstrapFromStorage, useWorkspacePersistToStorage } from "./hooks/useWorkspaceLocalStorage";
+import { TrustHostModal } from "./components/TrustHostModal";
 import {
   AppSettingsPanel,
   type AppSettingsTab,
@@ -65,12 +74,8 @@ const LayoutCommandCenter = lazy(async () => {
   return { default: m.LayoutCommandCenter };
 });
 
-const TerminalPane = lazy(async () => {
-  const m = await import("./components/TerminalPane");
-  return { default: m.TerminalPane };
-});
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { buildPaneContextActions, type ContextActionId } from "./features/context-actions";
+import { type ContextActionId } from "./features/context-actions";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -111,7 +116,6 @@ import type {
   LayoutSplitTreeNode,
   PaneLayoutItem,
   QuickSshSessionRequest,
-  SessionOutputEvent,
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
@@ -119,530 +123,85 @@ import type {
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTransparent from "../../../img/logo_tranparent.png";
-
-const emptyHost = (): HostConfig => ({
-  host: "",
-  hostName: "",
-  user: "",
-  port: 22,
-  identityFile: "",
-  proxyJump: "",
-  proxyCommand: "",
-});
-
-const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => ({
-  hostName: "",
-  user: defaultUser.trim(),
-  identityFile: "",
-  proxyJump: "",
-  proxyCommand: "",
-});
-
-type SavedSshSessionTab = {
-  id: string;
-  kind: "sshSaved";
-  hostAlias: string;
-};
-type QuickSshSessionTab = {
-  id: string;
-  kind: "sshQuick";
-  label: string;
-  request: QuickSshSessionRequest;
-};
-type LocalSessionTab = {
-  id: string;
-  kind: "local";
-  label: string;
-};
-type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab;
-type QuickConnectDraft = {
-  hostName: string;
-  user: string;
-  identityFile: string;
-  proxyJump: string;
-  proxyCommand: string;
-};
-
-type HostStatusFilter = "all" | "connected" | "disconnected";
-
-type QuickConnectWizardStep = 1 | 2;
-type AutoArrangeActiveMode = "a" | "b" | "c";
-type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
-type SplitMode = "duplicate" | "empty";
-type WorkspaceSnapshot = {
-  id: string;
-  name: string;
-  splitSlots: Array<string | null>;
-  paneLayouts: PaneLayoutItem[];
-  splitTree: SplitTreeNode;
-  activePaneIndex: number;
-  activeSessionId: string;
-};
-type DragPayload =
-  | { type: "session"; sessionId: string }
-  | { type: "machine"; hostAlias: string };
-type PaneDropZone = "left" | "right" | "top" | "bottom" | "center";
-type ContextMenuState = {
-  visible: boolean;
-  x: number;
-  y: number;
-  paneIndex: number | null;
-  splitMode: SplitMode;
-};
-type SplitAxis = "horizontal" | "vertical";
-type SplitLeafNode = { id: string; type: "leaf"; paneIndex: number };
-type SplitContainerNode = {
-  id: string;
-  type: "split";
-  axis: SplitAxis;
-  ratio: number;
-  first: SplitTreeNode;
-  second: SplitTreeNode;
-};
-type SplitTreeNode = SplitLeafNode | SplitContainerNode;
-type SplitResizeState = { splitId: string; axis: SplitAxis };
-type TrustPromptRequest = { sessionId: string; hostAlias: string };
-const DND_PAYLOAD_MIME = "application/x-nosuckshell-dnd";
-const DEFAULT_SPLIT_RATIO = 0.6;
-const MIN_SPLIT_RATIO = 0.2;
-const MAX_SPLIT_RATIO = 0.8;
-
-const SIDEBAR_MIN_WIDTH = 240;
-const SIDEBAR_MAX_WIDTH = 520;
-const SIDEBAR_DEFAULT_WIDTH = 280;
-const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
-const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
-const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
-const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
-const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
-const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
-const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
-const UI_FONT_PRESET_STORAGE_KEY = "nosuckshell.ui.fontPreset";
-const TERMINAL_FONT_PRESET_STORAGE_KEY = "nosuckshell.terminal.fontPreset";
-const QUICK_CONNECT_MODE_STORAGE_KEY = "nosuckshell.quickConnect.mode";
-const QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY = "nosuckshell.quickConnect.autoTrust";
-const SPLIT_RATIO_PRESET_STORAGE_KEY = "nosuckshell.layout.splitRatioPreset";
-const AUTO_ARRANGE_MODE_STORAGE_KEY = "nosuckshell.layout.autoArrangeMode";
-
-const parseStoredAutoArrangeMode = (raw: string | null): AutoArrangeMode => {
-  if (raw === "off" || raw === "a" || raw === "b" || raw === "c" || raw === "free") {
-    return raw;
-  }
-  return "c";
-};
-const WORKSPACES_STORAGE_KEY = "nosuckshell.layout.workspaces.v1";
-const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
-const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
-const DEFAULT_WORKSPACE_ID = "workspace-main";
-const SPLIT_RATIO_PRESET_VALUE: Record<SplitRatioPreset, number> = {
-  "50-50": 0.5,
-  "60-40": 0.6,
-  "70-30": 0.7,
-};
-const TERMINAL_FONT_FAMILY_BY_PRESET: Record<TerminalFontPreset, string> = {
-  "jetbrains-mono":
-    '"JetBrains Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-  "ibm-plex-mono":
-    '"IBM Plex Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-  "source-code-pro":
-    '"Source Code Pro", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-};
-const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
-  aggressive: 12,
-  balanced: 13,
-  safe: 14,
-};
-const TERMINAL_FONT_OFFSET_MIN = -3;
-const TERMINAL_FONT_OFFSET_MAX = 6;
-const TERMINAL_FONT_MIN = 9;
-const TERMINAL_FONT_MAX = 22;
-const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
-const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
-/** Must match CSS breakpoint for stacked-mobile shell */
-const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
-
-const createId = (): string => {
-  let suffix: string;
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const arr = new Uint32Array(1);
-    crypto.getRandomValues(arr);
-    suffix = arr[0].toString(36).padStart(8, "0").slice(0, 8);
-  } else {
-    suffix = Math.random().toString(36).slice(2, 10);
-  }
-  return `${Date.now()}-${suffix}`;
-};
-const hasTauriTransformCallback = (): boolean => {
-  if (import.meta.env.VITE_E2E === "true") {
-    return true;
-  }
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { transformCallback?: unknown } })
-    .__TAURI_INTERNALS__;
-  return typeof tauriInternals?.transformCallback === "function";
-};
-
-/** Block WebKit/Electron default context menu app-wide except in real text fields. */
-const allowNativeBrowserContextMenu = (target: EventTarget | null): boolean => {
-  if (!(target instanceof Element)) {
-    return false;
-  }
-  if (target.closest("textarea, select, [contenteditable='true'], [contenteditable='']")) {
-    return true;
-  }
-  const input = target.closest("input");
-  if (!input) {
-    return false;
-  }
-  const type = (input as HTMLInputElement).type;
-  return (
-    type === "text" ||
-    type === "search" ||
-    type === "password" ||
-    type === "email" ||
-    type === "url" ||
-    type === "tel" ||
-    type === "number" ||
-    type === "date" ||
-    type === "time" ||
-    type === "datetime-local" ||
-    type === ""
-  );
-};
-
-const clampSidebarWidth = (value: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
-const readLayoutMode = (): LayoutMode => {
-  if (typeof window === "undefined") {
-    return "auto";
-  }
-  const persisted = window.localStorage.getItem(LAYOUT_MODE_STORAGE_KEY);
-  return persisted === "wide" || persisted === "compact" ? persisted : "auto";
-};
-const readSplitRatioPreset = (): SplitRatioPreset => {
-  if (typeof window === "undefined") {
-    return "60-40";
-  }
-  const persisted = window.localStorage.getItem(SPLIT_RATIO_PRESET_STORAGE_KEY);
-  return persisted === "50-50" || persisted === "60-40" || persisted === "70-30" ? persisted : "60-40";
-};
-const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
-const createDefaultEntityStore = (): EntityStore => ({
-  schemaVersion: 3,
-  updatedAt: 0,
-  users: {},
-  groups: {},
-  keys: {},
-  tags: {},
-  hostBindings: {},
-});
-
-const normalizeEntityStore = (store: EntityStore): EntityStore => ({
-  ...store,
-  users: Object.fromEntries(
-    Object.entries(store.users).map(([id, u]) => [
-      id,
-      {
-        ...u,
-        hostName: u.hostName ?? "",
-        proxyJump: u.proxyJump ?? "",
-      },
-    ]),
-  ),
-});
-const createDefaultHostMetadata = (): HostMetadata => ({ favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false });
-const createLeafNode = (paneIndex: number): SplitLeafNode => ({ id: `leaf-${paneIndex}`, type: "leaf", paneIndex });
-const cloneSplitTree = (node: SplitTreeNode): SplitTreeNode =>
-  node.type === "leaf"
-    ? { ...node }
-    : {
-        ...node,
-        first: cloneSplitTree(node.first),
-        second: cloneSplitTree(node.second),
-      };
-const clonePaneLayouts = (layouts: PaneLayoutItem[]): PaneLayoutItem[] => layouts.map((entry) => ({ ...entry }));
-const cloneWorkspaceSnapshot = (snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
-  ...snapshot,
-  splitSlots: [...snapshot.splitSlots],
-  paneLayouts: clonePaneLayouts(snapshot.paneLayouts),
-  splitTree: cloneSplitTree(snapshot.splitTree),
-});
-const rebalanceSplitTree = (node: SplitTreeNode): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node;
-  }
-  const nextFirst = rebalanceSplitTree(node.first);
-  const nextSecond = rebalanceSplitTree(node.second);
-  const nextRatio = 0.5;
-  if (nextFirst === node.first && nextSecond === node.second && node.ratio === nextRatio) {
-    return node;
-  }
-  return {
-    ...node,
-    ratio: nextRatio,
-    first: nextFirst,
-    second: nextSecond,
-  };
-};
-const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOrder: number[]): Array<string | null> => {
-  if (paneOrder.length === 0) {
-    return slots;
-  }
-  const maxPaneIndex = Math.max(0, ...paneOrder);
-  const next = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
-  paneOrder.forEach((paneIndex) => {
-    next[paneIndex] = slots[paneIndex] ?? null;
-  });
-  if (next.length !== slots.length) {
-    return next;
-  }
-  for (let index = 0; index < next.length; index += 1) {
-    if (next[index] !== slots[index]) {
-      return next;
-    }
-  }
-  return slots;
-};
-
-/** Must match `.pane-drop-zones` in styles.css (size + grid fr ratios). */
-const PANE_DROP_OVERLAY = {
-  widthPx: 190,
-  widthMaxPct: 0.88,
-  widthCap: 220,
-  heightPx: 160,
-  heightMaxPct: 0.78,
-  heightCap: 190,
-  gapPx: 5,
-  /** 1fr + 1.2fr + 1fr */
-  frSum: 3.2,
-} as const;
-
-const getPaneDropOverlaySize = (paneWidth: number, paneHeight: number): { w: number; h: number } => {
-  const w = Math.min(
-    PANE_DROP_OVERLAY.widthCap,
-    Math.min(PANE_DROP_OVERLAY.widthPx, paneWidth * PANE_DROP_OVERLAY.widthMaxPct),
-  );
-  const h = Math.min(
-    PANE_DROP_OVERLAY.heightCap,
-    Math.min(PANE_DROP_OVERLAY.heightPx, paneHeight * PANE_DROP_OVERLAY.heightMaxPct),
-  );
-  return { w, h };
-};
-
-const resolvePaneDropZoneFromOverlay = (
-  clientX: number,
-  clientY: number,
-  bounds: Pick<DOMRect, "left" | "top" | "width" | "height">,
-): PaneDropZone => {
-  const { w, h } = getPaneDropOverlaySize(bounds.width, bounds.height);
-  const left = bounds.left + (bounds.width - w) / 2;
-  const top = bounds.top + (bounds.height - h) / 2;
-  const lx = Math.max(0, Math.min(w, clientX - left));
-  const ly = Math.max(0, Math.min(h, clientY - top));
-
-  const { frSum, gapPx } = PANE_DROP_OVERLAY;
-  const trackW = w - 2 * gapPx;
-  const trackH = h - 2 * gapPx;
-  const col0w = (trackW * 1) / frSum;
-  const col1w = (trackW * 1.2) / frSum;
-  const row0h = (trackH * 1) / frSum;
-  const row1h = (trackH * 1.2) / frSum;
-  const x1 = col0w;
-  const x2 = col0w + gapPx + col1w;
-  const y1 = row0h;
-  const y2 = row0h + gapPx + row1h;
-
-  const col = lx < x1 ? 0 : lx < x2 ? 1 : 2;
-  const row = ly < y1 ? 0 : ly < y2 ? 1 : 2;
-
-  if (row === 1 && col === 1) return "center";
-  if (row === 0 && col === 1) return "top";
-  if (row === 2 && col === 1) return "bottom";
-  if (row === 1 && col === 0) return "left";
-  if (row === 1 && col === 2) return "right";
-
-  const midTop = { x: w / 2, y: 0 };
-  const midBottom = { x: w / 2, y: h };
-  const midLeft = { x: 0, y: h / 2 };
-  const midRight = { x: w, y: h / 2 };
-  const dist = (ax: number, ay: number) => Math.hypot(lx - ax, ly - ay);
-
-  if (row === 0 && col === 0) {
-    return dist(midTop.x, midTop.y) < dist(midLeft.x, midLeft.y) ? "top" : "left";
-  }
-  if (row === 0 && col === 2) {
-    return dist(midTop.x, midTop.y) < dist(midRight.x, midRight.y) ? "top" : "right";
-  }
-  if (row === 2 && col === 0) {
-    return dist(midBottom.x, midBottom.y) < dist(midLeft.x, midLeft.y) ? "bottom" : "left";
-  }
-  return dist(midBottom.x, midBottom.y) < dist(midRight.x, midRight.y) ? "bottom" : "right";
-};
-
-const createEmptyWorkspaceSnapshot = (id: string, name: string): WorkspaceSnapshot => {
-  const splitSlots = createInitialPaneState();
-  return {
-    id,
-    name,
-    splitSlots,
-    paneLayouts: createPaneLayoutsFromSlots(splitSlots),
-    splitTree: createLeafNode(0),
-    activePaneIndex: 0,
-    activeSessionId: "",
-  };
-};
-const collectPaneOrder = (node: SplitTreeNode): number[] =>
-  node.type === "leaf" ? [node.paneIndex] : [...collectPaneOrder(node.first), ...collectPaneOrder(node.second)];
-
-/** Places a new session into a workspace snapshot (free pane or new split). Used for host connect → chosen workspace. */
-const appendSessionToWorkspaceSnapshot = (
-  targetSnapshot: WorkspaceSnapshot,
-  sessionId: string,
-  splitRatioDefaultValue: number,
-): WorkspaceSnapshot => {
-  const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
-  const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
-  const nextTargetPaneIndex =
-    typeof firstFreePaneIndex === "number"
-      ? firstFreePaneIndex
-      : Math.max(-1, ...targetPaneOrder) + 1;
-  const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
-  const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
-  if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
-    nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
-  }
-  const nextTargetSplitTree: SplitTreeNode =
-    typeof firstFreePaneIndex === "number"
-      ? cloneSplitTree(targetSnapshot.splitTree)
-      : {
-          id: `split-workspace-${createId()}`,
-          type: "split",
-          axis: "vertical",
-          ratio: splitRatioDefaultValue,
-          first: cloneSplitTree(targetSnapshot.splitTree),
-          second: createLeafNode(nextTargetPaneIndex),
-        };
-  return {
-    ...cloneWorkspaceSnapshot(targetSnapshot),
-    splitSlots: nextTargetSlots,
-    paneLayouts: nextTargetPaneLayouts,
-    splitTree: nextTargetSplitTree,
-    activePaneIndex: nextTargetPaneIndex,
-    activeSessionId: sessionId,
-  };
-};
-
-const replacePaneInTree = (
-  node: SplitTreeNode,
-  targetPaneIndex: number,
-  createReplacement: (leaf: SplitLeafNode) => SplitTreeNode,
-): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node.paneIndex === targetPaneIndex ? createReplacement(node) : node;
-  }
-  return {
-    ...node,
-    first: replacePaneInTree(node.first, targetPaneIndex, createReplacement),
-    second: replacePaneInTree(node.second, targetPaneIndex, createReplacement),
-  };
-};
-const updateSplitRatioInTree = (node: SplitTreeNode, splitId: string, ratio: number): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node;
-  }
-  if (node.id === splitId) {
-    return { ...node, ratio: Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio)) };
-  }
-  return {
-    ...node,
-    first: updateSplitRatioInTree(node.first, splitId, ratio),
-    second: updateSplitRatioInTree(node.second, splitId, ratio),
-  };
-};
-const removePaneFromTree = (node: SplitTreeNode, targetPane: number): SplitTreeNode | null => {
-  if (node.type === "leaf") {
-    return node.paneIndex === targetPane ? null : node;
-  }
-  const nextFirst = removePaneFromTree(node.first, targetPane);
-  const nextSecond = removePaneFromTree(node.second, targetPane);
-  if (!nextFirst && !nextSecond) {
-    return null;
-  }
-  if (!nextFirst) {
-    return nextSecond;
-  }
-  if (!nextSecond) {
-    return nextFirst;
-  }
-  return {
-    ...node,
-    first: nextFirst,
-    second: nextSecond,
-  };
-};
-const createTreeFromPaneCount = (paneCount: number): SplitTreeNode => {
-  const count = Math.max(1, paneCount);
-  let tree: SplitTreeNode = createLeafNode(0);
-  for (let paneIndex = 1; paneIndex < count; paneIndex += 1) {
-    tree = {
-      id: `split-${paneIndex}`,
-      type: "split",
-      axis: "vertical",
-      ratio: DEFAULT_SPLIT_RATIO,
-      first: tree,
-      second: createLeafNode(paneIndex),
-    };
-  }
-  return tree;
-};
-const serializeSplitTree = (node: SplitTreeNode): LayoutSplitTreeNode => {
-  if (node.type === "leaf") {
-    return {
-      id: node.id,
-      type: "leaf",
-      paneIndex: node.paneIndex,
-    };
-  }
-  return {
-    id: node.id,
-    type: "split",
-    axis: node.axis,
-    ratio: node.ratio,
-    first: serializeSplitTree(node.first),
-    second: serializeSplitTree(node.second),
-  };
-};
-const parseSplitTree = (raw: LayoutSplitTreeNode | null | undefined): SplitTreeNode | null => {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-  if (raw.type === "leaf") {
-    if (typeof raw.paneIndex !== "number" || !Number.isInteger(raw.paneIndex) || raw.paneIndex < 0) {
-      return null;
-    }
-    return createLeafNode(raw.paneIndex);
-  }
-  if (raw.type === "split") {
-    const first = parseSplitTree(raw.first);
-    const second = parseSplitTree(raw.second);
-    if (!first || !second) {
-      return null;
-    }
-    return {
-      id: typeof raw.id === "string" && raw.id.length > 0 ? raw.id : `split-fallback`,
-      type: "split",
-      axis: raw.axis === "horizontal" ? "horizontal" : "vertical",
-      ratio:
-        typeof raw.ratio === "number" && Number.isFinite(raw.ratio)
-          ? Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, raw.ratio))
-          : DEFAULT_SPLIT_RATIO,
-      first,
-      second,
-    };
-  }
-  return null;
-};
+import {
+  allowNativeBrowserContextMenu,
+  createDefaultEntityStore,
+  createDefaultHostMetadata,
+  createDefaultMetadataStore,
+  emptyHost,
+  normalizeEntityStore,
+} from "./features/app-bootstrap";
+import { createId } from "./features/app-id";
+import {
+  AUTO_ARRANGE_MODE_STORAGE_KEY,
+  DEFAULT_BACKUP_PATH,
+  DENSITY_PROFILE_STORAGE_KEY,
+  DENSITY_TERMINAL_BASE_FONT,
+  FRAME_MODE_PRESET_STORAGE_KEY,
+  LAYOUT_MODE_STORAGE_KEY,
+  LIST_TONE_PRESET_STORAGE_KEY,
+  MOBILE_STACKED_MEDIA,
+  QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY,
+  QUICK_CONNECT_MODE_STORAGE_KEY,
+  SETTINGS_OPEN_MODE_STORAGE_KEY,
+  SIDEBAR_AUTO_HIDE_DELAY_MS,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_PINNED_STORAGE_KEY,
+  SIDEBAR_VIEW_STORAGE_KEY,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+  SPLIT_RATIO_PRESET_STORAGE_KEY,
+  SPLIT_RATIO_PRESET_VALUE,
+  TERMINAL_FONT_FAMILY_BY_PRESET,
+  TERMINAL_FONT_MAX,
+  TERMINAL_FONT_MIN,
+  TERMINAL_FONT_OFFSET_MAX,
+  TERMINAL_FONT_OFFSET_MIN,
+  TERMINAL_FONT_OFFSET_STORAGE_KEY,
+  TERMINAL_FONT_PRESET_STORAGE_KEY,
+  UI_FONT_PRESET_STORAGE_KEY,
+  clampSidebarWidth,
+  parseStoredAutoArrangeMode,
+  readLayoutMode,
+  readSplitRatioPreset,
+} from "./features/app-preferences";
+import { DND_PAYLOAD_MIME, type DragPayload, type PaneDropZone, resolvePaneDropZoneFromOverlay } from "./features/pane-dnd";
+import {
+  type AutoArrangeActiveMode,
+  type ContextMenuState,
+  type HostStatusFilter,
+  type QuickConnectDraft,
+  type QuickConnectWizardStep,
+  type SavedSshSessionTab,
+  type SessionTab,
+  type SidebarViewId,
+  type SplitMode,
+  type TrustPromptRequest,
+  createQuickConnectDraft,
+} from "./features/session-model";
+import {
+  cloneSplitTree,
+  collectPaneOrder,
+  createLeafNode,
+  createTreeFromPaneCount,
+  parseSplitTree,
+  rebalanceSplitTree,
+  removePaneFromTree,
+  replacePaneInTree,
+  serializeSplitTree,
+  updateSplitRatioInTree,
+  type SplitAxis,
+  type SplitResizeState,
+  type SplitTreeNode,
+} from "./features/split-tree";
+import {
+  appendSessionToWorkspaceSnapshot,
+  clonePaneLayouts,
+  cloneWorkspaceSnapshot,
+  compactSplitSlotsByPaneOrder,
+  createEmptyWorkspaceSnapshot,
+  DEFAULT_WORKSPACE_ID,
+  type WorkspaceSnapshot,
+} from "./features/workspace-snapshot";
 
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
@@ -1142,15 +701,14 @@ export function App() {
     },
     [hosts, metadataStore.defaultUser],
   );
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
-  useEffect(() => {
-    metadataStoreRef.current = metadataStore;
-  }, [metadataStore]);
-  useEffect(() => {
-    quickConnectAutoTrustRef.current = quickConnectAutoTrust;
-  }, [quickConnectAutoTrust]);
+  useAppRefSync({
+    sessionsRef,
+    sessions,
+    metadataStoreRef,
+    metadataStore,
+    quickConnectAutoTrustRef,
+    quickConnectAutoTrust,
+  });
   useEffect(() => {
     if (!activeTrustPrompt) {
       return;
@@ -1264,76 +822,17 @@ export function App() {
       setError(String(e));
     }
   }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const raw = window.localStorage.getItem(WORKSPACES_STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as {
-        order?: string[];
-        activeWorkspaceId?: string;
-        snapshots?: Record<string, WorkspaceSnapshot>;
-      };
-      const order = Array.isArray(parsed.order) ? parsed.order.filter((entry): entry is string => typeof entry === "string") : [];
-      const snapshots = parsed.snapshots ?? {};
-      if (order.length === 0) {
-        return;
-      }
-      const normalizedOrder = order.filter((workspaceId) => {
-        const snapshot = snapshots[workspaceId];
-        return Boolean(snapshot && Array.isArray(snapshot.splitSlots) && snapshot.splitTree);
-      });
-      if (normalizedOrder.length === 0) {
-        return;
-      }
-      const normalizedSnapshots = normalizedOrder.reduce<Record<string, WorkspaceSnapshot>>((acc, workspaceId) => {
-        const snapshot = snapshots[workspaceId];
-        if (!snapshot) {
-          return acc;
-        }
-        acc[workspaceId] = {
-          ...snapshot,
-          id: snapshot.id || workspaceId,
-          name: snapshot.name || workspaceId,
-          splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
-          paneLayouts: Array.isArray(snapshot.paneLayouts)
-            ? snapshot.paneLayouts.map((entry) => ({ ...entry }))
-            : createPaneLayoutsFromSlots(createInitialPaneState()),
-          splitTree: snapshot.splitTree ? cloneSplitTree(snapshot.splitTree) : createLeafNode(0),
-          activePaneIndex: Number.isInteger(snapshot.activePaneIndex) ? snapshot.activePaneIndex : 0,
-          activeSessionId: typeof snapshot.activeSessionId === "string" ? snapshot.activeSessionId : "",
-        };
-        return acc;
-      }, {});
-      const fallbackWorkspaceId = normalizedOrder[0] ?? DEFAULT_WORKSPACE_ID;
-      const nextActiveWorkspaceId =
-        typeof parsed.activeWorkspaceId === "string" && normalizedSnapshots[parsed.activeWorkspaceId]
-          ? parsed.activeWorkspaceId
-          : fallbackWorkspaceId;
-      const nextActiveSnapshot = normalizedSnapshots[nextActiveWorkspaceId];
-      if (!nextActiveSnapshot) {
-        return;
-      }
-      isApplyingWorkspaceSnapshotRef.current = true;
-      setWorkspaceOrder(normalizedOrder);
-      setWorkspaceSnapshots(normalizedSnapshots);
-      setActiveWorkspaceId(nextActiveWorkspaceId);
-      setSplitSlots([...nextActiveSnapshot.splitSlots]);
-      setPaneLayouts(clonePaneLayouts(nextActiveSnapshot.paneLayouts));
-      setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
-      setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
-      setActiveSession(nextActiveSnapshot.activeSessionId);
-      queueMicrotask(() => {
-        isApplyingWorkspaceSnapshotRef.current = false;
-      });
-    } catch {
-      // ignore broken persisted workspace data
-    }
-  }, []);
+  useWorkspaceBootstrapFromStorage({
+    isApplyingWorkspaceSnapshotRef,
+    setWorkspaceOrder,
+    setWorkspaceSnapshots,
+    setActiveWorkspaceId,
+    setSplitSlots,
+    setPaneLayouts,
+    setSplitTree,
+    setActivePaneIndex,
+    setActiveSession,
+  });
 
   const storeUsers = useMemo<UserObject[]>(() => Object.values(entityStore.users), [entityStore.users]);
   const storeGroups = useMemo<GroupObject[]>(() => Object.values(entityStore.groups), [entityStore.groups]);
@@ -1815,55 +1314,13 @@ export function App() {
   }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
 
 
-  useEffect(() => {
-    if (!hasTauriTransformCallback()) {
-      return;
-    }
-    let unlisten: UnlistenFn | null = null;
-    void listen<SessionOutputEvent>("session-output", (event) => {
-      if (!event.payload.host_key_prompt) {
-        return;
-      }
-      const sessionId = event.payload.session_id;
-      const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
-      if (session?.kind === "sshQuick" && quickConnectAutoTrustRef.current) {
-        void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
-        return;
-      }
-      const trustHostAlias = session?.kind === "sshSaved" ? session.hostAlias : "";
-      if (trustHostAlias) {
-        const metadata = metadataStoreRef.current.hosts[trustHostAlias] ?? null;
-        if (metadata?.trustHostDefault) {
-          void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
-          return;
-        }
-      }
-      const promptHostLabel =
-        session?.kind === "sshSaved"
-          ? session.hostAlias
-          : session?.kind === "sshQuick"
-            ? session.label
-            : session?.kind === "local"
-              ? "local-shell"
-              : "unknown";
-      setTrustPromptQueue((prev) => {
-        if (prev.some((entry) => entry.sessionId === sessionId)) {
-          return prev;
-        }
-        return [...prev, { sessionId, hostAlias: promptHostLabel }];
-      });
-    }).then((fn) => {
-      unlisten = fn;
-    }).catch(() => {
-      // Tauri event bridge can be temporarily unavailable during dev reload.
-    });
-
-    return () => {
-      if (unlisten) {
-        void unlisten();
-      }
-    };
-  }, []);
+  useSessionOutputTrustListener({
+    sessionsRef,
+    quickConnectAutoTrustRef,
+    metadataStoreRef,
+    setError,
+    setTrustPromptQueue,
+  });
 
   useEffect(() => {
     const pendingProfileSessionIds = pendingProfileLoadSessionIdsRef.current;
@@ -2160,19 +1617,7 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
   }, [layoutMode]);
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(
-      WORKSPACES_STORAGE_KEY,
-      JSON.stringify({
-        order: workspaceOrder,
-        activeWorkspaceId,
-        snapshots: workspaceSnapshots,
-      }),
-    );
-  }, [activeWorkspaceId, workspaceOrder, workspaceSnapshots]);
+  useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
     if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
       return;
@@ -4162,383 +3607,49 @@ export function App() {
     await deleteSelectedLayoutProfile();
   };
 
-  const renderSplitNode = (node: SplitTreeNode) => {
-    if (node.type === "leaf") {
-      const paneIndex = node.paneIndex;
-      const paneSessionId = splitSlots[paneIndex] ?? null;
-      const paneIdentity = resolvePaneIdentity(paneIndex);
-      const isHoverTarget = highlightedHostPaneIndices.has(paneIndex);
-      const isHoverDimmed = hasHighlightedHostTargets && !isHoverTarget;
-      const isDropOverlayVisible =
-        (draggingKind === "machine" || draggingKind === "session") &&
-        dragOverPaneIndex === paneIndex &&
-        activeDropZonePaneIndex === paneIndex;
-      const isSelfPaneDrop =
-        draggingKind === "session" &&
-        draggingSessionIdRef.current != null &&
-        splitSlots.findIndex((s) => s === draggingSessionIdRef.current) === paneIndex;
-      const hasPaneSession = Boolean(paneSessionId);
-      const canClosePane = paneOrder.length > 1;
-      const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
-      const isToolbarExpanded = expandedPaneToolbarIndices.has(paneIndex);
-      const allVisibleAlreadyTargeted =
-        isBroadcastModeEnabled &&
-        visiblePaneSessionIds.length > 0 &&
-        visiblePaneSessionIds.every((sessionId) => broadcastTargets.has(sessionId));
-      return (
-        <div
-          key={`pane-${paneIndex}`}
-          data-pane-index={paneIndex}
-          className={`split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${
-            dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
-          } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
-            isHoverDimmed ? "is-host-hover-dimmed" : ""
-          } ${highlightedHostAlias ? "is-host-hovering" : ""}`}
-          draggable={false}
-          onClick={() => {
-            setActivePaneIndex(paneIndex);
-            if (paneSessionId) {
-              setActiveSession(paneSessionId);
-              requestTerminalFocus(paneSessionId);
-            }
-          }}
-          onDragOverCapture={(event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = resolveDropEffect(event);
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setDragOverPaneIndex(paneIndex);
-            setActiveDropZonePaneIndex(paneIndex);
-            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
-            setActiveDropZone(
-              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
-            );
-          }}
-          onDragEnterCapture={(event) => {
-            event.preventDefault();
-            setDragOverPaneIndex(paneIndex);
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setActiveDropZonePaneIndex(paneIndex);
-            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
-            setActiveDropZone(
-              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
-            );
-          }}
-          onDragLeave={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              return;
-            }
-            setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
-            setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
-            setActiveDropZone(null);
-          }}
-          onDropCapture={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            void handlePaneDrop(event, paneIndex);
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setHostContextMenu(null);
-            const initialSplitMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
-            setContextMenu({
-              visible: true,
-              x: event.clientX,
-              y: event.clientY,
-              paneIndex,
-              splitMode: initialSplitMode,
-            });
-          }}
-        >
-          {isDropOverlayVisible && draggingKind === "machine" && !hasPaneSession && (
-            <div className="pane-drop-zones pane-drop-zones-host-empty" aria-hidden="true">
-              <span className="pane-drop-host-empty-label">Drop to open here</span>
-            </div>
-          )}
-          {isDropOverlayVisible && !(draggingKind === "machine" && !hasPaneSession) && (
-            <div className="pane-drop-zones" aria-hidden="true">
-              <div className={`pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`}>Top</div>
-              <div className={`pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`}>Left</div>
-              <div
-                className={`pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`}
-              >
-                {draggingKind === "machine"
-                  ? "Replace"
-                  : isSelfPaneDrop
-                    ? "–"
-                    : "Swap"}
-              </div>
-              <div className={`pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`}>
-                Right
-              </div>
-              <div
-                className={`pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`}
-              >
-                Bottom
-              </div>
-            </div>
-          )}
-          <div
-            className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${
-              isToolbarExpanded ? "is-toolbar-expanded" : ""
-            }`}
-            draggable={Boolean(paneSessionId)}
-            onDragStart={(event) => {
-              if (!paneSessionId) {
-                return;
-              }
-              draggingSessionIdRef.current = paneSessionId;
-              setDragPayload(event, { type: "session", sessionId: paneSessionId });
-              setDraggingKind("session");
-              missingDragPayloadLoggedRef.current = false;
-            }}
-            onDragEnd={() => {
-              draggingSessionIdRef.current = null;
-              setDraggingKind(null);
-              setDragOverPaneIndex(null);
-              setActiveDropZonePaneIndex(null);
-              setActiveDropZone(null);
-              missingDragPayloadLoggedRef.current = false;
-            }}
-          >
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
-              <span className="split-pane-label-title" title={paneIdentity}>
-                {paneIdentity}
-              </span>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
-                  isToolbarExpanded ? "is-expanded" : ""
-                }`}
-                title={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
-                aria-label={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
-                aria-pressed={isToolbarExpanded}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setExpandedPaneToolbarIndices((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(paneIndex)) {
-                      next.delete(paneIndex);
-                    } else {
-                      next.add(paneIndex);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <span aria-hidden="true">{isToolbarExpanded ? "▾" : "▸"}</span>
-              </button>
-            </div>
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane left"
-                aria-label={`Split pane ${paneIndex + 1} left`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.left", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-vertical split-icon-vertical-normal" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane right"
-                aria-label={`Split pane ${paneIndex + 1} right`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.right", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-vertical split-icon-vertical-inverse" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane top"
-                aria-label={`Split pane ${paneIndex + 1} top`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.top", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-horizontal split-icon-horizontal-normal" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane bottom"
-                aria-label={`Split pane ${paneIndex + 1} bottom`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.bottom", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
-              </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
-                title={
-                  isBroadcastModeEnabled
-                    ? "Broadcast enabled — click to turn off"
-                    : "Broadcast disabled — click to send keyboard to multiple panes"
-                }
-                aria-label={
-                  isBroadcastModeEnabled ? "Turn off broadcast to multiple panes" : "Turn on broadcast to multiple panes"
-                }
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setBroadcastMode(!isBroadcastModeEnabled);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-broadcast" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="2.2" />
-                  <path d="M8.6 8.8a4.8 4.8 0 0 0 0 6.4" />
-                  <path d="M15.4 8.8a4.8 4.8 0 0 1 0 6.4" />
-                  <path d="M6.2 6.3a8.3 8.3 0 0 0 0 11.4" />
-                  <path d="M17.8 6.3a8.3 8.3 0 0 1 0 11.4" />
-                </svg>
-              </button>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn ${
-                  isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""
-                }`}
-                title="Toggle pane target"
-                aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
-                disabled={!isBroadcastModeEnabled || !hasPaneSession}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("broadcast.togglePaneTarget", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-target" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="6.4" />
-                  <circle cx="12" cy="12" r="2.3" />
-                </svg>
-              </button>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${
-                  allVisibleAlreadyTargeted ? "is-broadcast-active" : ""
-                }`}
-                title="Target all visible panes"
-                aria-label="Target all visible panes"
-                disabled={!isBroadcastModeEnabled}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("broadcast.selectAllVisible", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-all" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="6.2" cy="12.4" r="2.1" />
-                  <circle cx="12" cy="7.1" r="2.1" />
-                  <circle cx="17.8" cy="12.4" r="2.1" />
-                  <path d="M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" />
-                </svg>
-              </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
-              <button
-                className="btn action-icon-btn pane-toolbar-btn"
-                title="Close session in pane"
-                aria-label={`Close session in pane ${paneIndex + 1}`}
-                disabled={!hasPaneSession}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.clear", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-close-session" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5.2" y="6.2" width="13.6" height="11.6" rx="2.2" />
-                  <path d="M9.5 10l5 5M14.5 10l-5 5" />
-                </svg>
-              </button>
-              <button
-                className="btn action-icon-btn action-icon-btn-danger pane-toolbar-btn"
-                title="Close pane and session"
-                aria-label={`Close pane ${paneIndex + 1} and its session`}
-                disabled={!canClosePane}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.close", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-close-pane" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          {paneSessionId ? (
-            <Suspense
-              fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
-            >
-              <TerminalPane
-                sessionId={paneSessionId}
-                onUserInput={handleTerminalInput}
-                fontSize={terminalFontSize}
-                fontFamily={terminalFontFamily}
-              />
-            </Suspense>
-          ) : (
-            <div className="empty-pane split-empty-pane">
-              <p className="split-empty-pane-copy">One click and we both get what we want</p>
-              <button
-                type="button"
-                className="split-empty-pane-logo-btn"
-                title="Open local terminal in this pane"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void connectLocalShellInPane(paneIndex);
-                }}
-              >
-                <img src={logoTransparent} alt="Open local terminal in this pane" className="split-empty-pane-image" />
-              </button>
-              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
-                Or drop that host right here - I&apos;m waiting
-              </p>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const firstRatio = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, node.ratio));
-    const secondRatio = 1 - firstRatio;
-    const dividerClass = node.axis === "horizontal" ? "split-node-divider vertical" : "split-node-divider horizontal";
-
-    return (
-      <div
-        key={node.id}
-        className={`split-node split-node-${node.axis}`}
-        ref={(element) => {
-          splitNodeRefs.current[node.id] = element;
-        }}
-      >
-        <div className="split-node-child" style={{ flexBasis: `${firstRatio * 100}%` }}>
-          {renderSplitNode(node.first)}
-        </div>
-        <div
-          className={dividerClass}
-          role="separator"
-          aria-orientation={node.axis === "horizontal" ? "vertical" : "horizontal"}
-          onPointerDown={startSplitResize(node.id, node.axis)}
-        />
-        <div className="split-node-child" style={{ flexBasis: `${secondRatio * 100}%` }}>
-          {renderSplitNode(node.second)}
-        </div>
-      </div>
-    );
-  };
+  const renderSplitNode = createSplitPaneRenderer({
+    splitSlots,
+    activePaneIndex,
+    paneOrder,
+    resolvePaneIdentity,
+    highlightedHostPaneIndices,
+    hasHighlightedHostTargets,
+    highlightedHostAlias,
+    draggingKind,
+    dragOverPaneIndex,
+    activeDropZonePaneIndex,
+    activeDropZone,
+    draggingSessionIdRef,
+    setActivePaneIndex,
+    setActiveSession,
+    requestTerminalFocus,
+    setDragOverPaneIndex,
+    setActiveDropZonePaneIndex,
+    setActiveDropZone,
+    resolveDropEffect,
+    resolvePaneDropZone,
+    handlePaneDrop,
+    setHostContextMenu,
+    setContextMenu,
+    shouldSplitAsEmpty,
+    expandedPaneToolbarIndices,
+    setExpandedPaneToolbarIndices,
+    handleContextAction,
+    isBroadcastModeEnabled,
+    setBroadcastMode,
+    visiblePaneSessionIds,
+    broadcastTargets,
+    terminalFontSize,
+    terminalFontFamily,
+    handleTerminalInput,
+    connectLocalShellInPane,
+    logoTransparentSrc: logoTransparent,
+    splitNodeRefs,
+    startSplitResize,
+    setDragPayload,
+    setDraggingKind,
+    missingDragPayloadLoggedRef,
+  });
 
   const renderHostRow = (row: HostRowViewModel, key: string) => (
     <div
@@ -4761,170 +3872,43 @@ export function App() {
       >
         {isSidebarPinned ? "◧" : "◨"}
       </button>
-      <aside
-        className={`left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${
-          isSidebarPinned ? "is-pinned" : "is-unpinned"
-        }`}
+      <HostSidebar
+        isSidebarOpen={isSidebarOpen}
+        isSidebarPinned={isSidebarPinned}
         onMouseEnter={revealSidebar}
         onMouseLeave={maybeHideSidebar}
-      >
-        <header className="brand">
-          <div
-            className={`brand-bar${isQuickAddMenuOpen ? " is-quick-add-open" : ""}`}
-            ref={quickAddMenuRef}
-          >
-            <div className="brand-logo-area">
-              <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
-            </div>
-            <div className="brand-add-column">
-              <div className="brand-primary-add-wrap brand-toolbar-cluster">
-                <button
-                  type="button"
-                  className="btn brand-app-settings-btn"
-                  aria-label="Open app settings"
-                  title="App settings"
-                  onClick={() => setIsAppSettingsOpen(true)}
-                >
-                  <svg className="settings-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      fill="currentColor"
-                      d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.72-1.68-.97l-.38-2.65A.51.51 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.58-1.68.97l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.63c-.04.34-.07.67-.07.98s.03.66.07.97l-2.11 1.63c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.68.97l.38 2.65c.03.24.24.43.5.43h4c.25 0 .46-.18.49-.42l.38-2.65c.62-.24 1.16-.57 1.68-.97l2.49 1c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.63z"
-                    />
-                  </svg>
-                </button>
-                <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-inner">
-                  <button
-                    className="btn host-plus-btn"
-                    aria-label="Open add menu"
-                    title="Add host"
-                    onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
-                  >
-                    <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 6v12M6 12h12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            {isQuickAddMenuOpen && (
-              <div className="quick-add-menu" role="menu">
-                <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane(activePaneIndex)}>
-                  New local terminal
-                </button>
-                <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
-                  Quick connect terminal
-                </button>
-                <button className="quick-add-menu-item" onClick={openAddHostModal}>
-                  Add host
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add group
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add user
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add key
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
-
-        <section className="host-filter-card">
-          <div className="sidebar-view-tabs" role="tablist" aria-label="Sidebar views">
-            {sidebarViews.map((view) => (
-              <button
-                key={view.id}
-                className={`tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`}
-                role="tab"
-                aria-selected={selectedSidebarViewId === view.id}
-                onClick={() => setSelectedSidebarViewId(view.id)}
-                title={view.label}
-              >
-                {view.label}
-              </button>
-            ))}
-          </div>
-          <div className="filter-head-row">
-            <input
-              className="input host-search-input"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search alias, hostname, user"
-            />
-            <button
-              className={`btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`}
-              onClick={() => setShowAdvancedFilters((prev) => !prev)}
-              aria-expanded={showAdvancedFilters}
-              aria-controls="advanced-host-filters"
-            >
-              Filters {showAdvancedFilters ? "−" : "+"}
-            </button>
-            <span className="pill-muted">{filteredHostRows.length}</span>
-          </div>
-          <div id="advanced-host-filters" className={`advanced-filters ${showAdvancedFilters ? "is-open" : ""}`}>
-            <div className="filter-row">
-              <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as HostStatusFilter)}>
-                <option value="all">All status</option>
-                <option value="connected">Connected</option>
-                <option value="disconnected">Disconnected</option>
-              </select>
-              <input
-                className="input"
-                type="number"
-                value={portFilter}
-                onChange={(event) => setPortFilter(event.target.value)}
-                placeholder="Port"
-              />
-            </div>
-            <div className="filter-row">
-              <select className="input" value={selectedTagFilter} onChange={(event) => setSelectedTagFilter(event.target.value)}>
-                <option value="all">All tags</option>
-                {availableTags.map((tag) => (
-                  <option key={tag} value={tag}>
-                    {tag}
-                  </option>
-                ))}
-              </select>
-              <button className={`btn ${favoritesOnly ? "btn-primary" : ""}`} onClick={() => setFavoritesOnly((prev) => !prev)}>
-                Favorites
-              </button>
-            </div>
-            <div className="filter-row">
-              <button className={`btn ${recentOnly ? "btn-primary" : ""}`} onClick={() => setRecentOnly((prev) => !prev)}>
-                Recent
-              </button>
-              <button className="btn" onClick={clearFilters}>
-                Reset filters
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <div className="host-list">
-          {filteredHostRows.length === 0 ? (
-            <div className="empty-pane">
-              <p>No hosts match the active filters.</p>
-              <span>Adjust or reset filters to show hosts.</span>
-            </div>
-          ) : (
-            <>
-              {connectedHostRows.length > 0 && (
-                <div className="host-list-top">
-                  <p className="host-list-section-title">Connected</p>
-                  {connectedHostRows.map((row, index) =>
-                    renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`),
-                  )}
-                </div>
-              )}
-              <div className="host-list-scroll">
-                {otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`))}
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
+        logoSrc={logoTextTransparent}
+        isQuickAddMenuOpen={isQuickAddMenuOpen}
+        quickAddMenuRef={quickAddMenuRef}
+        onOpenSettings={() => setIsAppSettingsOpen(true)}
+        onToggleQuickAddMenu={() => setIsQuickAddMenuOpen((prev) => !prev)}
+        onConnectLocalInActivePane={() => void connectLocalShellInNewPane(activePaneIndex)}
+        onOpenQuickConnect={() => openQuickConnectModal()}
+        onOpenAddHost={openAddHostModal}
+        sidebarViews={sidebarViews}
+        selectedSidebarViewId={selectedSidebarViewId}
+        onSelectSidebarView={setSelectedSidebarViewId}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        showAdvancedFilters={showAdvancedFilters}
+        onToggleAdvancedFilters={() => setShowAdvancedFilters((prev) => !prev)}
+        filteredHostCount={filteredHostRows.length}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        portFilter={portFilter}
+        onPortFilterChange={setPortFilter}
+        availableTags={availableTags}
+        selectedTagFilter={selectedTagFilter}
+        onSelectedTagFilterChange={setSelectedTagFilter}
+        favoritesOnly={favoritesOnly}
+        onToggleFavorites={() => setFavoritesOnly((prev) => !prev)}
+        recentOnly={recentOnly}
+        onToggleRecent={() => setRecentOnly((prev) => !prev)}
+        onClearFilters={clearFilters}
+        connectedHostRows={connectedHostRows}
+        otherHostRows={otherHostRows}
+        renderHostRow={renderHostRow}
+      />
       <div
         className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}
         role="separator"
@@ -5209,371 +4193,73 @@ export function App() {
         </Suspense>
       )}
       {isAddHostModalOpen && (
-        <div className="app-settings-overlay" onClick={closeAddHostModal}>
-          <section className="app-settings-modal panel add-host-modal" onClick={(event) => event.stopPropagation()}>
-            <header className="panel-header">
-              <h2>Add host</h2>
-              <button className="btn" onClick={closeAddHostModal}>
-                Cancel
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <HostForm host={newHostDraft} onChange={setNewHostDraft} />
-              <div className="action-row">
-                <button className="btn" onClick={closeAddHostModal}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={createHost} disabled={!canCreateHost}>
-                  Add host
-                </button>
-              </div>
-              {error && <p className="error-text">{error}</p>}
-            </div>
-          </section>
-        </div>
+        <AddHostModal
+          newHostDraft={newHostDraft}
+          onChangeNewHost={setNewHostDraft}
+          onClose={closeAddHostModal}
+          onCreateHost={createHost}
+          canCreateHost={canCreateHost}
+          error={error}
+        />
       )}
       {isQuickConnectModalOpen && (
-        <div className="app-settings-overlay" onClick={closeQuickConnectModal}>
-          <section
-            className="app-settings-modal panel add-host-modal"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={handleQuickConnectModalKeyDown}
-          >
-            <header className="panel-header">
-              <h2>Quick connect</h2>
-              <button className="btn" onClick={closeQuickConnectModal}>
-                Cancel
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <p className="muted-copy quick-connect-shortcuts">
-                Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users.
-              </p>
-              {quickConnectMode === "wizard" && (
-                <div className="quick-connect-mode-wrap">
-                  <p className="field-help">
-                    Step {quickConnectWizardStep}/2 -{" "}
-                    {quickConnectWizardStep === 1 ? "Provide host target" : "Choose or type user"}
-                  </p>
-                  {quickConnectWizardStep === 1 && (
-                    <label className="field">
-                      <span className="field-label">Host</span>
-                      <input
-                        className="input"
-                        value={quickConnectDraft.hostName}
-                        onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            proceedQuickConnectWizard();
-                          }
-                        }}
-                        placeholder="server.local:2222 or [2001:db8::1]:2200"
-                        autoFocus
-                      />
-                    </label>
-                  )}
-                  {quickConnectWizardStep === 2 && (
-                    <>
-                      <label className="field">
-                        <span className="field-label">User</span>
-                        <input
-                          className="input"
-                          value={quickConnectDraft.user}
-                          onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
-                          onKeyDown={handleQuickConnectUserInputKeyDown}
-                          placeholder="Default or custom user"
-                          autoFocus
-                        />
-                      </label>
-                      {quickConnectUserOptions.length > 0 && (
-                        <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                          {quickConnectUserOptions.map((user) => (
-                            <button
-                              key={user}
-                              type="button"
-                              className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
-                              onClick={() => {
-                                applyQuickConnectUser(user);
-                              }}
-                            >
-                              {user}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-              {quickConnectMode === "smart" && (
-                <div className="quick-connect-mode-wrap">
-                  <label className="field">
-                    <span className="field-label">Host</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.hostName}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void connectQuickSshInNewPane();
-                        }
-                      }}
-                      placeholder="example.com or 10.0.0.8:2222"
-                      autoFocus
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">User</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.user}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
-                      onKeyDown={handleQuickConnectUserInputKeyDown}
-                      placeholder="Default or custom user"
-                    />
-                  </label>
-                  {quickConnectUserOptions.length > 0 && (
-                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                      {quickConnectUserOptions.map((user) => (
-                        <button
-                          key={user}
-                          type="button"
-                          className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
-                          onClick={() => {
-                            applyQuickConnectUser(user);
-                          }}
-                        >
-                          {user}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {quickConnectMode === "command" && (
-                <div className="quick-connect-mode-wrap">
-                  <label className="field">
-                    <span className="field-label">Target command</span>
-                    <input
-                      className="input"
-                      value={quickConnectCommandInput}
-                      onChange={(event) => setQuickConnectCommandInput(event.target.value)}
-                      onKeyDown={handleQuickConnectCommandInputKeyDown}
-                      placeholder="user@host:22"
-                      autoFocus
-                    />
-                  </label>
-                  {quickConnectUserOptions.length > 0 && (
-                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                      {quickConnectUserOptions.map((user) => (
-                        <button
-                          key={user}
-                          type="button"
-                          className={`btn ${quickConnectCommandInput.trim().startsWith(`${user}@`) ? "btn-primary" : ""}`}
-                          onClick={() => {
-                            const targetPart = quickConnectCommandInput.includes("@")
-                              ? quickConnectCommandInput.slice(quickConnectCommandInput.indexOf("@"))
-                              : "@";
-                            setQuickConnectCommandInput(`${user}${targetPart}`);
-                          }}
-                        >
-                          {user}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <p className="field-help">
-                    Supports `user@host`, `user@host:port`, and `user@[2001:db8::1]:2200`.
-                  </p>
-                </div>
-              )}
-              {(quickConnectMode !== "wizard" || quickConnectWizardStep === 2) && (
-                <>
-                  <label className="field">
-                    <span className="field-label">Identity file</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.identityFile}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, identityFile: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Proxy jump</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.proxyJump}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyJump: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Proxy command</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.proxyCommand}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyCommand: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                </>
-              )}
-              <div className="action-row">
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
-                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
-                    Back
-                  </button>
-                )}
-                <button className="btn" onClick={closeQuickConnectModal}>
-                  Cancel
-                </button>
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 1 ? (
-                  <button className="btn btn-primary" onClick={proceedQuickConnectWizard}>
-                    Next
-                  </button>
-                ) : (
-                  <button className="btn btn-primary" onClick={() => void connectQuickSshInNewPane()}>
-                    Connect
-                  </button>
-                )}
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
-                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
-                    Back
-                  </button>
-                )}
-              </div>
-              {error && <p className="error-text">{error}</p>}
-            </div>
-          </section>
-        </div>
+        <QuickConnectModal
+          quickConnectMode={quickConnectMode}
+          quickConnectWizardStep={quickConnectWizardStep}
+          onWizardStepChange={setQuickConnectWizardStep}
+          quickConnectDraft={quickConnectDraft}
+          onQuickConnectDraftChange={setQuickConnectDraft}
+          quickConnectCommandInput={quickConnectCommandInput}
+          onQuickConnectCommandInputChange={setQuickConnectCommandInput}
+          quickConnectUserOptions={quickConnectUserOptions}
+          onClose={closeQuickConnectModal}
+          onModalKeyDown={handleQuickConnectModalKeyDown}
+          onProceedWizard={proceedQuickConnectWizard}
+          onUserInputKeyDown={handleQuickConnectUserInputKeyDown}
+          onCommandInputKeyDown={handleQuickConnectCommandInputKeyDown}
+          onApplyUser={applyQuickConnectUser}
+          onConnect={() => void connectQuickSshInNewPane()}
+          error={error}
+        />
       )}
       {activeTrustPrompt && (
-        <div className="app-settings-overlay" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-          <section
-            className="app-settings-modal panel trust-host-modal"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={handleTrustPromptKeyDown}
-          >
-            <header className="panel-header">
-              <h2>Trust host key</h2>
-              <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-                Close
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <p className="muted-copy">
-                Session <strong>{activeTrustPrompt.sessionId}</strong> requests trust confirmation for host{" "}
-                <strong>{activeTrustPrompt.hostAlias}</strong>.
-              </p>
-              <label className="field checkbox-field trust-default-checkbox">
-                <input
-                  className="checkbox-input"
-                  type="checkbox"
-                  checked={saveTrustHostAsDefault}
-                  onChange={(event) => setSaveTrustHostAsDefault(event.target.checked)}
-                />
-                <span className="field-label">Save as default for this host</span>
-              </label>
-              <div className="action-row">
-                <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-                  Dismiss
-                </button>
-                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()} autoFocus>
-                  Trust host
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+        <TrustHostModal
+          prompt={activeTrustPrompt}
+          saveTrustHostAsDefault={saveTrustHostAsDefault}
+          onSaveTrustDefaultChange={setSaveTrustHostAsDefault}
+          onClose={dismissTrustPrompt}
+          onAccept={acceptTrustPrompt}
+          onKeyDown={handleTrustPromptKeyDown}
+        />
       )}
       {contextMenu.visible && contextMenu.paneIndex !== null && (
-        <div
-          className="context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          role="menu"
-          onContextMenuCapture={(event) => {
-            event.preventDefault();
-          }}
-        >
-          {buildPaneContextActions({
-            paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
-            canClosePane: paneOrder.length > 1,
-            broadcastModeEnabled: isBroadcastModeEnabled,
-            broadcastCount: broadcastTargets.size,
-            splitMode: contextMenu.splitMode,
-            freeMoveEnabled: autoArrangeMode === "free",
-          }).map((action) => (
-            <button
-              key={action.id}
-              className={`context-menu-item ${action.separatorAbove ? "separator-above" : ""}`}
-              disabled={action.disabled}
-              onClick={(event) =>
-                void handleContextAction(action.id, contextMenu.paneIndex ?? 0, {
-                  preferredSplitMode: contextMenu.splitMode,
-                  eventLike: event,
-                })
-              }
-            >
-              {action.label}
-            </button>
-          ))}
-          {workspaceSendTargets.map((workspace, index) => (
-            <button
-              key={`send-${workspace.id}`}
-              className={`context-menu-item ${index === 0 ? "separator-above" : ""}`}
-              onClick={() => {
-                if (!contextMenuPaneSessionId) {
-                  return;
-                }
-                sendSessionToWorkspace(contextMenuPaneSessionId, workspace.id);
-                setContextMenu((prev) => ({ ...prev, visible: false }));
-              }}
-            >
-              Send to {workspace.name}
-            </button>
-          ))}
-          {workspaceSendPlaceholder && (
-            <button type="button" className="context-menu-item separator-above" disabled>
-              Send to other workspace (add another workspace tab)
-            </button>
-          )}
-        </div>
+        <PaneContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          paneIndex={contextMenu.paneIndex}
+          splitMode={contextMenu.splitMode}
+          paneSessionId={splitSlots[contextMenu.paneIndex] ?? null}
+          canClosePane={paneOrder.length > 1}
+          broadcastModeEnabled={isBroadcastModeEnabled}
+          broadcastCount={broadcastTargets.size}
+          freeMoveEnabled={autoArrangeMode === "free"}
+          workspaceSendTargets={workspaceSendTargets}
+          workspaceSendPlaceholder={workspaceSendPlaceholder}
+          onSendToWorkspace={sendSessionToWorkspace}
+          onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
+          onPaneAction={handleContextAction}
+        />
       )}
       {hostContextMenu && (
-        <div
-          className="context-menu"
-          style={{ left: hostContextMenu.x, top: hostContextMenu.y }}
-          role="menu"
-          onContextMenuCapture={(event) => {
-            event.preventDefault();
-          }}
-        >
-          {workspaceTabs.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                void connectToHostInWorkspace(hostContextMenu.host, workspace.id);
-                setHostContextMenu(null);
-              }}
-            >
-              Connect in {workspace.name}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="context-menu-item separator-above"
-            onClick={() => {
-              openHostMenuForHost(hostContextMenu.host);
-              setHostContextMenu(null);
-            }}
-          >
-            Edit host
-          </button>
-        </div>
+        <HostContextMenu
+          x={hostContextMenu.x}
+          y={hostContextMenu.y}
+          host={hostContextMenu.host}
+          workspaces={workspaceTabs}
+          onConnectInWorkspace={connectToHostInWorkspace}
+          onEditHost={openHostMenuForHost}
+          onClose={() => setHostContextMenu(null)}
+        />
       )}
       {isStackedShell && (
         <nav className="mobile-shell-tabbar" aria-label="Mobile workspace">
