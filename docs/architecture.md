@@ -79,3 +79,4 @@ The backend emits terminal output (and related session signals) as Tauri events.
 
 - Backup cryptography and threat model: [backup-security.md](backup-security.md)
 - Releases: [releases.md](releases.md)
+- Release notes: [CHANGELOG.md](CHANGELOG.md)

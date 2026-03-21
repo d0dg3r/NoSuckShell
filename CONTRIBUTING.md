@@ -53,6 +53,10 @@ Use the checklist in [.github/pull_request_template.md](.github/pull_request_tem
 
 For security-sensitive reports, use the process in [SECURITY.md](SECURITY.md), not a public issue.
 
+## Releases (maintainers)
+
+Process and tagging: [docs/releases.md](docs/releases.md). User-facing notes: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
 ## Community standards
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold it.
