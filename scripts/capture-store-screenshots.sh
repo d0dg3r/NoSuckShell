@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Capture the focused or titled NoSuckShell window to Flathub / store PNG paths.
+# Prefer automated assets: from repo root run `npm run screenshots` (Playwright + e2e build).
+# This script is for manual native-window grabs (title bar + shadow on X11/GNOME).
 # Prerequisites: NoSuckShell running, xdotool, gnome-screenshot (or adjust below).
 # Usage:
 #   ./scripts/capture-store-screenshots.sh flathub 01-main

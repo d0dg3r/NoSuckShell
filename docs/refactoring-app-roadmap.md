@@ -23,7 +23,7 @@ Line ranges are approximate (file size changes over time). Use them as **navigat
 
 | Region (lines) | Inhalt |
 | --- | --- |
-| **~1–661** | Imports; module-level **types** (`SessionTab`, `WorkspaceSnapshot`, `SplitTreeNode`, …); **constants** (storage keys, layout presets, `MOBILE_STACKED_MEDIA`); **pure helpers** (view filter builders, split-tree clone/rebalance, pane drop overlay math, `evaluateRule` / `evaluateGroup`, …). |
+| **~1–661** | Imports; module-level **types** (`SessionTab`, `WorkspaceSnapshot`, `SplitTreeNode`, …); **constants** (storage keys, layout presets, `MOBILE_STACKED_MEDIA`); **pure helpers** (split-tree clone/rebalance, pane drop overlay math, …). View filters: [`features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts). |
 | **~662–~3750** | `export function App()`: **state** (hosts, sessions, entity store, workspaces, layout profiles, UI chrome, modals); **refs**; **effects** (persistence, listeners, focus); **handlers** (connect, save host, backup, layout apply, …). |
 | **~3751–~4283** | **Render helpers** scoped inside `App`: e.g. `renderSplitNode` (pane chrome, drop zones, `TerminalPane`), host row / slide-menu rendering with `HostForm`. Heavy prop closure on parent state. |
 | **~4295–end** | **Root JSX**: `app-shell`, sidebar (`aside`), filters, session tabs, split container, context menu, **app settings** (modal/docked), quick-connect / add-host modals, mobile stacked shell. |
@@ -39,6 +39,8 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 **Scope:** Functions and small types at module top that only need `types.ts` / `ViewFilterRule` / `HostRowViewModel`-shaped rows — e.g. `parseBooleanRuleValue`, `getRuleFieldValue`, `evaluateRule`, `evaluateGroup`, and related helpers, plus `createEmptyFilterGroup` / `createDefaultViewProfile` if kept pure.
 
 **Target:** e.g. [`apps/desktop/src/features/view-profile-filters.ts`](../apps/desktop/src/features/view-profile-filters.ts) (name can vary).
+
+**Status:** Done — logic + `ViewFilterHostRow` live in that module; Vitest in `view-profile-filters.test.ts`; `App.tsx` wires `evaluateGroup`, `createDefaultViewProfile`, and `createEmptyViewFilterRule`.
 
 **Risk:** Low — no React; easy to unit test beside existing `features/*.test.ts`.
 

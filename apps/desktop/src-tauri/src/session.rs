@@ -7,6 +7,7 @@ use std::env;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -20,6 +21,11 @@ pub struct SessionOutputEvent {
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedMaster = Arc<Mutex<Box<dyn MasterPty + Send>>>;
 type SharedChild = Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>;
+
+/// Coalesce small PTY reads to reduce IPC event rate (slightly higher latency under flood).
+const SESSION_OUTPUT_COALESCE_MAX_BYTES: usize = 16 * 1024;
+const SESSION_OUTPUT_COALESCE_MAX_WAIT: Duration = Duration::from_millis(12);
+const SESSION_OUTPUT_HOST_KEY_NEEDLE: &str = "Are you sure you want to continue connecting";
 
 pub struct SessionHandle {
     writer: SharedWriter,
@@ -163,23 +169,70 @@ impl SessionState {
 
         let session_id_for_thread = session_id.clone();
         std::thread::spawn(move || {
+            let emit_chunk = |chunk: String| {
+                let host_key_prompt = chunk.contains(SESSION_OUTPUT_HOST_KEY_NEEDLE);
+                let _ = app.emit(
+                    "session-output",
+                    SessionOutputEvent {
+                        session_id: session_id_for_thread.clone(),
+                        chunk,
+                        host_key_prompt,
+                    },
+                );
+            };
+
             let mut buf = [0_u8; 8192];
+            let mut pending = String::new();
+            let mut pending_since: Option<Instant> = None;
+
+            let flush_pending = |pending: &mut String, pending_since: &mut Option<Instant>, emit: &dyn Fn(String)| {
+                if pending.is_empty() {
+                    return;
+                }
+                *pending_since = None;
+                let chunk = std::mem::take(pending);
+                emit(chunk);
+            };
+
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(read_len) => {
-                        let chunk = String::from_utf8_lossy(&buf[..read_len]).to_string();
-                        let host_key_prompt = chunk.contains("Are you sure you want to continue connecting");
-                        let _ = app.emit(
-                            "session-output",
-                            SessionOutputEvent {
-                                session_id: session_id_for_thread.clone(),
-                                chunk,
-                                host_key_prompt,
-                            },
-                        );
+                    Ok(0) => {
+                        flush_pending(&mut pending, &mut pending_since, &emit_chunk);
+                        break;
                     }
-                    Err(_) => break,
+                    Ok(read_len) => {
+                        let fragment = String::from_utf8_lossy(&buf[..read_len]);
+                        if pending.is_empty() && !fragment.is_empty() {
+                            pending_since = Some(Instant::now());
+                        }
+                        pending.push_str(&fragment);
+
+                        while pending.len() > SESSION_OUTPUT_COALESCE_MAX_BYTES {
+                            let rest = pending.split_off(SESSION_OUTPUT_COALESCE_MAX_BYTES);
+                            let chunk = std::mem::replace(&mut pending, rest);
+                            pending_since = if pending.is_empty() {
+                                None
+                            } else {
+                                Some(Instant::now())
+                            };
+                            emit_chunk(chunk);
+                        }
+
+                        if pending.contains(SESSION_OUTPUT_HOST_KEY_NEEDLE) {
+                            flush_pending(&mut pending, &mut pending_since, &emit_chunk);
+                            continue;
+                        }
+
+                        if let Some(since) = pending_since {
+                            if !pending.is_empty() && since.elapsed() >= SESSION_OUTPUT_COALESCE_MAX_WAIT {
+                                flush_pending(&mut pending, &mut pending_since, &emit_chunk);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        flush_pending(&mut pending, &mut pending_since, &emit_chunk);
+                        break;
+                    }
                 }
             }
         });

@@ -42,19 +42,37 @@ German UI shots: tag screenshots with `xml:lang="de"` in metainfo and use German
 
 ## Language policy (Flathub)
 
-Flathub recommends **at least one screenshot in English**. The app UI may be partially German; options:
+**Current committed assets** come from the automated run above: the UI is **mixed English and German** (e.g. sidebar **Favoriten**, settings tabs in English). For Flathub **quality / featuring**, plan either:
 
-- Add **one English-forward** screenshot (e.g. terminal-heavy view where chrome is minimal), **or**
-- Provide a **dedicated English screenshot set** once UI localization exists, **or**
-- Ship **German** screenshots with `xml:lang="de"` and add **at least one** separate English image for curation.
+- at least **one** screenshot whose visible chrome is **English-first**, or  
+- tag German-heavy shots with `xml:lang="de"` in metainfo **and** add a separate English image.
 
 See [metainfo-captions.xml](metainfo-captions.xml) for a copy-paste snippet.
 
-## How to capture (Linux)
+## Automated generation (recommended)
+
+Uses a **Chromium + Playwright** run against the **e2e Vite build** (stubbed Tauri IPC with demo hosts and terminal output). Output matches the real React UI closely; window **title bar and native shadow are not included** — for strict Flathub window-only shots on Linux, re-capture with a system window tool using the same window size.
+
+From the repository root (after `npm run desktop:install`):
+
+```bash
+npm run screenshots
+```
+
+This runs `npm run build:e2e` and [generate.spec.ts](../../../apps/desktop/e2e/screenshots/generate.spec.ts), then writes:
+
+- `store-ms-snap/*.png` — **1920×1080** (`.app-shell` bounds; suitable for Microsoft Store / Snap)
+- `flathub/*.png` — same scenes downscaled to max **1000×700** with ImageMagick `magick` when available (otherwise a copy of the store file)
+
+Requires Playwright’s browser: `cd apps/desktop && npx playwright install chromium` (once per machine).
+
+On **GitHub Releases** (tag `v*`), the [Release workflow](../../../.github/workflows/release.yml) runs the same `npm run screenshots` step and attaches **`marketing-screenshots.zip`** (contains `flathub/` and `store-ms-snap/` PNGs) to the release. Copy those into this folder if you want committed assets to match the published release.
+
+## Manual capture (Linux, native window)
 
 1. Build/run the desktop app: from repo root `WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev` (if needed on your GPU/WebKit stack).
 2. **Do not maximize** the window (Flathub: keep shadow and rounded corners).
-3. Use the system **window screenshot** tool (e.g. **GNOME**: capture window; **KDE**: Spectacle window mode) so **title bar + shadow** are included.
+3. Use the system **window screenshot** tool (e.g. **GNOME**: capture window; **KDE**: Spectacle window mode; **Hyprland**: `grim -g "…"`) so **title bar + shadow** are included where possible.
 4. Save into `flathub/` or `store-ms-snap/` as listed above.
 
 Helper script (requires `xdotool`, `gnome-screenshot`; X11/Wayland behavior varies):

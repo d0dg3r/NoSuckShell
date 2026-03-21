@@ -18,7 +18,7 @@ import { emitTauriEvent } from "./tauri-event-shim";
 
 const now = () => Math.floor(Date.now() / 1000);
 
-const demoHosts: HostConfig[] = [
+const seedHosts: HostConfig[] = [
   {
     host: "demo-server",
     hostName: "staging.example.com",
@@ -38,6 +38,9 @@ const demoHosts: HostConfig[] = [
     proxyCommand: "",
   },
 ];
+
+/** Mutable host list for e2e (save_host / delete_host update this; list_hosts reads it). */
+let e2eHosts: HostConfig[] = [...seedHosts];
 
 const demoMetadata: HostMetadataStore = {
   defaultUser: "",
@@ -116,14 +119,13 @@ function emitShellBanner(sessionId: string, lines: string): void {
       chunk: lines,
       host_key_prompt: false,
     });
-  }, 50);
+  }, 1200);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function invoke(cmd: string, args?: Record<string, any>): Promise<any> {
+export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
     case "list_hosts":
-      return demoHosts;
+      return e2eHosts;
     case "list_host_metadata":
       return demoMetadata;
     case "list_layout_profiles":
@@ -132,8 +134,25 @@ export async function invoke(cmd: string, args?: Record<string, any>): Promise<a
       return demoViewProfiles;
     case "list_store_objects":
       return defaultEntityStore();
-    case "save_host":
-    case "delete_host":
+    case "save_host": {
+      const host = args?.host as HostConfig | undefined;
+      if (host?.host) {
+        const idx = e2eHosts.findIndex((h) => h.host === host.host);
+        if (idx >= 0) {
+          e2eHosts = e2eHosts.map((h, i) => (i === idx ? host : h));
+        } else {
+          e2eHosts = [...e2eHosts, host];
+        }
+      }
+      return undefined;
+    }
+    case "delete_host": {
+      const hostName = args?.hostName as string | undefined;
+      if (hostName) {
+        e2eHosts = e2eHosts.filter((h) => h.host !== hostName);
+      }
+      return undefined;
+    }
     case "save_host_metadata":
     case "touch_host_last_used":
     case "export_backup":
@@ -163,7 +182,10 @@ export async function invoke(cmd: string, args?: Record<string, any>): Promise<a
       const alias = host?.host ?? "host";
       const hn = host?.hostName ?? "example.com";
       const u = host?.user ?? "user";
-      emitShellBanner(session_id, `\r\nConnected to ${alias} (${hn})\r\nLast login: Mon Jan  1 12:00:00 2024 from 203.0.113.10\r\n${u}@${hn.split(".")[0]}:~$ `);
+      emitShellBanner(
+        session_id,
+        `\r\ne2e mock shell\r\nConnected to ${alias} (${hn})\r\nLast login: Mon Jan  1 12:00:00 2024 from 203.0.113.10\r\n${u}@${hn.split(".")[0]}:~$ `,
+      );
       return { session_id } satisfies SessionStarted;
     }
     case "start_quick_ssh_session": {

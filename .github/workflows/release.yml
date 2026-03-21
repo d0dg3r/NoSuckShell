@@ -89,6 +89,61 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo test
 
+  marketing-screenshots:
+    name: Marketing screenshots (Playwright)
+    needs:
+      - validate-tag
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install ImageMagick and zip
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick zip
+
+      - name: Install npm dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: apps/desktop
+        run: npx playwright install chromium --with-deps
+
+      - name: Generate store & Flathub PNGs
+        working-directory: apps/desktop
+        env:
+          CI: true
+        run: npm run screenshots
+
+      - name: Pack marketing screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="marketing-screenshots-bundle"
+          rm -rf "$out" marketing-screenshots.zip
+          mkdir -p "$out"
+          cp -a docs/media/screenshots/flathub "$out/"
+          cp -a docs/media/screenshots/store-ms-snap "$out/"
+          (cd "$out" && zip -r -q ../marketing-screenshots.zip .)
+
+      - name: Upload marketing screenshots
+        uses: actions/upload-artifact@v5
+        with:
+          name: marketing-screenshots
+          if-no-files-found: error
+          path: marketing-screenshots.zip
+
   build:
     name: Build ${{ matrix.artifact_name }}
     needs:
@@ -232,6 +287,7 @@ jobs:
     needs:
       - validate-tag
       - build
+      - marketing-screenshots
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
@@ -240,6 +296,12 @@ jobs:
           pattern: bundle-*
           merge-multiple: true
           path: release-artifacts
+
+      - name: Download marketing screenshots
+        uses: actions/download-artifact@v5
+        with:
+          name: marketing-screenshots
+          path: marketing-screenshots-artifact
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -250,5 +312,8 @@ jobs:
           generate_release_notes: true
           body: |
             Automated release for `${{ needs.validate-tag.outputs.tag }}`.
+
+            **Marketing screenshots** (Flathub + Microsoft Store / Snap sizes): `marketing-screenshots.zip` in the assets below. Unzip and copy into `docs/media/screenshots/` if you want the repo to match the release visuals.
           files: |
             release-artifacts/**
+            marketing-screenshots-artifact/marketing-screenshots.zip

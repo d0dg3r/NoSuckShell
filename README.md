@@ -23,6 +23,20 @@ Cross-platform **SSH manager** desktop app (**Tauri** + **React**) focused on fa
 - **Encrypted backups** — Export/import is password-protected; plain legacy JSON backups are rejected on purpose.
 - **Cross-platform** — Linux, macOS, and Windows builds via [GitHub Releases](https://github.com/d0dg3r/NoSuckShell/releases).
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/01-main.png" alt="NoSuckShell host list with an embedded SSH session" width="780" />
+</p>
+
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/02-split.png" alt="Split workspace with SSH and local terminal panes" width="380" />
+  &nbsp;
+  <img src="docs/media/screenshots/store-ms-snap/03-layout-profiles.png" alt="Layout command center for saved layouts" width="380" />
+</p>
+
+More sizes (Flathub downscales, Microsoft/Snap 1920×1080), captions for AppStream, video notes, and regeneration commands: [docs/media/screenshots/README.md](docs/media/screenshots/README.md).
+
 ## Install
 
 ### From GitHub Releases (recommended)
