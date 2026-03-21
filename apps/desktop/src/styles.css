@@ -577,7 +577,65 @@ body,
   height: 100%;
 }
 
-.brand-primary-add-wrap .host-plus-btn {
+.brand-toolbar-cluster {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-height: 0;
+  height: 100%;
+}
+
+@media (max-width: 600px) {
+  .brand-toolbar-cluster {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .brand-app-settings-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}
+.brand-primary-add-inner {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.brand-app-settings-btn {
+  flex: 0 0 auto;
+  width: var(--control-height-lg);
+  min-width: var(--control-height-lg);
+  align-self: stretch;
+  min-height: var(--control-height-lg);
+  padding: 0;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: rgba(150, 170, 161, 0.45);
+  background: rgba(16, 22, 26, 0.78);
+  color: #d4e2db;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.brand-app-settings-btn:hover {
+  border-color: rgba(130, 184, 152, 0.55);
+  background: rgba(20, 28, 33, 0.88);
+  color: #e8f4ee;
+}
+
+.brand-app-settings-btn:focus-visible,
+.brand-app-settings-btn:active {
+  border-color: rgba(255, 212, 59, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.brand-primary-add-wrap .host-plus-btn,
+.brand-primary-add-inner .host-plus-btn {
   width: var(--control-height-lg);
   min-width: var(--control-height-lg);
   flex: 1 1 auto;
@@ -974,6 +1032,13 @@ body,
   stroke-linecap: round;
 }
 
+.settings-icon-svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+  stroke: none;
+}
+
 .host-slide-menu {
   grid-column: 1 / -1;
   overflow: hidden;
@@ -1328,6 +1393,33 @@ body,
 .brand-bar.is-quick-add-open .brand-primary-add-wrap .btn.host-plus-btn:active {
   border-radius: 0;
   border-top-right-radius: var(--radius-panel);
+}
+
+.brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn,
+.brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:hover,
+.brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:focus-visible,
+.brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:active {
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-left-color: rgba(150, 170, 161, 0.42);
+  border-left-width: 1px;
+  border-left-style: solid;
+  border-radius: 0;
+}
+
+.brand-bar:not(.is-quick-add-open) .brand-primary-add-wrap .brand-app-settings-btn,
+.brand-bar:not(.is-quick-add-open) .brand-primary-add-wrap .btn.brand-app-settings-btn:hover,
+.brand-bar:not(.is-quick-add-open) .brand-primary-add-wrap .btn.brand-app-settings-btn:focus-visible,
+.brand-bar:not(.is-quick-add-open) .brand-primary-add-wrap .btn.brand-app-settings-btn:active {
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
+}
+
+.brand-bar.is-quick-add-open .brand-primary-add-wrap .brand-app-settings-btn,
+.brand-bar.is-quick-add-open .brand-primary-add-wrap .btn.brand-app-settings-btn:hover,
+.brand-bar.is-quick-add-open .brand-primary-add-wrap .btn.brand-app-settings-btn:focus-visible,
+.brand-bar.is-quick-add-open .brand-primary-add-wrap .btn.brand-app-settings-btn:active {
+  border-radius: var(--radius-panel) 0 0 0;
 }
 
 .btn:disabled {
@@ -3640,6 +3732,28 @@ body,
   border-top: 1px solid rgba(150, 170, 161, 0.42);
   border-right: none;
   border-bottom: none;
+}
+
+.app-shell.app-shell--stacked-mobile .brand-toolbar-cluster {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.app-shell.app-shell--stacked-mobile .brand-app-settings-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+}
+
+.app-shell.app-shell--stacked-mobile .brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn,
+.app-shell.app-shell--stacked-mobile .brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:hover,
+.app-shell.app-shell--stacked-mobile .brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:focus-visible,
+.app-shell.app-shell--stacked-mobile .brand-bar .brand-primary-add-wrap .btn.brand-app-settings-btn:active {
+  border-left: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
 }
 
 .app-shell.app-shell--stacked-mobile .host-item {
