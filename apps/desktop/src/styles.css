@@ -577,7 +577,54 @@ body,
   height: 100%;
 }
 
-.brand-primary-add-wrap .host-plus-btn {
+.brand-toolbar-cluster {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-height: 0;
+  height: 100%;
+}
+
+.brand-primary-add-inner {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.brand-app-settings-btn {
+  flex: 0 0 auto;
+  width: var(--control-height-lg);
+  min-width: var(--control-height-lg);
+  align-self: stretch;
+  min-height: var(--control-height-lg);
+  padding: 0;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: rgba(150, 170, 161, 0.45);
+  background: rgba(16, 22, 26, 0.78);
+  color: #d4e2db;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.brand-app-settings-btn:hover {
+  border-color: rgba(130, 184, 152, 0.55);
+  background: rgba(20, 28, 33, 0.88);
+  color: #e8f4ee;
+}
+
+.brand-app-settings-btn:focus-visible,
+.brand-app-settings-btn:active {
+  border-color: rgba(255, 212, 59, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.brand-primary-add-wrap .host-plus-btn,
+.brand-primary-add-inner .host-plus-btn {
   width: var(--control-height-lg);
   min-width: var(--control-height-lg);
   flex: 1 1 auto;
