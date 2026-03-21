@@ -4340,6 +4340,8 @@ export function App() {
   const appShellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
+    "--shell-grid-gap": isSidebarOpen ? "var(--space-2)" : "var(--space-1)",
+    "--sidebar-resize-track-width": isSidebarOpen ? "8px" : "0px",
   } as CSSProperties;
   const contextMenuPaneSessionId =
     contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
