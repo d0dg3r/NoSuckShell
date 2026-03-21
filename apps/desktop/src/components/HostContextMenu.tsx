@@ -1,4 +1,5 @@
 import type { HostConfig } from "../types";
+import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPosition";
 import type { WorkspaceTabLite } from "./PaneContextMenu";
 
 export type HostContextMenuProps = {
@@ -20,10 +21,13 @@ export function HostContextMenu({
   onEditHost,
   onClose,
 }: HostContextMenuProps) {
+  const { menuRef, style: menuStyle } = useClampedContextMenuPosition(true, x, y, [host.host, workspaces.length]);
+
   return (
     <div
+      ref={menuRef}
       className="context-menu"
-      style={{ left: x, top: y }}
+      style={menuStyle}
       role="menu"
       onContextMenuCapture={(event) => {
         event.preventDefault();

@@ -5,6 +5,7 @@ import {
   type PaneContextSessionKind,
 } from "../features/context-actions";
 import type { SplitMode } from "../features/session-model";
+import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPosition";
 
 export type WorkspaceTabLite = { id: string; name: string };
 
@@ -49,10 +50,25 @@ export function PaneContextMenu({
   onDismiss,
   onPaneAction,
 }: PaneContextMenuProps) {
+  const { menuRef, style: menuStyle } = useClampedContextMenuPosition(true, x, y, [
+    paneIndex,
+    splitMode,
+    paneSessionId,
+    paneSessionKind,
+    paneFileView,
+    canClosePane,
+    broadcastModeEnabled,
+    broadcastCount,
+    freeMoveEnabled,
+    workspaceSendTargets.length,
+    workspaceSendPlaceholder,
+  ]);
+
   return (
     <div
+      ref={menuRef}
       className="context-menu"
-      style={{ left: x, top: y }}
+      style={menuStyle}
       role="menu"
       onContextMenuCapture={(event) => {
         event.preventDefault();

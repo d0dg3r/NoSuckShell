@@ -1,3 +1,4 @@
+import { openAuxWindow } from "../../../tauri-api";
 import type { AutoArrangeMode, LayoutMode, QuickConnectMode, SplitRatioPreset } from "../app-settings-types";
 
 export type AppSettingsLayoutTabProps = {
@@ -52,9 +53,26 @@ export function AppSettingsLayoutTab({
             <span className="field-label">Host sidebar always visible (pinned)</span>
           </label>
           <p className="muted-copy field-span-2">
-            When off, the sidebar can auto-hide; hover the left edge or use the slim handle to show it. You can still
-            toggle pin from that edge handle.
+            When off, the sidebar can auto-hide after you move away. If it is collapsed, click the expand control at the
+            left window edge to show it again. Use the pin control in the host sidebar header to pin or unpin.
           </p>
+          <div className="field field-span-2">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                void openAuxWindow().catch(() => {
+                  /* no-op outside desktop */
+                });
+              }}
+            >
+              Open additional app window
+            </button>
+            <p className="muted-copy field-help">
+              A second window shares the same sessions and can receive file copy/paste from the main window via the in-app
+              clipboard.
+            </p>
+          </div>
           <label className="field">
             <span className="field-label">Window layout</span>
             <select

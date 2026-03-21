@@ -21,6 +21,8 @@ export type AppSettingsAppearanceTabProps = {
   setListTonePreset: (value: ListTonePreset) => void;
   frameModePreset: FrameModePreset;
   setFrameModePreset: (value: FrameModePreset) => void;
+  showFullPathInFilePaneTitle: boolean;
+  setShowFullPathInFilePaneTitle: (value: boolean) => void;
 };
 
 export function AppSettingsAppearanceTab({
@@ -37,6 +39,8 @@ export function AppSettingsAppearanceTab({
   setListTonePreset,
   frameModePreset,
   setFrameModePreset,
+  showFullPathInFilePaneTitle,
+  setShowFullPathInFilePaneTitle,
 }: AppSettingsAppearanceTabProps) {
   return (
     <div className="settings-stack">
@@ -130,6 +134,20 @@ export function AppSettingsAppearanceTab({
             </select>
             <span className="field-help">Hover/focus frame strength.</span>
           </label>
+          <label className="field field-span-2 checkbox-field">
+            <input
+              id="settings-file-pane-full-path-title"
+              type="checkbox"
+              className="checkbox-input"
+              checked={showFullPathInFilePaneTitle}
+              onChange={(event) => setShowFullPathInFilePaneTitle(event.target.checked)}
+            />
+            <span className="field-label">Show full path in file pane titles</span>
+          </label>
+          <p className="muted-copy field-span-2">
+            When off, the split-pane title shows only the current folder name while browsing local or remote files. The
+            tooltip always shows the full path. When on, the title shows the full path with ellipsis if space is tight.
+          </p>
         </div>
       </section>
     </div>

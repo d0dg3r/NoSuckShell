@@ -3,6 +3,7 @@
 
 mod backup;
 mod host_metadata;
+mod sftp_export;
 mod key_crypto;
 mod quick_ssh;
 mod sftp;
@@ -30,10 +31,19 @@ use secure_store::{
     save_store_objects as save_store_objects_backend, unlock_key_material as unlock_key_material_backend,
 };
 use sftp::{
+    copy_local_file as sftp_copy_local_file_backend,
+    create_local_dir as sftp_create_local_dir_backend,
+    delete_local_entry as sftp_delete_local_entry_backend,
     download_remote_file as sftp_download_remote_file_backend,
     get_local_home_canonical_path as sftp_get_local_home_canonical_path_backend,
     list_local_dir as sftp_list_local_dir_backend,
     list_remote_dir as sftp_list_remote_dir_backend,
+    open_local_entry_in_os as sftp_open_local_entry_in_os_backend,
+    rename_local_entry as sftp_rename_local_entry_backend,
+    sftp_create_dir as sftp_create_dir_backend,
+    sftp_delete_entry as sftp_delete_entry_backend,
+    sftp_rename_entry as sftp_rename_entry_backend,
+    upload_remote_file as sftp_upload_remote_file_backend,
     RemoteSshSpec,
 };
 use session::SessionState;
@@ -42,12 +52,17 @@ use ssh_config::{
     delete_host_from_file, load_hosts, load_ssh_config_raw, save_host_to_file, write_ssh_config_raw,
     HostConfig,
 };
+use sftp_export::{export_local_archive, export_remote_archive};
 use view_profiles::{
     delete_view_profile as delete_view_profile_backend, load_view_profiles,
     reorder_view_profiles as reorder_view_profiles_backend, save_view_profile as save_view_profile_backend,
     ViewProfile,
 };
+use tauri::Emitter;
+use tauri::Manager;
 use tauri::State;
+use tauri::WebviewUrl;
+use tauri::webview::WebviewWindowBuilder;
 use store_models::{EntityStore, HostBinding, SshKeyObject, TagObject, UserObject, GroupObject};
 
 #[derive(serde::Deserialize)]
@@ -160,8 +175,123 @@ fn get_local_home_canonical_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn sftp_download_file(spec: RemoteSshSpec, remote_file_path: String, dest_dir_under_home: String) -> Result<String, String> {
-    sftp_download_remote_file_backend(spec, remote_file_path, dest_dir_under_home)
+fn sftp_download_file(spec: RemoteSshSpec, remote_file_path: String, dest_dir_path: String) -> Result<String, String> {
+    sftp_download_remote_file_backend(spec, remote_file_path, dest_dir_path)
+}
+
+#[tauri::command]
+fn sftp_export_paths_archive(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    names: Vec<String>,
+    format: String,
+    dest_dir_path: String,
+    local_output_base_name: Option<String>,
+) -> Result<String, String> {
+    export_remote_archive(
+        spec,
+        parent_path,
+        names,
+        format,
+        dest_dir_path,
+        local_output_base_name,
+    )
+}
+
+#[tauri::command]
+fn local_export_paths_archive(
+    parent_path_key: String,
+    names: Vec<String>,
+    format: String,
+    dest_dir_path: String,
+    local_output_base_name: Option<String>,
+) -> Result<String, String> {
+    export_local_archive(
+        parent_path_key,
+        names,
+        format,
+        dest_dir_path,
+        local_output_base_name,
+    )
+}
+
+#[tauri::command]
+fn sftp_upload_file(
+    spec: RemoteSshSpec,
+    local_dir_path: String,
+    local_file_name: String,
+    remote_file_path: String,
+) -> Result<(), String> {
+    sftp_upload_remote_file_backend(spec, local_dir_path, local_file_name, remote_file_path)
+}
+
+#[tauri::command]
+fn copy_local_file(
+    src_dir_path: String,
+    src_name: String,
+    dest_dir_path: String,
+    dest_name: String,
+) -> Result<String, String> {
+    sftp_copy_local_file_backend(src_dir_path, src_name, dest_dir_path, dest_name)
+}
+
+#[tauri::command]
+fn create_local_dir(parent_path_key: String, dir_name: String) -> Result<(), String> {
+    sftp_create_local_dir_backend(parent_path_key, dir_name)
+}
+
+#[tauri::command]
+fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), String> {
+    sftp_delete_local_entry_backend(parent_path_key, name)
+}
+
+#[tauri::command]
+fn rename_local_entry(parent_path_key: String, old_name: String, new_name: String) -> Result<(), String> {
+    sftp_rename_local_entry_backend(parent_path_key, old_name, new_name)
+}
+
+#[tauri::command]
+fn open_local_entry_in_os(parent_path_key: String, name: String) -> Result<(), String> {
+    sftp_open_local_entry_in_os_backend(parent_path_key, name)
+}
+
+#[tauri::command]
+fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: String) -> Result<(), String> {
+    sftp_create_dir_backend(spec, parent_path, dir_name)
+}
+
+#[tauri::command]
+fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+    sftp_delete_entry_backend(spec, parent_path, name)
+}
+
+#[tauri::command]
+fn sftp_rename_entry(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    sftp_rename_entry_backend(spec, parent_path, old_name, new_name)
+}
+
+#[tauri::command]
+fn broadcast_file_transfer_clipboard(app: tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
+    app.emit("nossuck-file-clipboard", payload)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_aux_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("aux") {
+        w.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(&app, "aux", WebviewUrl::default())
+        .title("NoSuckShell")
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -292,6 +422,7 @@ fn reorder_view_profiles(ids: Vec<String>) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(SessionState::default())
         .invoke_handler(tauri::generate_handler![
             list_hosts,
@@ -311,6 +442,19 @@ fn main() {
             list_local_dir,
             get_local_home_canonical_path,
             sftp_download_file,
+            sftp_export_paths_archive,
+            local_export_paths_archive,
+            sftp_upload_file,
+            copy_local_file,
+            create_local_dir,
+            delete_local_entry,
+            rename_local_entry,
+            open_local_entry_in_os,
+            sftp_create_dir,
+            sftp_delete_entry,
+            sftp_rename_entry,
+            broadcast_file_transfer_clipboard,
+            open_aux_window,
             send_input,
             resize_session,
             close_session,

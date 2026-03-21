@@ -50,6 +50,7 @@ import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
 import { createSplitPaneRenderer } from "./components/SplitWorkspace";
 import { useAppRefSync } from "./hooks/useAppRefSync";
+import { listen } from "@tauri-apps/api/event";
 import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
 import { useWorkspaceBootstrapFromStorage, useWorkspacePersistToStorage } from "./hooks/useWorkspaceLocalStorage";
 import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
@@ -59,6 +60,8 @@ import {
   type AppSettingsTab,
   type AutoArrangeMode,
   type DensityProfile,
+  type FileExportArchiveFormat,
+  type FileExportDestMode,
   type FrameModePreset,
   type LayoutMode,
   type ListTonePreset,
@@ -76,6 +79,12 @@ const LayoutCommandCenter = lazy(async () => {
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
 import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
+import {
+  FILE_DND_PAYLOAD_MIME,
+  parseFileDragPayload,
+  type FileDragPayload,
+} from "./features/file-pane-dnd";
+import { setFileTransferClipboardFromEvent } from "./features/file-transfer-clipboard";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -137,6 +146,10 @@ import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
   DENSITY_PROFILE_STORAGE_KEY,
+  FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY,
+  FILE_EXPORT_DEST_MODE_STORAGE_KEY,
+  FILE_EXPORT_PATH_KEY_STORAGE_KEY,
+  FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY,
   DENSITY_TERMINAL_BASE_FONT,
   FRAME_MODE_PRESET_STORAGE_KEY,
   LAYOUT_MODE_STORAGE_KEY,
@@ -161,10 +174,13 @@ import {
   TERMINAL_FONT_PRESET_STORAGE_KEY,
   UI_FONT_PRESET_STORAGE_KEY,
   clampSidebarWidth,
+  parseFileExportArchiveFormat,
+  parseFileExportDestMode,
   parseStoredAutoArrangeMode,
   readLayoutMode,
   readSplitRatioPreset,
 } from "./features/app-preferences";
+import { resolveFileExportDestPath } from "./features/file-export-dest";
 import { DND_PAYLOAD_MIME, type DragPayload, type PaneDropZone, resolvePaneDropZoneFromOverlay } from "./features/pane-dnd";
 import {
   type AutoArrangeActiveMode,
@@ -349,6 +365,30 @@ export function App() {
     const persisted = window.localStorage.getItem(FRAME_MODE_PRESET_STORAGE_KEY);
     return persisted === "cleaner" || persisted === "clearer" || persisted === "balanced" ? persisted : "balanced";
   });
+  const [showFullPathInFilePaneTitle, setShowFullPathInFilePaneTitle] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY) === "true";
+  });
+  const [fileExportDestMode, setFileExportDestMode] = useState<FileExportDestMode>(() => {
+    if (typeof window === "undefined") {
+      return "fixed";
+    }
+    return parseFileExportDestMode(window.localStorage.getItem(FILE_EXPORT_DEST_MODE_STORAGE_KEY));
+  });
+  const [fileExportPathKey, setFileExportPathKey] = useState<string>(() => {
+    if (typeof window === "undefined") {
+      return "Downloads";
+    }
+    return window.localStorage.getItem(FILE_EXPORT_PATH_KEY_STORAGE_KEY) ?? "Downloads";
+  });
+  const [fileExportArchiveFormat, setFileExportArchiveFormat] = useState<FileExportArchiveFormat>(() => {
+    if (typeof window === "undefined") {
+      return "tarGz";
+    }
+    return parseFileExportArchiveFormat(window.localStorage.getItem(FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY));
+  });
   const [terminalFontOffset, setTerminalFontOffset] = useState<number>(() => {
     if (typeof window === "undefined") {
       return 0;
@@ -442,6 +482,9 @@ export function App() {
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
+  const localFilePanePathsRef = useRef<Record<number, string>>({});
+  const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
+  const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
@@ -742,16 +785,37 @@ export function App() {
     }
     setSaveTrustHostAsDefault(true);
   }, [activeTrustPrompt?.sessionId]);
-  const resolvePaneIdentity = useCallback(
-    (paneIndex: number): string => {
+  const onFilePaneTitleChange = useCallback((paneIndex: number, payload: { short: string; full: string } | null) => {
+    if (payload === null) {
+      delete filePaneTitlesRef.current[paneIndex];
+    } else {
+      filePaneTitlesRef.current[paneIndex] = payload;
+    }
+    setFilePaneTitleEpoch((n) => n + 1);
+  }, []);
+
+  const resolvePaneLabel = useCallback(
+    (paneIndex: number): { display: string; title: string } => {
       const paneSessionId = splitSlots[paneIndex] ?? null;
       if (!paneSessionId) {
-        return "Drop it on me";
+        const t = "Drop it on me";
+        return { display: t, title: t };
+      }
+      const fileView = sessionFileViews[paneSessionId] ?? "terminal";
+      if (fileView === "local" || fileView === "remote") {
+        const payload = filePaneTitlesRef.current[paneIndex];
+        if (payload) {
+          return {
+            display: showFullPathInFilePaneTitle ? payload.full : payload.short,
+            title: payload.full,
+          };
+        }
       }
       const paneSession = sessionById.get(paneSessionId) ?? null;
-      return resolveSessionTitle(paneSession);
+      const label = resolveSessionTitle(paneSession);
+      return { display: label, title: label };
     },
-    [resolveSessionTitle, sessionById, splitSlots],
+    [resolveSessionTitle, sessionById, splitSlots, sessionFileViews, showFullPathInFilePaneTitle, filePaneTitleEpoch],
   );
   const load = async () => {
     const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles, loadedStore] = await Promise.all([
@@ -1350,6 +1414,25 @@ export function App() {
   });
 
   useEffect(() => {
+    if (import.meta.env.VITE_E2E === "true") {
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    void listen<FileDragPayload>("nossuck-file-clipboard", (ev) => {
+      setFileTransferClipboardFromEvent(ev.payload as FileDragPayload);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        /* plain Vite preview without Tauri */
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
     const pendingProfileSessionIds = pendingProfileLoadSessionIdsRef.current;
     if (pendingProfileSessionIds && pendingProfileSessionIds.size > 0) {
       const hasAllPendingSessionIds = Array.from(pendingProfileSessionIds).every((id) => sessionIds.includes(id));
@@ -1635,6 +1718,18 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(FRAME_MODE_PRESET_STORAGE_KEY, frameModePreset);
   }, [frameModePreset]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY, String(showFullPathInFilePaneTitle));
+  }, [showFullPathInFilePaneTitle]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_DEST_MODE_STORAGE_KEY, fileExportDestMode);
+  }, [fileExportDestMode]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_PATH_KEY_STORAGE_KEY, fileExportPathKey);
+  }, [fileExportPathKey]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY, fileExportArchiveFormat);
+  }, [fileExportArchiveFormat]);
   useEffect(() => {
     window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
   }, [terminalFontOffset]);
@@ -2569,7 +2664,11 @@ export function App() {
       return lastInternalDragPayloadRef.current;
     }
     try {
-      const parsed = JSON.parse(encoded) as Partial<DragPayload>;
+      const parsedObj = JSON.parse(encoded) as Record<string, unknown>;
+      if (parsedObj.kind === "local" || parsedObj.kind === "remote") {
+        return null;
+      }
+      const parsed = parsedObj as Partial<DragPayload>;
       const result =
         parsed.type === "session" && typeof parsed.sessionId === "string" && parsed.sessionId.length > 0
           ? ({ type: "session", sessionId: parsed.sessionId } as DragPayload)
@@ -2609,6 +2708,12 @@ export function App() {
           height: rawBounds.height,
         }
       : null;
+    const fileRaw = event.dataTransfer.getData(FILE_DND_PAYLOAD_MIME);
+    const filePlain = parseFileDragPayload(event.dataTransfer.getData("text/plain") || "");
+    if ((fileRaw && parseFileDragPayload(fileRaw)) || filePlain) {
+      lastInternalDragPayloadRef.current = null;
+      return;
+    }
     const payload = parseDragPayload(event);
     if (!payload) {
       lastInternalDragPayloadRef.current = null;
@@ -2750,6 +2855,9 @@ export function App() {
   };
 
   const resolveDropEffect = (event: ReactDragEvent): DataTransfer["dropEffect"] => {
+    if (event.dataTransfer.types.includes(FILE_DND_PAYLOAD_MIME)) {
+      return "copy";
+    }
     const payload = parseDragPayload(event);
     if (!payload) {
       if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
@@ -3485,9 +3593,11 @@ export function App() {
   };
   const revealSidebar = () => {
     clearSidebarHideTimeout();
-    if (!isSidebarPinned) {
-      setIsSidebarVisible(true);
-    }
+    setIsSidebarVisible(true);
+  };
+  const toggleHostSidebar = () => {
+    clearSidebarHideTimeout();
+    setIsSidebarVisible((prev) => !prev);
   };
   const maybeHideSidebar = () => {
     if (isSidebarPinned || isSidebarResizing) {
@@ -3845,11 +3955,20 @@ export function App() {
     [splitSlots, sessions, hosts],
   );
 
+  const onLocalFilePanePathChange = useCallback((paneIndex: number, pathKey: string) => {
+    localFilePanePathsRef.current[paneIndex] = pathKey;
+  }, []);
+
+  const getFileExportDestPath = useCallback(async () => {
+    return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
+  }, [fileExportDestMode, fileExportPathKey]);
+
   const renderSplitNode = createSplitPaneRenderer({
     splitSlots,
     activePaneIndex,
     paneOrder,
-    resolvePaneIdentity,
+    resolvePaneLabel,
+    showFullPathInFilePaneTitle,
     highlightedHostPaneIndices,
     hasHighlightedHostTargets,
     highlightedHostAlias,
@@ -3890,13 +4009,17 @@ export function App() {
     paneFileViewForPane,
     paneContextSessionKindForPane,
     remoteSshSpecForPane,
+    onLocalFilePanePathChange,
+    getFileExportDestPath,
+    fileExportArchiveFormat,
+    onFilePaneTitleChange,
   });
 
   const appShellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     "--shell-grid-gap": isSidebarOpen ? "var(--space-2)" : "var(--space-1)",
-    "--sidebar-resize-track-width": isSidebarOpen ? "8px" : "0px",
+    "--sidebar-resize-track-width": isSidebarOpen ? "12px" : "0px",
   } as CSSProperties;
   const contextMenuPaneSessionId =
     contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
@@ -3943,20 +4066,39 @@ export function App() {
         event.preventDefault();
       }}
     >
-      <button
-        type="button"
-        className={`left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`}
-        aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
-        title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
-        onMouseEnter={revealSidebar}
-        onMouseLeave={maybeHideSidebar}
-        onClick={toggleSidebarPinned}
+      <div
+        className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}
       >
-        {isSidebarPinned ? "◧" : "◨"}
-      </button>
+        {!isSidebarOpen && (
+          <button
+            type="button"
+            className="btn sidebar-rail-toggle-btn"
+            aria-label="Expand host sidebar"
+            title="Expand host sidebar"
+            onClick={() => {
+              clearSidebarHideTimeout();
+              setIsSidebarVisible(true);
+            }}
+          >
+            <svg className="sidebar-rail-toggle-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <g
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 7.5l5.25 4.5L9 16.5" />
+                <path d="M14.25 7.5l5.25 4.5-5.25 4.5" />
+              </g>
+            </svg>
+          </button>
+        )}
+      </div>
       <HostSidebar
         isSidebarOpen={isSidebarOpen}
         isSidebarPinned={isSidebarPinned}
+        onToggleSidebarPinned={toggleSidebarPinned}
         onMouseEnter={revealSidebar}
         onMouseLeave={maybeHideSidebar}
         logoSrc={logoTextTransparent}
@@ -4020,13 +4162,39 @@ export function App() {
           handleRemoveHostIntent,
         }}
       />
-      <div
-        className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize host sidebar"
-        onPointerDown={startSidebarResize}
-      />
+      <div className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}>
+        <div
+          className="sidebar-resize-track"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize host sidebar"
+          onPointerDown={startSidebarResize}
+        />
+        <button
+          type="button"
+          className="btn sidebar-rail-toggle-btn sidebar-rail-toggle-btn--on-separator"
+          aria-expanded={isSidebarOpen}
+          aria-label="Collapse host sidebar"
+          title="Collapse host sidebar"
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleHostSidebar();
+          }}
+        >
+          <svg className="sidebar-rail-toggle-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <g
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M14.75 7.5L9.5 12l5.25 4.5" />
+              <path d="M19.5 7.5l-5.25 4.5 5.25 4.5" />
+            </g>
+          </svg>
+        </button>
+      </div>
 
       <TerminalWorkspaceDock
         workspaceTabs={workspaceTabs}
@@ -4074,6 +4242,14 @@ export function App() {
           setListTonePreset={setListTonePreset}
           frameModePreset={frameModePreset}
           setFrameModePreset={setFrameModePreset}
+          showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
+          setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+          fileExportDestMode={fileExportDestMode}
+          setFileExportDestMode={setFileExportDestMode}
+          fileExportPathKey={fileExportPathKey}
+          setFileExportPathKey={setFileExportPathKey}
+          fileExportArchiveFormat={fileExportArchiveFormat}
+          setFileExportArchiveFormat={setFileExportArchiveFormat}
           layoutMode={layoutMode}
           setLayoutMode={setLayoutMode}
           splitRatioPreset={splitRatioPreset}

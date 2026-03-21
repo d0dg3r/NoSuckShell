@@ -1,12 +1,19 @@
 export type AppSettingsTab =
   | "appearance"
   | "layout"
+  | "files"
   | "data"
   | "ssh"
   | "views"
   | "store"
   | "help"
   | "about";
+
+/** Where SFTP downloads / file exports are saved. */
+export type FileExportDestMode = "fixed" | "ask";
+
+/** Archive format for folder or multi-item export. */
+export type FileExportArchiveFormat = "tarGz" | "zip";
 
 export type IdentityStoreSubTab = "overview" | "users" | "groups" | "tags" | "keys" | "hosts";
 

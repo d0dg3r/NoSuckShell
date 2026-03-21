@@ -4,6 +4,7 @@ import type { AppSettingsTab, IdentityStoreSubTab } from "./app-settings-types";
 export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "appearance", label: "Appearance" },
   { id: "layout", label: "Layout & Navigation" },
+  { id: "files", label: "Files & export" },
   { id: "views", label: "Views" },
   { id: "store", label: "Identity Store" },
   { id: "ssh", label: "SSH" },

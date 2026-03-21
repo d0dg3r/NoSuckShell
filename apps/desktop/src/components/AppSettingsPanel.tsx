@@ -7,6 +7,7 @@ import { IdentityStoreSubtabs } from "./settings/IdentityStoreSubtabs";
 import { AppSettingsAboutTab } from "./settings/tabs/AppSettingsAboutTab";
 import { AppSettingsAppearanceTab } from "./settings/tabs/AppSettingsAppearanceTab";
 import { AppSettingsDataTab } from "./settings/tabs/AppSettingsDataTab";
+import { AppSettingsFilesTab } from "./settings/tabs/AppSettingsFilesTab";
 import { AppSettingsHelpTab } from "./settings/tabs/AppSettingsHelpTab";
 import { AppSettingsLayoutTab } from "./settings/tabs/AppSettingsLayoutTab";
 import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
@@ -17,6 +18,8 @@ export type {
   AppSettingsTab,
   AutoArrangeMode,
   DensityProfile,
+  FileExportArchiveFormat,
+  FileExportDestMode,
   FrameModePreset,
   IdentityStoreSubTab,
   LayoutMode,
@@ -54,6 +57,14 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setListTonePreset,
     frameModePreset,
     setFrameModePreset,
+    showFullPathInFilePaneTitle,
+    setShowFullPathInFilePaneTitle,
+    fileExportDestMode,
+    setFileExportDestMode,
+    fileExportPathKey,
+    setFileExportPathKey,
+    fileExportArchiveFormat,
+    setFileExportArchiveFormat,
     layoutMode,
     setLayoutMode,
     splitRatioPreset,
@@ -233,6 +244,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setListTonePreset={setListTonePreset}
               frameModePreset={frameModePreset}
               setFrameModePreset={setFrameModePreset}
+              showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
+              setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
             />
           )}
           {activeAppSettingsTab === "layout" && (
@@ -251,6 +264,16 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setQuickConnectMode={setQuickConnectMode}
               quickConnectAutoTrust={quickConnectAutoTrust}
               setQuickConnectAutoTrust={setQuickConnectAutoTrust}
+            />
+          )}
+          {activeAppSettingsTab === "files" && (
+            <AppSettingsFilesTab
+              fileExportDestMode={fileExportDestMode}
+              setFileExportDestMode={setFileExportDestMode}
+              fileExportPathKey={fileExportPathKey}
+              setFileExportPathKey={setFileExportPathKey}
+              fileExportArchiveFormat={fileExportArchiveFormat}
+              setFileExportArchiveFormat={setFileExportArchiveFormat}
             />
           )}
           {activeAppSettingsTab === "views" && (

@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for NoSuckShell desktop app",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "windows": ["main", "aux"],
+  "permissions": ["core:default", "dialog:default"]
 }

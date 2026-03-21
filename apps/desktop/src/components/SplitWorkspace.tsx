@@ -3,6 +3,7 @@ import type { ContextActionId, PaneContextSessionKind } from "../features/contex
 import type { DragPayload, PaneDropZone } from "../features/pane-dnd";
 import type { ContextMenuState, SplitMode } from "../features/session-model";
 import { MAX_SPLIT_RATIO, MIN_SPLIT_RATIO, type SplitAxis, type SplitTreeNode } from "../features/split-tree";
+import type { FileExportArchiveFormat } from "./settings/app-settings-types";
 import type { HostConfig, RemoteSshSpec } from "../types";
 
 const TerminalPane = lazy(async () => {
@@ -24,7 +25,9 @@ export type SplitPaneRendererBridge = {
   splitSlots: Array<string | null>;
   activePaneIndex: number;
   paneOrder: number[];
-  resolvePaneIdentity: (paneIndex: number) => string;
+  resolvePaneLabel: (paneIndex: number) => { display: string; title: string };
+  /** When true and pane is in local/remote file view, pane title uses ellipsis for long full paths. */
+  showFullPathInFilePaneTitle: boolean;
   highlightedHostPaneIndices: Set<number>;
   hasHighlightedHostTargets: boolean;
   highlightedHostAlias: string | null;
@@ -71,6 +74,10 @@ export type SplitPaneRendererBridge = {
   paneFileViewForPane: (paneIndex: number) => "terminal" | "remote" | "local";
   paneContextSessionKindForPane: (paneIndex: number) => PaneContextSessionKind;
   remoteSshSpecForPane: (paneIndex: number) => RemoteSshSpec | null;
+  onLocalFilePanePathChange: (paneIndex: number, pathKey: string) => void;
+  getFileExportDestPath: () => Promise<string | null>;
+  fileExportArchiveFormat: FileExportArchiveFormat;
+  onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -78,7 +85,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
     if (node.type === "leaf") {
       const paneIndex = node.paneIndex;
       const paneSessionId = b.splitSlots[paneIndex] ?? null;
-      const paneIdentity = b.resolvePaneIdentity(paneIndex);
+      const paneLabel = b.resolvePaneLabel(paneIndex);
       const isHoverTarget = b.highlightedHostPaneIndices.has(paneIndex);
       const isHoverDimmed = b.hasHighlightedHostTargets && !isHoverTarget;
       const isDropOverlayVisible =
@@ -216,8 +223,15 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
             }}
           >
             <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
-              <span className="split-pane-label-title" title={paneIdentity}>
-                {paneIdentity}
+              <span
+                className={`split-pane-label-title ${
+                  (paneFileView === "local" || paneFileView === "remote") && b.showFullPathInFilePaneTitle
+                    ? "split-pane-label-title--file-full-path"
+                    : ""
+                }`}
+                title={paneLabel.title}
+              >
+                {paneLabel.display}
               </span>
               <button
                 className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
@@ -468,15 +482,26 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
               >
                 <RemoteFilePane
+                  paneIndex={paneIndex}
                   spec={remoteSpec}
+                  getExportDestPath={b.getFileExportDestPath}
+                  archiveFormat={b.fileExportArchiveFormat}
                   onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
+                  onFilePaneTitleChange={b.onFilePaneTitleChange}
                 />
               </Suspense>
             ) : paneFileView === "local" ? (
               <Suspense
                 fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
               >
-                <LocalFilePane onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)} />
+                <LocalFilePane
+                  paneIndex={paneIndex}
+                  onPathChange={(pathKey) => b.onLocalFilePanePathChange(paneIndex, pathKey)}
+                  getExportDestPath={b.getFileExportDestPath}
+                  archiveFormat={b.fileExportArchiveFormat}
+                  onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
+                  onFilePaneTitleChange={b.onFilePaneTitleChange}
+                />
               </Suspense>
             ) : (
               <Suspense

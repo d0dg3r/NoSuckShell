@@ -8,6 +8,7 @@ export type HostSidebarView = { id: SidebarViewId; label: string };
 export type HostSidebarProps = {
   isSidebarOpen: boolean;
   isSidebarPinned: boolean;
+  onToggleSidebarPinned: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   logoSrc: string;
@@ -46,6 +47,7 @@ export type HostSidebarProps = {
 export function HostSidebar({
   isSidebarOpen,
   isSidebarPinned,
+  onToggleSidebarPinned,
   onMouseEnter,
   onMouseLeave,
   logoSrc,
@@ -95,6 +97,25 @@ export function HostSidebar({
           </div>
           <div className="brand-add-column">
             <div className="brand-primary-add-wrap brand-toolbar-cluster">
+              <button
+                type="button"
+                className="btn brand-sidebar-pin-btn"
+                aria-pressed={isSidebarPinned}
+                aria-label={
+                  isSidebarPinned
+                    ? "Unpin sidebar — enable auto-hide on mouse leave"
+                    : "Pin sidebar — keep host list visible"
+                }
+                title={isSidebarPinned ? "Pinned — click to allow auto-hide" : "Unpinned — click to keep sidebar always visible"}
+                onClick={onToggleSidebarPinned}
+              >
+                <svg className="sidebar-pin-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M12 2C8.97 2 6.5 4.47 6.5 7.5c0 3.05 3.12 8.08 5.5 10.74 2.38-2.66 5.5-7.69 5.5-10.74C17.5 4.47 15.03 2 12 2zm0 9.25c-1.24 0-2.25-1.01-2.25-2.25S10.76 6.75 12 6.75s2.25 1.01 2.25 2.25S13.24 11.25 12 11.25z"
+                  />
+                </svg>
+              </button>
               <button
                 type="button"
                 className="btn brand-app-settings-btn"

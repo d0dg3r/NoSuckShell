@@ -16,6 +16,8 @@ import type {
   AppSettingsTab,
   AutoArrangeMode,
   DensityProfile,
+  FileExportArchiveFormat,
+  FileExportDestMode,
   FrameModePreset,
   LayoutMode,
   ListTonePreset,
@@ -49,6 +51,14 @@ export type AppSettingsPanelProps = {
   setListTonePreset: (value: ListTonePreset) => void;
   frameModePreset: FrameModePreset;
   setFrameModePreset: (value: FrameModePreset) => void;
+  showFullPathInFilePaneTitle: boolean;
+  setShowFullPathInFilePaneTitle: (value: boolean) => void;
+  fileExportDestMode: FileExportDestMode;
+  setFileExportDestMode: (value: FileExportDestMode) => void;
+  fileExportPathKey: string;
+  setFileExportPathKey: (value: string) => void;
+  fileExportArchiveFormat: FileExportArchiveFormat;
+  setFileExportArchiveFormat: (value: FileExportArchiveFormat) => void;
   layoutMode: LayoutMode;
   setLayoutMode: (value: LayoutMode) => void;
   splitRatioPreset: SplitRatioPreset;

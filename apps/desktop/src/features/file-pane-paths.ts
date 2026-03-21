@@ -145,3 +145,40 @@ export function formatFileSize(bytes: number): string {
   }
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
+
+/** Last path segment for pane title when not showing full path (local browser). */
+export function localFolderTitleShort(pathKey: string): string {
+  const key = pathKey.trim();
+  if (key === "") {
+    return "Home";
+  }
+  if (key === "/") {
+    return "/";
+  }
+  const parts = key.split("/").filter((seg) => seg.length > 0);
+  const base = parts[parts.length - 1];
+  return base ?? key;
+}
+
+/** Last path segment for pane title when not showing full path (remote SFTP). */
+export function remoteFolderTitleShort(remotePath: string): string {
+  const t = remotePath.trim();
+  if (t === "" || t === ".") {
+    return "Remote";
+  }
+  if (t === "/") {
+    return "/";
+  }
+  const parts = t.split("/").filter((seg) => seg.length > 0);
+  const base = parts[parts.length - 1];
+  return base ?? t;
+}
+
+/** Resolved full path string for remote (for tooltip / full-path title mode). */
+export function remotePathFullDisplay(remotePath: string): string {
+  const t = remotePath.trim();
+  if (!t || t === ".") {
+    return ".";
+  }
+  return t;
+}

@@ -222,19 +222,77 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return [] as TagObject[];
     case "sftp_list_remote_dir":
       return [
-        { name: "etc", isDir: true, size: 0, mtime: null },
-        { name: "home", isDir: true, size: 0, mtime: null },
-        { name: "README.txt", isDir: false, size: 12, mtime: Math.floor(Date.now() / 1000) },
+        {
+          name: "etc",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          userDisplay: "0",
+          groupDisplay: "0",
+        },
+        {
+          name: "home",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          userDisplay: "0",
+          groupDisplay: "0",
+        },
+        {
+          name: "README.txt",
+          isDir: false,
+          size: 12,
+          mtime: Math.floor(Date.now() / 1000),
+          modeDisplay: "-rw-r--r--",
+          userDisplay: "1000",
+          groupDisplay: "1000",
+        },
       ];
     case "list_local_dir":
       return [
-        { name: "Documents", isDir: true, size: 0, mtime: null },
-        { name: "notes.md", isDir: false, size: 8, mtime: Math.floor(Date.now() / 1000) },
+        {
+          name: "Documents",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          userDisplay: "e2e",
+          groupDisplay: "e2e",
+        },
+        {
+          name: "notes.md",
+          isDir: false,
+          size: 8,
+          mtime: Math.floor(Date.now() / 1000),
+          modeDisplay: "-rw-r--r--",
+          userDisplay: "e2e",
+          groupDisplay: "e2e",
+        },
       ];
     case "get_local_home_canonical_path":
       return "/home/e2e";
     case "sftp_download_file":
       return "/home/e2e/Downloads/mock-download.bin";
+    case "sftp_export_paths_archive":
+      return "/home/e2e/Downloads/mock-export.tar.gz";
+    case "local_export_paths_archive":
+      return "/home/e2e/Downloads/mock-local-export.tar.gz";
+    case "sftp_upload_file":
+    case "broadcast_file_transfer_clipboard":
+    case "open_aux_window":
+      return undefined;
+    case "copy_local_file":
+      return "/home/e2e/Documents/copied-file";
+    case "create_local_dir":
+    case "delete_local_entry":
+    case "rename_local_entry":
+    case "open_local_entry_in_os":
+    case "sftp_create_dir":
+    case "sftp_delete_entry":
+    case "sftp_rename_entry":
+      return undefined;
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);
   }

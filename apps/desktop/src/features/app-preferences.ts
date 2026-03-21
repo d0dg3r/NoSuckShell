@@ -1,4 +1,5 @@
 import type { AutoArrangeMode, DensityProfile, LayoutMode, SplitRatioPreset, TerminalFontPreset } from "../components/AppSettingsPanel";
+import type { FileExportArchiveFormat, FileExportDestMode } from "../components/settings/app-settings-types";
 
 export const SIDEBAR_MIN_WIDTH = 240;
 export const SIDEBAR_MAX_WIDTH = 520;
@@ -21,6 +22,12 @@ export const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
 export const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
 export const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
 export const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
+/** When true, split-pane label shows full file path (ellipsis); otherwise folder basename only. Tooltip always shows full path in file view. */
+export const FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY = "nosuckshell.ui.filePaneShowFullPathInPaneTitle";
+
+export const FILE_EXPORT_DEST_MODE_STORAGE_KEY = "nosuckshell.fileExport.destMode";
+export const FILE_EXPORT_PATH_KEY_STORAGE_KEY = "nosuckshell.fileExport.pathKey";
+export const FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY = "nosuckshell.fileExport.archiveFormat";
 /** Must match CSS breakpoint for stacked-mobile shell */
 export const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
 
@@ -59,6 +66,15 @@ export const parseStoredAutoArrangeMode = (raw: string | null): AutoArrangeMode 
 
 export const clampSidebarWidth = (value: number): number =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
+
+export const parseFileExportDestMode = (raw: string | null): FileExportDestMode =>
+  raw === "ask" ? "ask" : "fixed";
+
+export const parseFileExportArchiveFormat = (raw: string | null): FileExportArchiveFormat =>
+  raw === "zip" ? "zip" : "tarGz";
+
+export const fileExportArchiveFormatToApi = (fmt: FileExportArchiveFormat): "tar.gz" | "zip" =>
+  fmt === "zip" ? "zip" : "tar.gz";
 
 export const readLayoutMode = (): LayoutMode => {
   if (typeof window === "undefined") {

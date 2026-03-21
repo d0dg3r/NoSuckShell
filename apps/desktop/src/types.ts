@@ -146,6 +146,14 @@ export type SftpDirEntry = {
   isDir: boolean;
   size: number;
   mtime: number | null;
+  /** e.g. `drwxr-xr-x` */
+  modeDisplay: string;
+  /** Permission bits only, e.g. `755`. */
+  modeOctal: string;
+  /** Numeric uid from the server when available. */
+  userDisplay: string;
+  /** Numeric gid from the server when available. */
+  groupDisplay: string;
 };
 
 export type LocalDirEntry = {
@@ -153,6 +161,10 @@ export type LocalDirEntry = {
   isDir: boolean;
   size: number;
   mtime: number | null;
+  modeDisplay: string;
+  modeOctal: string;
+  userDisplay: string;
+  groupDisplay: string;
 };
 
 export type RemoteSshSpec =

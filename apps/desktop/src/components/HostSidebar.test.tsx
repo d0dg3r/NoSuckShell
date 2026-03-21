@@ -8,6 +8,7 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
   return {
     isSidebarOpen: true,
     isSidebarPinned: true,
+    onToggleSidebarPinned: vi.fn(),
     onMouseEnter: vi.fn(),
     onMouseLeave: vi.fn(),
     logoSrc: "",
@@ -76,5 +77,20 @@ describe("HostSidebar", () => {
     expect(btn).toBeTruthy();
     fireEvent.click(btn!);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onToggleSidebarPinned when the pin sidebar button is clicked", () => {
+    const onToggleSidebarPinned = vi.fn();
+    const { container } = render(
+      <HostSidebar {...minimalHostSidebarProps({ onToggleSidebarPinned, isSidebarPinned: false })} />,
+    );
+    const aside = container.querySelector("aside.left-rail");
+    expect(aside).toBeTruthy();
+    const btn = aside!.querySelector<HTMLButtonElement>(
+      '[aria-label="Pin sidebar — keep host list visible"]',
+    );
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn!);
+    expect(onToggleSidebarPinned).toHaveBeenCalledTimes(1);
   });
 });
