@@ -1,6 +1,6 @@
 # Promo video checklist
 
-Use the same **demo hosts and terminal content** as in [README.md](README.md) / screenshot guide — no real credentials or IPs.
+Use the same **demo hosts and terminal content** as in [README.md](README.md) (screenshot guide) — no real credentials or IPs.
 
 ## Suggested flow (45–75 seconds)
 

@@ -1,275 +1,186 @@
+/**
+ * Stub IPC for `e2e` / screenshot builds (replaces `@tauri-apps/api/core` invoke).
+ */
 import type {
   EntityStore,
-  HostBinding,
+  GroupObject,
   HostConfig,
   HostMetadataStore,
   LayoutProfile,
   QuickSshSessionRequest,
   SessionStarted,
-  SshKeyObject,
+  TagObject,
+  UserObject,
+  ViewFilterGroup,
   ViewProfile,
 } from "../types";
-import { emitSessionOutput } from "./tauri-event-shim";
+import { emitTauriEvent } from "./tauri-event-shim";
 
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+const now = () => Math.floor(Date.now() / 1000);
 
-let hosts: HostConfig[] = [];
-let metadataStore: HostMetadataStore = { defaultUser: "", hosts: {} };
-let layoutProfiles: LayoutProfile[] = [];
-let viewProfiles: ViewProfile[] = [];
-let entityStore: EntityStore = {
+const demoHosts: HostConfig[] = [
+  {
+    host: "demo-server",
+    hostName: "staging.example.com",
+    user: "demo",
+    port: 22,
+    identityFile: "",
+    proxyJump: "",
+    proxyCommand: "",
+  },
+  {
+    host: "lab-runner",
+    hostName: "lab.example.com",
+    user: "builder",
+    port: 22,
+    identityFile: "",
+    proxyJump: "",
+    proxyCommand: "",
+  },
+];
+
+const demoMetadata: HostMetadataStore = {
+  defaultUser: "",
+  hosts: {
+    "demo-server": {
+      favorite: true,
+      tags: ["demo", "staging"],
+      lastUsedAt: now(),
+      trustHostDefault: true,
+    },
+    "lab-runner": {
+      favorite: false,
+      tags: ["ci"],
+      lastUsedAt: now() - 3600,
+      trustHostDefault: true,
+    },
+  },
+};
+
+const demoLayoutProfiles: LayoutProfile[] = [
+  {
+    id: "profile-demo-1",
+    name: "Two-pane staging",
+    withHosts: true,
+    panes: [],
+    splitTree: null,
+    createdAt: now() - 86400,
+    updatedAt: now(),
+  },
+];
+
+const emptyViewFilterGroup: ViewFilterGroup = {
+  id: "root",
+  mode: "and",
+  rules: [],
+  groups: [],
+};
+
+const demoViewProfiles: ViewProfile[] = [
+  {
+    id: "view-demo-1",
+    name: "Staging only",
+    order: 0,
+    filterGroup: {
+      ...emptyViewFilterGroup,
+      rules: [{ id: "r1", field: "tag", operator: "contains", value: "staging" }],
+    },
+    sortRules: [{ field: "host" as const, direction: "asc" as const }],
+    createdAt: now() - 3600,
+    updatedAt: now(),
+  },
+];
+
+const defaultEntityStore = (): EntityStore => ({
   schemaVersion: 1,
-  updatedAt: 0,
+  updatedAt: now(),
   users: {},
   groups: {},
-  keys: {},
   tags: {},
+  keys: {},
   hostBindings: {},
-};
+});
 
-const activeSessionIds = new Set<string>();
+let sessionSeq = 0;
 
-const newSessionId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-};
+function nextSessionId(prefix: string): string {
+  sessionSeq += 1;
+  return `${prefix}-${sessionSeq}`;
+}
 
-const scheduleWelcomeChunks = (sessionId: string): void => {
-  // Defer past React layout so TerminalPane has registered its `listen` handler.
+function emitShellBanner(sessionId: string, lines: string): void {
+  // Defer past React mount + `listen()` subscription in TerminalPane.
   window.setTimeout(() => {
-    emitSessionOutput({
+    emitTauriEvent("session-output", {
       session_id: sessionId,
-      chunk: "\r\n[e2e mock shell]\r\n$ ",
+      chunk: lines,
       host_key_prompt: false,
     });
   }, 50);
-};
+}
 
-const startAnySession = (): SessionStarted => {
-  const session_id = newSessionId();
-  activeSessionIds.add(session_id);
-  scheduleWelcomeChunks(session_id);
-  return { session_id };
-};
-
-const hostConfigFromQuickRequest = (request: QuickSshSessionRequest): HostConfig => ({
-  host: request.hostName,
-  hostName: request.hostName,
-  user: request.user,
-  port: request.port ?? 22,
-  identityFile: request.identityFile,
-  proxyJump: request.proxyJump,
-  proxyCommand: request.proxyCommand,
-});
-
-export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function invoke(cmd: string, args?: Record<string, any>): Promise<any> {
   switch (cmd) {
     case "list_hosts":
-      return Promise.resolve(structuredClone(hosts) as T);
-
-    case "save_host": {
-      const { host } = args as { host: HostConfig };
-      const next = hosts.filter((h) => h.host !== host.host);
-      next.push({ ...host });
-      hosts = next;
-      return Promise.resolve(undefined as T);
-    }
-
-    case "delete_host": {
-      const { hostName } = args as { hostName: string };
-      hosts = hosts.filter((h) => h.host !== hostName);
-      delete metadataStore.hosts[hostName];
-      return Promise.resolve(undefined as T);
-    }
-
+      return demoHosts;
     case "list_host_metadata":
-      return Promise.resolve(structuredClone(metadataStore) as T);
-
-    case "save_host_metadata": {
-      const { metadata } = args as { metadata: HostMetadataStore };
-      metadataStore = { ...metadata, hosts: { ...metadata.hosts } };
-      return Promise.resolve(undefined as T);
-    }
-
-    case "touch_host_last_used": {
-      const { hostAlias } = args as { hostAlias: string };
-      const prev = metadataStore.hosts[hostAlias] ?? {
-        favorite: false,
-        tags: [],
-        lastUsedAt: null,
-        trustHostDefault: false,
-      };
-      metadataStore = {
-        ...metadataStore,
-        hosts: {
-          ...metadataStore.hosts,
-          [hostAlias]: { ...prev, lastUsedAt: nowSeconds() },
-        },
-      };
-      return Promise.resolve(undefined as T);
-    }
-
-    case "start_session":
-      return Promise.resolve(startAnySession() as T);
-
-    case "start_local_session":
-      return Promise.resolve(startAnySession() as T);
-
-    case "start_quick_ssh_session": {
-      const { request } = args as { request: QuickSshSessionRequest };
-      void hostConfigFromQuickRequest(request);
-      return Promise.resolve(startAnySession() as T);
-    }
-
-    case "send_input": {
-      const { sessionId, data } = args as { sessionId: string; data: string };
-      if (activeSessionIds.has(sessionId) && data.trim().length > 0) {
-        emitSessionOutput({
-          session_id: sessionId,
-          chunk: data.includes("\r") ? `\r\n[e2e echo]\r\n` : data,
-          host_key_prompt: false,
-        });
-      }
-      return Promise.resolve(undefined as T);
-    }
-
-    case "resize_session":
-      return Promise.resolve(undefined as T);
-
-    case "close_session": {
-      const { sessionId } = args as { sessionId: string };
-      activeSessionIds.delete(sessionId);
-      return Promise.resolve(undefined as T);
-    }
-
+      return demoMetadata;
+    case "list_layout_profiles":
+      return demoLayoutProfiles;
+    case "list_view_profiles":
+      return demoViewProfiles;
+    case "list_store_objects":
+      return defaultEntityStore();
+    case "save_host":
+    case "delete_host":
+    case "save_host_metadata":
+    case "touch_host_last_used":
     case "export_backup":
     case "import_backup":
-      return Promise.resolve(undefined as T);
-
-    case "list_layout_profiles":
-      return Promise.resolve(structuredClone(layoutProfiles) as T);
-
-    case "save_layout_profile": {
-      const { profile } = args as { profile: LayoutProfile };
-      const rest = layoutProfiles.filter((p) => p.id !== profile.id);
-      layoutProfiles = [...rest, { ...profile }];
-      return Promise.resolve(undefined as T);
-    }
-
-    case "delete_layout_profile": {
-      const { profileId } = args as { profileId: string };
-      layoutProfiles = layoutProfiles.filter((p) => p.id !== profileId);
-      return Promise.resolve(undefined as T);
-    }
-
-    case "list_view_profiles":
-      return Promise.resolve(structuredClone(viewProfiles) as T);
-
-    case "save_view_profile": {
-      const { profile } = args as { profile: ViewProfile };
-      const rest = viewProfiles.filter((p) => p.id !== profile.id);
-      viewProfiles = [...rest, { ...profile }];
-      return Promise.resolve(undefined as T);
-    }
-
-    case "delete_view_profile": {
-      const { profileId } = args as { profileId: string };
-      viewProfiles = viewProfiles.filter((p) => p.id !== profileId);
-      return Promise.resolve(undefined as T);
-    }
-
-    case "reorder_view_profiles": {
-      const { ids } = args as { ids: string[] };
-      const order = new Map(ids.map((id, index) => [id, index]));
-      viewProfiles = [...viewProfiles].sort((a, b) => {
-        const ai = order.get(a.id) ?? 999;
-        const bi = order.get(b.id) ?? 999;
-        return ai - bi;
-      });
-      return Promise.resolve(undefined as T);
-    }
-
-    case "list_store_objects":
-      return Promise.resolve(structuredClone(entityStore) as T);
-
-    case "save_store_objects": {
-      const { store } = args as { store: EntityStore };
-      entityStore = {
-        ...store,
-        users: { ...store.users },
-        groups: { ...store.groups },
-        keys: { ...store.keys },
-        tags: { ...store.tags },
-        hostBindings: { ...store.hostBindings },
-      };
-      return Promise.resolve(undefined as T);
-    }
-
-    case "assign_host_binding": {
-      const { hostAlias, binding } = args as { hostAlias: string; binding: HostBinding };
-      entityStore = {
-        ...entityStore,
-        hostBindings: {
-          ...entityStore.hostBindings,
-          [hostAlias]: { ...binding },
-        },
-        updatedAt: nowSeconds(),
-      };
-      return Promise.resolve(undefined as T);
-    }
-
-    case "list_users":
-      return Promise.resolve(Object.values(entityStore.users) as T);
-
-    case "list_groups":
-      return Promise.resolve(Object.values(entityStore.groups) as T);
-
-    case "list_tags":
-      return Promise.resolve(Object.values(entityStore.tags) as T);
-
-    case "create_encrypted_key": {
-      const { name, publicKey } = args as {
-        name: string;
-        privateKeyPem: string;
-        publicKey: string;
-        passphrase?: string;
-      };
-      const ts = nowSeconds();
-      const key: SshKeyObject = {
-        type: "encrypted",
-        id: newSessionId(),
-        name,
-        ciphertext: "e2e",
-        kdf: "argon2id",
-        salt: "AA",
-        nonce: "AA",
-        fingerprint: "e2e",
-        publicKey,
-        createdAt: ts,
-        updatedAt: ts,
-      };
-      entityStore = {
-        ...entityStore,
-        keys: { ...entityStore.keys, [key.id]: key },
-        updatedAt: ts,
-      };
-      return Promise.resolve(key as T);
-    }
-
+    case "save_layout_profile":
+    case "delete_layout_profile":
+    case "save_view_profile":
+    case "delete_view_profile":
+    case "reorder_view_profiles":
+    case "save_store_objects":
+    case "assign_host_binding":
+    case "create_encrypted_key":
     case "unlock_key_material":
-      return Promise.resolve("-----BEGIN MOCK KEY-----\ne2e\n-----END MOCK KEY-----\n" as T);
-
-    case "delete_key": {
-      const { keyId } = args as { keyId: string };
-      const nextKeys = { ...entityStore.keys };
-      delete nextKeys[keyId];
-      entityStore = { ...entityStore, keys: nextKeys, updatedAt: nowSeconds() };
-      return Promise.resolve(undefined as T);
+    case "delete_key":
+    case "send_input":
+    case "resize_session":
+    case "close_session":
+      return undefined;
+    case "start_local_session": {
+      const session_id = nextSessionId("local");
+      emitShellBanner(session_id, "\r\nNoSuckShell local demo shell\r\n$ ");
+      return { session_id } satisfies SessionStarted;
     }
-
+    case "start_session": {
+      const host = args?.host as HostConfig;
+      const session_id = nextSessionId("ssh");
+      const alias = host?.host ?? "host";
+      const hn = host?.hostName ?? "example.com";
+      const u = host?.user ?? "user";
+      emitShellBanner(session_id, `\r\nConnected to ${alias} (${hn})\r\nLast login: Mon Jan  1 12:00:00 2024 from 203.0.113.10\r\n${u}@${hn.split(".")[0]}:~$ `);
+      return { session_id } satisfies SessionStarted;
+    }
+    case "start_quick_ssh_session": {
+      const request = args?.request as QuickSshSessionRequest;
+      const session_id = nextSessionId("quick");
+      const hn = request?.hostName ?? "example.com";
+      const u = request?.user ?? "user";
+      emitShellBanner(session_id, `\r\nQuick SSH session → ${u}@${hn}\r\n$ `);
+      return { session_id } satisfies SessionStarted;
+    }
+    case "list_users":
+      return [] as UserObject[];
+    case "list_groups":
+      return [] as GroupObject[];
+    case "list_tags":
+      return [] as TagObject[];
     default:
-      return Promise.reject(new Error(`e2e invoke: unhandled command ${cmd}`));
+      throw new Error(`e2e invoke not implemented: ${cmd}`);
   }
 }

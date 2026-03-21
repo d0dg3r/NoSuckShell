@@ -1,32 +1,21 @@
-import type { SessionOutputEvent } from "../types";
+/**
+ * In-browser event bus for `e2e` / screenshot builds (replaces `@tauri-apps/api/event`).
+ */
+const target = new EventTarget();
 
-type EventPayloadMap = {
-  "session-output": SessionOutputEvent;
-};
+export type ListenHandler<T> = (event: { payload: T }) => void;
 
-type Handler<T> = (event: { payload: T }) => void;
-
-const listeners = new Map<string, Set<Handler<unknown>>>();
-
-export async function listen<K extends keyof EventPayloadMap>(
-  event: K,
-  handler: Handler<EventPayloadMap[K]>,
-): Promise<() => void> {
-  const set = listeners.get(event) ?? new Set();
-  listeners.set(event, set);
-  const wrapped = handler as Handler<unknown>;
-  set.add(wrapped);
+export async function listen<T>(channel: string, handler: ListenHandler<T>): Promise<() => void> {
+  const wrapped = (ev: Event) => {
+    const ce = ev as CustomEvent<T>;
+    handler({ payload: ce.detail });
+  };
+  target.addEventListener(channel, wrapped as EventListener);
   return async () => {
-    set.delete(wrapped);
+    target.removeEventListener(channel, wrapped as EventListener);
   };
 }
 
-export function emitSessionOutput(payload: SessionOutputEvent): void {
-  const set = listeners.get("session-output");
-  if (!set) {
-    return;
-  }
-  for (const handler of set) {
-    handler({ payload });
-  }
+export function emitTauriEvent<T>(channel: string, detail: T): void {
+  target.dispatchEvent(new CustomEvent(channel, { detail }));
 }

@@ -1,6 +1,6 @@
 # Screenshots for README and app stores
 
-This folder holds **marketing screenshots** for [README.md](../../README.md), [Flathub](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines), [Microsoft Store](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images), and [Snapcraft](https://snapcraft.io/docs/store-icon-and-screenshot-requirements).
+This folder holds **marketing screenshots** for [README.md](../../../README.md), [Flathub](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines), [Microsoft Store](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images), and [Snapcraft](https://snapcraft.io/docs/store-icon-and-screenshot-requirements).
 
 ## Size matrix
 

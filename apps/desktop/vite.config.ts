@@ -8,6 +8,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig(({ mode }) => {
   const e2e = mode === "e2e";
   return {
+    define: e2e
+      ? {
+          "import.meta.env.VITE_E2E": JSON.stringify("true"),
+        }
+      : undefined,
     plugins: [react()],
     resolve: {
       extensions: [".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"],

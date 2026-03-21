@@ -48,6 +48,7 @@ flowchart LR
 | `invoke` wrappers | [`apps/desktop/src/tauri-api.ts`](../apps/desktop/src/tauri-api.ts) |
 | Shared DTOs / types | [`apps/desktop/src/types.ts`](../apps/desktop/src/types.ts) |
 | Terminal (xterm) | [`apps/desktop/src/components/TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx) |
+| Refactoring notes (`App.tsx`) | [`docs/refactoring-app-roadmap.md`](refactoring-app-roadmap.md) |
 
 The UI calls Rust through `invoke` from `@tauri-apps/api/core` (centralized in `tauri-api.ts`).
 
