@@ -8,6 +8,9 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ### Added
 
+- **Keyboard:** Settings → **Keyboard** to record shortcuts (physical `KeyboardEvent.code`); configurable **leader key** and follow-up bindings; conflict hints; persisted in `localStorage`. Global shortcuts respect terminal focus (modifier chords and Escape when a modal is open).
+- **Help:** In-app Help includes a **Keyboard shortcuts** table (from the same source as runtime) and replaces static “-” keys for mapped actions when opened from Settings.
+- **Plugins & license:** **Plugin store** section with a static catalog (free **Demo plugin**, paid **File workspace** via entitlement `dev.nosuckshell.addon.file-workspace`). Reference **license server** at [`services/license-server`](../services/license-server/) and operator guide [`license-server-runbook.md`](license-server-runbook.md).
 - **SSH / host keys:** Per-host **host key policy** in the sidebar host settings (interactive, auto-accept new keys, or accept any key with warning). OpenSSH `StrictHostKeyChecking` is set from app metadata on session start so ProxyJump hops do not stall on unseen yes/no prompts.
 - **Metadata:** `trustHostDefault` and `strictHostKeyPolicy` are persisted end-to-end in Rust (no silent loss on `save_host_metadata`).
 - **Quick Connect:** Optional `strictHostKeyPolicy`; **Auto-trust** in settings maps to `accept-new` for quick sessions.
@@ -17,6 +20,7 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 - Installers remain **unsigned**; see [releases.md](releases.md) for signing / notarization follow-up.
 - **SFTP** file browser still uses its own host-key path; terminal SSH behavior above does not apply there yet.
+- **File workspace** requires a license that includes `dev.nosuckshell.addon.file-workspace` (or a dev token from the license server). See [license-server-runbook.md](license-server-runbook.md) § Local development.
 
 ## [0.1.0-beta.5] - 2026-03-21
 
