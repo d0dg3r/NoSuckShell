@@ -81,7 +81,7 @@ fn remote_mode_and_owners(stat: &ssh2::FileStat, is_dir: bool) -> (String, Strin
     };
     let mode = mode_display_rwx(type_ch, perm_low);
     let octal = mode_octal_low(perm_low);
-    // Avoid exposing raw UID/GID values, which may later be logged.
+    // Avoid UID/GID and owner strings in Tauri IPC payloads (CodeQL cleartext-logging).
     let user = String::from("-");
     let group = String::from("-");
     (mode, user, group, octal)
@@ -96,14 +96,9 @@ fn local_mode_and_owners(meta: &std::fs::Metadata) -> (String, String, String, S
     let low = mode_bits & 0o777;
     let mode = mode_display_rwx(tc, low);
     let octal = mode_octal_low(low);
-    let uid = meta.uid();
-    let gid = meta.gid();
-    let user = uzers::get_user_by_uid(uid)
-        .map(|u| u.name().to_string_lossy().into_owned())
-        .unwrap_or_else(|| uid.to_string());
-    let group = uzers::get_group_by_gid(gid)
-        .map(|g| g.name().to_string_lossy().into_owned())
-        .unwrap_or_else(|| gid.to_string());
+    // Same as remote listing: avoid owner resolution in values returned over Tauri IPC (CodeQL).
+    let user = String::from("-");
+    let group = String::from("-");
     (mode, user, group, octal)
 }
 
