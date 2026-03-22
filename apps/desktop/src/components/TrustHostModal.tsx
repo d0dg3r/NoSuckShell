@@ -33,7 +33,7 @@ export function TrustHostModal({
         </header>
         <div className="app-settings-content">
           <p className="muted-copy">
-            Session <strong>{prompt.sessionId}</strong> requests trust confirmation for host <strong>{prompt.hostAlias}</strong>.
+            Session <strong>{prompt.sessionId}</strong> requests trust confirmation for host <strong>{prompt.hostLabel}</strong>.
           </p>
           <label className="field checkbox-field trust-default-checkbox">
             <input

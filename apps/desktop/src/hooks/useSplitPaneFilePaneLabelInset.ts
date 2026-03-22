@@ -40,5 +40,5 @@ export function useSplitPaneFilePaneLabelInset(
       window.removeEventListener("resize", apply);
       root.style.paddingTop = "";
     };
-  }, effectDeps);
+  }, [rootRef, ...effectDeps]);
 }

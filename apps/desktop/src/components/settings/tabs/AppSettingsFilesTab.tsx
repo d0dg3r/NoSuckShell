@@ -50,7 +50,7 @@ export function AppSettingsFilesTab({
         <header className="settings-card-head">
           <h3>File browser export</h3>
           <p className="muted-copy">
-            Save icon and bulk export use this destination.             Path keys match the local file browser (empty = home, “Downloads” for ~/Downloads, or an absolute path).
+            Save icon and bulk export use this destination. Path keys match the local file browser (empty = home, “Downloads” for ~/Downloads, or an absolute path).
           </p>
         </header>
         <div className="host-form-grid">

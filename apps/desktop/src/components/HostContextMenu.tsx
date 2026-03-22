@@ -37,6 +37,7 @@ export function HostContextMenu({
         <button
           key={workspace.id}
           type="button"
+          role="menuitem"
           className="context-menu-item"
           onClick={() => {
             void onConnectInWorkspace(host, workspace.id);
@@ -48,6 +49,7 @@ export function HostContextMenu({
       ))}
       <button
         type="button"
+        role="menuitem"
         className="context-menu-item separator-above"
         onClick={() => {
           onEditHost(host);

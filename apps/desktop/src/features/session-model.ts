@@ -46,4 +46,4 @@ export type ContextMenuState = {
   paneIndex: number | null;
   splitMode: SplitMode;
 };
-export type TrustPromptRequest = { sessionId: string; hostAlias: string };
+export type TrustPromptRequest = { sessionId: string; hostLabel: string };
