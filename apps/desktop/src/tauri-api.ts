@@ -258,6 +258,11 @@ export const broadcastFileTransferClipboard = (payload: unknown): Promise<void> 
 
 export const openAuxWindow = (): Promise<void> => invoke("open_aux_window");
 
+export const openExternalUrl = (url: string): Promise<void> => invoke("open_external_url", { url });
+
+export const openVirtViewerFromSpicePayload = (spiceData: Record<string, unknown>): Promise<void> =>
+  invoke("open_virt_viewer_from_spice_payload", { spiceData });
+
 export const createLocalDir = (parentPathKey: string, dirName: string): Promise<void> =>
   invoke("create_local_dir", { parentPathKey, dirName });
 

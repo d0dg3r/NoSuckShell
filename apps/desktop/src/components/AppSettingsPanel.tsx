@@ -12,6 +12,7 @@ import { AppSettingsHelpTab } from "./settings/tabs/AppSettingsHelpTab";
 import { AppSettingsKeyboardTab } from "./settings/tabs/AppSettingsKeyboardTab";
 import { AppSettingsLayoutTab } from "./settings/tabs/AppSettingsLayoutTab";
 import { AppSettingsPluginsTab } from "./settings/tabs/AppSettingsPluginsTab";
+import { AppSettingsProxmuxTab } from "./settings/tabs/AppSettingsProxmuxTab";
 import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
 import { AppSettingsHostsTab } from "./settings/tabs/AppSettingsHostsTab";
 import { AppSettingsStoreTabContent } from "./settings/tabs/AppSettingsStoreTabContent";
@@ -441,6 +442,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             />
           )}
           {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "proxmux" && <AppSettingsProxmuxTab />}
           {activeAppSettingsTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}

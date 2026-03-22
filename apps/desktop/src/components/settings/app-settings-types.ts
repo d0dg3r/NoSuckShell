@@ -9,6 +9,7 @@ export type AppSettingsTab =
   | "hosts"
   | "store"
   | "plugins"
+  | "proxmux"
   | "help"
   | "about";
 

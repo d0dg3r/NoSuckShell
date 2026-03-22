@@ -107,9 +107,9 @@ export function AppSettingsPluginsTab() {
         <header className="settings-card-head">
           <h3>Plugin store</h3>
           <p className="muted-copy">
-            Add-ons ship inside the app; purchasing on Ko-fi (or your checkout) should give you a <strong>license token</strong>{" "}
-            to paste below. Replace the default Ko-fi link in <code className="inline-code">plugin-store-catalog.ts</code>{" "}
-            with your shop or membership URL.
+            NoSuckShell is <strong>open source (MIT)</strong>; only a few built-in add-ons ask for a <strong>license token</strong> in
+            official builds. Add-ons ship inside the app — purchasing on Ko-fi (or your checkout) should give you a token to paste below.
+            Replace the default Ko-fi link in <code className="inline-code">plugin-store-catalog.ts</code> with your shop or membership URL.
           </p>
         </header>
         <ul className="plugin-store-list">
@@ -123,7 +123,12 @@ export function AppSettingsPluginsTab() {
             return (
               <li key={item.id} className="plugin-store-card">
                 <div className="plugin-store-card-head">
-                  <strong>{item.title}</strong>
+                  <div className="plugin-store-card-title-row">
+                    {item.logoSrc ? (
+                      <img src={item.logoSrc} alt="" className="plugin-store-logo" width={40} height={40} />
+                    ) : null}
+                    <strong>{item.title}</strong>
+                  </div>
                   <span className={`plugin-store-badge ${badgeClass}`}>{badgeLabel}</span>
                 </div>
                 <p className="muted-copy">{item.description}</p>
@@ -163,12 +168,13 @@ export function AppSettingsPluginsTab() {
         <header className="settings-card-head">
           <h3>License</h3>
           <p className="muted-copy">
-            Paid add-ons use an offline-signed token. After a purchase or donation, paste the token issued by the project
-            (for example via a Ko-fi webhook service you operate). See{" "}
+            Optional paid add-ons use an offline-signed token (separate from the MIT license on the source). After a purchase or donation,
+            paste the token issued by the project (for example via a Ko-fi webhook service you operate). See{" "}
             <a href="https://ko-fi.com/" target="_blank" rel="noreferrer">
               Ko-fi
             </a>
-            , <code className="inline-code">docs/licensing.md</code>, and <code className="inline-code">docs/license-server-runbook.md</code>.
+            , <code className="inline-code">docs/licensing.md</code>, <code className="inline-code">docs/terms-of-sale.md</code>, and{" "}
+            <code className="inline-code">docs/license-server-runbook.md</code>.
           </p>
         </header>
         {loadError ? <p className="error-text">{loadError}</p> : null}

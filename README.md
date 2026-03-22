@@ -117,9 +117,9 @@ If the workflow rejects the tag, use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH
 | [SECURITY.md](SECURITY.md) | Reporting vulnerabilities |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards |
 
-## License
+## License and optional add-ons
 
-This project is released under the [MIT License](LICENSE).
+The **source code** is under the [MIT License](LICENSE). A **few built-in plugins** can be unlocked in **official binaries** with a signed **license token** after a small purchase (for example via Ko-fi); see [docs/licensing.md](docs/licensing.md) and the maintainer template [docs/terms-of-sale.md](docs/terms-of-sale.md).
 
 ## Support the project
 

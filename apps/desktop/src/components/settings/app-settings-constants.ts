@@ -12,6 +12,7 @@ export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "ssh", label: "SSH" },
   { id: "data", label: "Data & Backup" },
   { id: "plugins", label: "Plugins & license" },
+  { id: "proxmux", label: "PROXMUX" },
   { id: "help", label: "Help" },
   { id: "about", label: "About" },
 ];

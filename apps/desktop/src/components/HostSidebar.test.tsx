@@ -27,7 +27,10 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     showAdvancedFilters: false,
     onToggleAdvancedFilters: vi.fn(),
     onCloseAdvancedFilters: vi.fn(),
-    filteredHostCount: 0,
+    listFilterCount: 0,
+    showHostAdvancedFilters: true,
+    searchInputPlaceholder: undefined,
+    proxmuxPanel: null,
     statusFilter: "all",
     onStatusFilterChange: vi.fn(),
     portFilter: "",
@@ -55,7 +58,7 @@ describe("HostSidebar", () => {
     const { container } = render(
       <HostSidebar
         {...minimalHostSidebarProps({
-          filteredHostCount: 1,
+          listFilterCount: 1,
           otherHostRows: [sampleRow()],
         })}
       />,
@@ -91,6 +94,25 @@ describe("HostSidebar", () => {
     expect(btn).toBeTruthy();
     fireEvent.click(btn!);
     expect(onToggleSidebarPinned).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders proxmux panel when PROXMUX tab is active", () => {
+    const { container } = render(
+      <HostSidebar
+        {...minimalHostSidebarProps({
+          sidebarViews: [
+            { id: "builtin:all", label: "All" },
+            { id: "builtin:proxmux", label: "PROXMUX" },
+          ],
+          selectedSidebarViewId: "builtin:proxmux",
+          listFilterCount: 0,
+          showHostAdvancedFilters: false,
+          proxmuxPanel: <div data-testid="proxmux-panel">Proxmox UI</div>,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("proxmux-panel")).toBeInTheDocument();
+    expect(container.querySelector(".filter-toggle-btn")).toBeNull();
   });
 
   it("calls onToggleQuickAddMenu when the Add dropdown trigger is clicked", () => {

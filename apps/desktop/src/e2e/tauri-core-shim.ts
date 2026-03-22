@@ -175,6 +175,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     }
     case "save_host_metadata":
     case "touch_host_last_used":
+    case "open_external_url":
+    case "open_virt_viewer_from_spice_payload":
     case "export_backup":
     case "import_backup":
     case "save_layout_profile":
@@ -322,13 +324,63 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
           enabled: true,
           entitlementOk: true,
         },
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.proxmux",
+            version: "0.0.0-e2e",
+            displayName: "PROXMUX",
+            capabilities: ["settingsUi", "hostMetadataEnricher"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
       ];
     case "set_plugin_enabled":
       return undefined;
     case "plugin_invoke": {
       const method = args?.method as string;
+      const pluginId = args?.pluginId as string;
       if (method === "ping") {
         return { ok: true, message: "pong", echo: args?.arg ?? {} };
+      }
+      if (pluginId === "dev.nosuckshell.plugin.proxmux") {
+        if (method === "listState") {
+          return {
+            activeClusterId: null,
+            clusters: [],
+            usesEncryptedSecrets: false,
+            usesPlainSecrets: false,
+            favoritesByCluster: {},
+          };
+        }
+        if (method === "saveCluster" || method === "removeCluster" || method === "setActiveCluster") {
+          return { ok: true };
+        }
+        if (method === "testConnection" || method === "testConnectionDraft") {
+          return { ok: false, message: "e2e stub: no Proxmox server" };
+        }
+        if (method === "fetchResources") {
+          return { ok: true, resources: [] };
+        }
+        if (method === "guestStatus") {
+          return { ok: true, data: { status: "stopped" } };
+        }
+        if (method === "guestPower") {
+          return { ok: true };
+        }
+        if (method === "toggleProxmuxFavorite") {
+          return { ok: true, favorites: [] };
+        }
+        if (method === "fetchSpiceProxy") {
+          return {
+            ok: true,
+            data: {
+              type: "spice",
+              host: "127.0.0.1",
+              port: "5900",
+            },
+          };
+        }
       }
       throw new Error(`e2e plugin_invoke: unknown method ${method}`);
     }

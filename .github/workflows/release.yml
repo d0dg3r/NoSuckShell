@@ -263,8 +263,13 @@ jobs:
         working-directory: apps/desktop
         run: npx @tauri-apps/cli icon src-tauri/icons/icon-source-square.png --output src-tauri/icons
 
+      # Embeds production Ed25519 verify key at compile time (see license.rs `option_env!`).
+      # Repository secret: 64 hex chars (32-byte public key), same as desktop `NOSUCKSHELL_LICENSE_PUBKEY_HEX`.
+      # If unset, binaries fall back to the public dev key (fine for forks; official releases should set the secret).
       - name: Build Tauri app bundles
         working-directory: apps/desktop
+        env:
+          NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
         run: npm run tauri:build
 
       - name: Upload platform bundles

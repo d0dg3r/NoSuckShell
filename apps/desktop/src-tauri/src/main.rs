@@ -66,6 +66,8 @@ use tauri::State;
 use tauri::WebviewUrl;
 use tauri::webview::WebviewWindowBuilder;
 use store_models::{EntityStore, HostBinding, SshKeyObject, TagObject, UserObject, GroupObject};
+use serde::Deserialize;
+use serde_json::Value as JsonValue;
 
 #[derive(serde::Deserialize)]
 struct BackupIpcArgs {
@@ -128,6 +130,72 @@ fn save_host_metadata(metadata: HostMetadataStore) -> Result<(), String> {
 #[tauri::command]
 fn touch_host_last_used(host_alias: String) -> Result<(), String> {
     touch_host_last_used_backend(&host_alias).map_err(|err| err.to_string())
+}
+
+fn validate_external_http_url(url: &str) -> Result<(), String> {
+    let t = url.trim();
+    if t.is_empty() {
+        return Err("URL is empty".into());
+    }
+    if t.len() > 8192 {
+        return Err("URL is too long".into());
+    }
+    let lower = t.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Ok(());
+    }
+    Err("URL must start with http:// or https://".into())
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    validate_external_http_url(&url)?;
+    open::that(url.trim()).map_err(|e| e.to_string())
+}
+
+fn spice_payload_to_virt_viewer_ini(data: &JsonValue) -> Result<String, String> {
+    let obj = data
+        .as_object()
+        .ok_or_else(|| "SPICE payload must be a JSON object".to_string())?;
+    let mut out = String::from("[virt-viewer]\n");
+    for (k, v) in obj {
+        let val_str = match v {
+            JsonValue::String(x) => x.clone(),
+            JsonValue::Number(n) => n.to_string(),
+            JsonValue::Bool(b) => b.to_string(),
+            JsonValue::Null => String::new(),
+            _ => continue,
+        };
+        out.push_str(k);
+        out.push('=');
+        out.push_str(&val_str);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenSpicePayloadArgs {
+    spice_data: JsonValue,
+}
+
+#[tauri::command]
+fn open_virt_viewer_from_spice_payload(args: OpenSpicePayloadArgs) -> Result<(), String> {
+    let content = spice_payload_to_virt_viewer_ini(&args.spice_data)?;
+    let name = format!("nosuckshell-spice-{}.vv", uuid::Uuid::new_v4());
+    let path = std::env::temp_dir().join(name);
+    std::fs::write(&path, &content).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+    }
+    open::that(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -476,6 +544,8 @@ fn main() {
             list_host_metadata,
             save_host_metadata,
             touch_host_last_used,
+            open_external_url,
+            open_virt_viewer_from_spice_payload,
             start_session,
             start_local_session,
             start_quick_ssh_session,

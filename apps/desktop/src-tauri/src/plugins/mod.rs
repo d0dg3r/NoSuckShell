@@ -1,6 +1,7 @@
 //! Built-in plugin registry and host-config enrichment hooks.
 mod demo;
 mod file_workspace;
+mod proxmux;
 
 use crate::license;
 use crate::ssh_config::HostConfig;
@@ -51,6 +52,7 @@ pub fn register_builtin_plugins() {
     let _ = REGISTRY.set(vec![
         &file_workspace::FileWorkspacePlugin as &dyn NssPlugin,
         &demo::DemoPlugin as &dyn NssPlugin,
+        &proxmux::ProxmuxPlugin as &dyn NssPlugin,
     ]);
 }
 

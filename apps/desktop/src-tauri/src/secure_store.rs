@@ -79,6 +79,21 @@ fn load_master_secret_from_keychain_like_source() -> Option<String> {
     }
 }
 
+/// Encrypt `plaintext` with the optional app master key (`NOSUCKSHELL_MASTER_KEY` or `~/.ssh/nosuckshell.master.key`).
+/// Returns `None` when no master key is configured.
+pub fn try_encrypt_with_app_master(plaintext: &str) -> Option<Result<(String, String, String)>> {
+    let secret = load_master_secret_from_keychain_like_source()?;
+    Some(encrypt_string(&secret, plaintext))
+}
+
+/// Decrypt a credential produced with [`try_encrypt_with_app_master`].
+pub fn decrypt_with_app_master(ciphertext: &str, salt: &str, nonce: &str) -> Result<String> {
+    let secret = load_master_secret_from_keychain_like_source().ok_or_else(|| {
+        anyhow::anyhow!("Missing app master key (set NOSUCKSHELL_MASTER_KEY or create nosuckshell.master.key under your SSH directory)")
+    })?;
+    decrypt_string(&secret, ciphertext, salt, nonce)
+}
+
 pub fn list_store_objects() -> Result<EntityStore> {
     load_or_migrate_store()
 }

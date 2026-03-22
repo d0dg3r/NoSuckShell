@@ -4333,6 +4333,701 @@ body,
   align-items: center;
 }
 
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.settings-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settings-field-span-2 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-field-span-2 {
+    grid-column: auto;
+  }
+}
+
+.settings-card-head h4 {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 650;
+  color: rgba(220, 235, 226, 0.95);
+}
+
+.proxmux-cluster-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.proxmux-cluster-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid rgba(150, 170, 161, 0.1);
+}
+
+.proxmux-cluster-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.proxmux-cluster-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.proxmux-badge-insecure {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 127, 137, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(255, 127, 137, 0.28);
+}
+
+.proxmux-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(150, 170, 161, 0.14);
+  border-radius: 8px;
+  margin-top: var(--space-4);
+}
+
+.proxmux-resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm);
+}
+
+.proxmux-resource-table th,
+.proxmux-resource-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(150, 170, 161, 0.1);
+  vertical-align: middle;
+}
+
+.proxmux-resource-table th {
+  font-weight: 600;
+  color: rgba(184, 204, 194, 0.88);
+  background: rgba(12, 16, 20, 0.35);
+}
+
+.proxmux-resource-table tr:last-child td {
+  border-bottom: none;
+}
+
+.proxmux-sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 120px;
+  flex: 1;
+  min-width: 0;
+}
+
+.proxmux-sidebar-error {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.proxmux-sidebar-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.proxmux-sidebar-field-label {
+  display: block;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b8ccc2;
+  margin-bottom: var(--space-2);
+}
+
+.proxmux-sidebar-cluster-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.proxmux-sidebar-cluster-select {
+  width: 100%;
+  min-height: var(--control-height-md);
+}
+
+/* Native <select> in the sidebar is outside .host-filter-card — force dark theme like other selects */
+.proxmux-sidebar-panel select.input {
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, #bfd2c8 50%),
+    linear-gradient(135deg, #bfd2c8 50%, transparent 50%),
+    rgba(21, 27, 31, 0.96);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px),
+    0 0;
+  background-size:
+    5px 5px,
+    5px 5px,
+    100% 100%;
+  background-repeat: no-repeat;
+  color: var(--text-main);
+  padding: var(--space-2) var(--space-4);
+  padding-right: 28px;
+  font-size: var(--font-base);
+  line-height: 1.25;
+}
+
+.proxmux-sidebar-panel select.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.proxmux-sidebar-panel select.input option {
+  background: #151b1f;
+  color: var(--text-main);
+}
+
+.proxmux-sidebar-refresh {
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+
+.proxmux-sidebar-guest-detail {
+  padding: var(--space-3);
+  border-radius: 8px;
+  background: rgba(12, 16, 20, 0.45);
+  border: 1px solid rgba(150, 170, 161, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.proxmux-sidebar-guest-detail--embedded {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  gap: var(--space-2);
+}
+
+.proxmux-guest-slide.host-slide-menu {
+  grid-column: unset;
+  transform: none;
+  transition:
+    max-height 0.22s ease,
+    opacity 0.18s ease;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.proxmux-guest-slide.host-slide-menu.is-open {
+  max-height: 520px;
+  border: none;
+}
+
+.proxmux-sidebar-guest-detail-head {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.proxmux-sidebar-guest-detail-title {
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(184, 204, 194, 0.75);
+}
+
+.proxmux-sidebar-guest-detail-id {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  word-break: break-word;
+  text-align: right;
+}
+
+.proxmux-sidebar-guest-detail-loading {
+  margin: 0;
+}
+
+.proxmux-sidebar-guest-stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  font-size: var(--font-sm);
+  align-items: baseline;
+}
+
+.proxmux-sidebar-guest-stats dt {
+  margin: 0;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.proxmux-sidebar-guest-stats dd {
+  margin: 0;
+  color: rgba(220, 235, 226, 0.92);
+  word-break: break-word;
+}
+
+.proxmux-sidebar-guest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.proxmux-sidebar-guest-actions .btn {
+  flex: 0 1 auto;
+}
+
+.proxmux-sidebar-guest-detail-error {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.proxmux-sidebar-loading {
+  margin: 0;
+}
+
+.proxmux-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.proxmux-sidebar-section {
+  margin-bottom: var(--space-4);
+}
+
+.proxmux-sidebar-section:last-child {
+  margin-bottom: 0;
+}
+
+.proxmux-sidebar-rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* PROXMUX rows: dark brand-bar-style base + category veil; status = inset strip (high contrast). */
+.proxmux-sidebar-row-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  border-radius: var(--radius-control);
+  background-color: rgba(9, 13, 16, 0.97);
+  background-repeat: no-repeat;
+}
+
+.proxmux-sidebar-row-wrap > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Layer order: first image paints on top — category veil over horizontal base (matches .brand-bar family). */
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="node"] {
+  background-image:
+    radial-gradient(ellipse 135% 110% at 0% 50%, color-mix(in srgb, var(--brand-blue) 26%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      rgba(9, 13, 16, 0.96) 0%,
+      rgba(9, 13, 16, 0.84) 46%,
+      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
+      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="qemu"] {
+  background-image:
+    radial-gradient(ellipse 130% 105% at 6% 48%, color-mix(in srgb, var(--brand-cyan) 24%, transparent), transparent 56%),
+    linear-gradient(
+      90deg,
+      rgba(9, 13, 16, 0.96) 0%,
+      rgba(9, 13, 16, 0.84) 46%,
+      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
+      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="qemu-template"] {
+  background-image:
+    radial-gradient(ellipse 125% 100% at 4% 50%, color-mix(in srgb, #9b7ed8 22%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      rgba(9, 13, 16, 0.96) 0%,
+      rgba(9, 13, 16, 0.84) 46%,
+      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
+      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="lxc"] {
+  background-image:
+    radial-gradient(ellipse 130% 105% at 4% 50%, color-mix(in srgb, var(--support-amber) 22%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      rgba(9, 13, 16, 0.96) 0%,
+      rgba(9, 13, 16, 0.84) 46%,
+      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
+      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="node"] {
+  background-image:
+    radial-gradient(ellipse 135% 110% at 0% 50%, color-mix(in srgb, var(--brand-blue) 28%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
+      rgba(9, 13, 16, 0.9) 32%,
+      rgba(9, 13, 16, 0.84) 52%,
+      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
+      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="qemu"] {
+  background-image:
+    radial-gradient(ellipse 130% 105% at 6% 48%, color-mix(in srgb, var(--brand-cyan) 26%, transparent), transparent 56%),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
+      rgba(9, 13, 16, 0.9) 32%,
+      rgba(9, 13, 16, 0.84) 52%,
+      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
+      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="qemu-template"] {
+  background-image:
+    radial-gradient(ellipse 125% 100% at 4% 50%, color-mix(in srgb, #b49df0 24%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
+      rgba(9, 13, 16, 0.9) 32%,
+      rgba(9, 13, 16, 0.84) 52%,
+      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
+      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="lxc"] {
+  background-image:
+    radial-gradient(ellipse 130% 105% at 4% 50%, color-mix(in srgb, var(--support-amber) 24%, transparent), transparent 58%),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
+      rgba(9, 13, 16, 0.9) 32%,
+      rgba(9, 13, 16, 0.84) 52%,
+      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
+      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
+    );
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-power="up"] {
+  box-shadow: inset 4px 0 0 rgba(130, 184, 152, 0.98);
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-power="down"] {
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--danger) 92%, transparent);
+}
+
+.proxmux-sidebar-row-wrap[data-proxmux-power="template"] {
+  box-shadow: inset 4px 0 0 rgba(154, 138, 210, 0.92);
+}
+
+.proxmux-sidebar-item-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  min-width: 0;
+  border-radius: var(--radius-control);
+  border: 1px solid rgba(150, 170, 161, 0.12);
+  background: transparent;
+  overflow: hidden;
+}
+
+.proxmux-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: center;
+  gap: 3px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+}
+
+.proxmux-sidebar-actions-spacer {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  align-self: center;
+}
+
+.proxmux-action-btn {
+  appearance: none;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  border-radius: 4px;
+  border: 1px solid rgba(150, 170, 161, 0.35);
+  background: rgba(10, 14, 18, 0.65);
+  color: var(--text-main);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.proxmux-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.proxmux-action-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.proxmux-action-ssh {
+  color: color-mix(in srgb, var(--brand-blue) 92%, white);
+  border-color: color-mix(in srgb, var(--brand-blue) 45%, transparent);
+  background: color-mix(in srgb, var(--brand-blue) 14%, rgba(8, 12, 16, 0.9));
+}
+
+.proxmux-action-ssh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand-blue) 65%, transparent);
+  background: color-mix(in srgb, var(--brand-blue) 22%, rgba(8, 12, 16, 0.92));
+}
+
+.proxmux-action-shell {
+  color: color-mix(in srgb, var(--support-amber) 95%, white);
+  border-color: color-mix(in srgb, var(--support-amber) 42%, transparent);
+  background: color-mix(in srgb, var(--support-amber) 12%, rgba(8, 12, 16, 0.9));
+}
+
+.proxmux-action-shell:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--support-amber) 58%, transparent);
+  background: color-mix(in srgb, var(--support-amber) 20%, rgba(8, 12, 16, 0.92));
+}
+
+.proxmux-action-novnc {
+  color: color-mix(in srgb, var(--brand-cyan) 92%, white);
+  border-color: color-mix(in srgb, var(--brand-cyan) 42%, transparent);
+  background: color-mix(in srgb, var(--brand-cyan) 12%, rgba(8, 12, 16, 0.9));
+}
+
+.proxmux-action-novnc:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand-cyan) 62%, transparent);
+  background: color-mix(in srgb, var(--brand-cyan) 20%, rgba(8, 12, 16, 0.92));
+}
+
+.proxmux-action-spice {
+  color: color-mix(in srgb, #c4a8f5 90%, white);
+  border-color: color-mix(in srgb, #9b7ed8 38%, transparent);
+  background: color-mix(in srgb, #9b7ed8 12%, rgba(8, 12, 16, 0.9));
+}
+
+.proxmux-action-spice:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #b49df0 48%, transparent);
+  background: color-mix(in srgb, #b49df0 18%, rgba(8, 12, 16, 0.92));
+}
+
+.proxmux-sidebar-favorite-spacer {
+  width: var(--control-height-md);
+  min-width: var(--control-height-md);
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* Icon-only favorite: no host-list cell background on the star */
+.proxmux-sidebar-favorite-btn {
+  align-self: center;
+  width: var(--control-height-md);
+  min-width: var(--control-height-md);
+  height: var(--control-height-md);
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  box-shadow: none;
+  color: rgba(150, 175, 162, 0.42);
+  font-size: var(--font-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    transform 0.12s ease,
+    text-shadow 0.15s ease;
+}
+
+.proxmux-sidebar-favorite-btn:hover {
+  color: rgba(220, 210, 170, 0.88);
+  transform: scale(1.06);
+}
+
+.proxmux-sidebar-favorite-btn.is-active {
+  color: var(--brand-yellow);
+  text-shadow: 0 0 14px rgba(255, 212, 59, 0.5);
+}
+
+.proxmux-sidebar-favorite-btn:focus-visible {
+  outline: 2px solid rgba(255, 212, 59, 0.55);
+  outline-offset: 2px;
+}
+
+.proxmux-sidebar-item-shell .proxmux-sidebar-row {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.proxmux-sidebar-item-shell .proxmux-sidebar-row--guest:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-item-shell {
+  border-color: rgba(130, 184, 152, 0.28);
+  border-bottom: none;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+/* Fused card: keep type/status gradient from parent; only add outline */
+.proxmux-sidebar-row-wrap--expanded {
+  border: 1px solid rgba(130, 184, 152, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.proxmux-sidebar-row-wrap--expanded .proxmux-guest-slide.host-slide-menu.is-open {
+  border-radius: 0 0 7px 7px;
+}
+
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:hover {
+  background: rgba(8, 12, 16, 0.35);
+}
+
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:focus-visible {
+  outline-offset: -2px;
+}
+
+.proxmux-sidebar-row-wrap--expanded .host-slide-content {
+  border-top: 1px solid rgba(150, 170, 161, 0.16);
+  padding: var(--space-3);
+  margin: 0;
+}
+
+.proxmux-sidebar-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+  background: rgba(12, 16, 20, 0.35);
+  border: 1px solid rgba(150, 170, 161, 0.1);
+  font-size: var(--font-base);
+  color: var(--text-main);
+}
+
+.proxmux-sidebar-row--guest {
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.proxmux-sidebar-row--guest:hover {
+  border-color: rgba(130, 184, 152, 0.22);
+  background: rgba(14, 20, 24, 0.42);
+}
+
+.proxmux-sidebar-row--guest:focus-visible {
+  outline: 2px solid rgba(255, 212, 59, 0.75);
+  outline-offset: 2px;
+}
+
+.proxmux-sidebar-row.is-expanded {
+  border-color: rgba(130, 184, 152, 0.35);
+}
+
+.proxmux-sidebar-row-chevron {
+  display: inline-block;
+  margin-right: var(--space-2);
+  font-size: 10px;
+  opacity: 0.85;
+  vertical-align: middle;
+}
+
+/* Match host list primary line (.host-item-main + .host-item sizing) */
+.proxmux-sidebar-row-main {
+  font-size: inherit;
+  font-weight: 700;
+  color: var(--text-main);
+  word-break: break-word;
+}
+
+.proxmux-sidebar-row-meta {
+  font-size: var(--font-xs);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
 .plugin-store-list {
   list-style: none;
   padding: 0;
@@ -4355,6 +5050,21 @@ body,
   justify-content: space-between;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+.plugin-store-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-store-logo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .plugin-store-badge {

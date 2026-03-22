@@ -37,7 +37,7 @@ export const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => 
 export type HostStatusFilter = "all" | "connected" | "disconnected";
 export type QuickConnectWizardStep = 1 | 2;
 export type AutoArrangeActiveMode = "a" | "b" | "c";
-export type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
+export type SidebarViewId = "builtin:all" | "builtin:favorites" | "builtin:proxmux" | `custom:${string}`;
 export type SplitMode = "duplicate" | "empty";
 export type ContextMenuState = {
   visible: boolean;

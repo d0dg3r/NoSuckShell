@@ -15,6 +15,11 @@ const DEV_LICENSE_SEED: [u8; 32] = *b"nosuckshell-dev-1-license-seed!!";
 const DEV_LICENSE_VERIFYING_KEY_HEX: &str =
     "1190c7277b2d5bf268179b4286c2232ed656d27ba9917481d797f0098eec3efe";
 
+/// Compile-time public key for official release builds (64 hex chars = 32 bytes).
+/// Set in the build environment, e.g. `NOSUCKSHELL_LICENSE_PUBKEY_HEX=... cargo build`.
+/// When unset, only runtime env and the dev fallback apply.
+const EMBEDDED_LICENSE_PUBKEY_HEX: Option<&str> = option_env!("NOSUCKSHELL_LICENSE_PUBKEY_HEX");
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LicensePayload {
@@ -42,15 +47,26 @@ fn license_message(payload: &LicensePayload) -> Result<String> {
     Ok(serde_json::to_string(payload)?)
 }
 
+fn verifying_key_from_hex_64(trimmed: &str) -> Result<VerifyingKey> {
+    let bytes = hex::decode(trimmed).context("decode license public key hex")?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
+    VerifyingKey::from_bytes(&arr).map_err(|_| anyhow::anyhow!("invalid Ed25519 public key"))
+}
+
+/// Resolution order: runtime `NOSUCKSHELL_LICENSE_PUBKEY_HEX`, then compile-time embed, then dev key.
 fn verifying_key_from_env_or_dev() -> Result<VerifyingKey> {
     if let Ok(hex_str) = std::env::var("NOSUCKSHELL_LICENSE_PUBKEY_HEX") {
         let trimmed = hex_str.trim();
         if trimmed.len() == 64 {
-            let bytes = hex::decode(trimmed).context("decode NOSUCKSHELL_LICENSE_PUBKEY_HEX")?;
-            let arr: [u8; 32] = bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
-            return VerifyingKey::from_bytes(&arr).map_err(|_| anyhow::anyhow!("invalid Ed25519 public key"));
+            return verifying_key_from_hex_64(trimmed);
+        }
+    }
+    if let Some(embedded) = EMBEDDED_LICENSE_PUBKEY_HEX {
+        let trimmed = embedded.trim();
+        if trimmed.len() == 64 {
+            return verifying_key_from_hex_64(trimmed);
         }
     }
     let bytes = hex::decode(DEV_LICENSE_VERIFYING_KEY_HEX.trim()).context("decode dev license pubkey")?;

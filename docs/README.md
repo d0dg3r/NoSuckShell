@@ -11,7 +11,8 @@ Index of maintained documentation for NoSuckShell.
 | Doc | Description |
 | --- | --- |
 | [architecture.md](architecture.md) | Stack, modules, SSH vs SFTP paths, IPC, events, on-disk artifacts. |
-| [licensing.md](licensing.md) | Offline licenses, Ed25519 tokens, Ko-fi webhooks, entitlements, key rotation. |
+| [licensing.md](licensing.md) | MIT vs. commercial tokens, offline licenses, Ed25519, Ko-fi webhooks, entitlements, key rotation. |
+| [terms-of-sale.md](terms-of-sale.md) | Template terms for optional paid add-ons (entitlements); not legal advice. |
 | [license-server-runbook.md](license-server-runbook.md) | Deploy `services/license-server`, Ko-fi webhook, trials (`exp`), plugin store entitlements. |
 | [roadmap.md](roadmap.md) | Planned plugin-shaped work (GitHub sync, Bitwarden, Vault, NSS-Commander). |
 | [releases.md](releases.md) | Release tagging and GitHub releases. |

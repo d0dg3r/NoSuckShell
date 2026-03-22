@@ -43,10 +43,14 @@ import {
   startSession,
   touchHostLastUsed,
   listPlugins,
+  openExternalUrl,
+  openVirtViewerFromSpicePayload,
+  pluginInvoke,
 } from "./tauri-api";
 import { AddHostModal } from "./components/AddHostModal";
 import { HostContextMenu } from "./components/HostContextMenu";
 import { HostSidebar } from "./components/HostSidebar";
+import { ProxmuxSidebarPanel } from "./components/ProxmuxSidebarPanel";
 import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
 import { createSplitPaneRenderer } from "./components/SplitWorkspace";
@@ -80,7 +84,7 @@ const LayoutCommandCenter = lazy(async () => {
 });
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { FILE_WORKSPACE_PLUGIN_ID } from "./features/builtin-plugin-ids";
+import { FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./features/builtin-plugin-ids";
 import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
 import {
   FILE_DND_PAYLOAD_MIME,
@@ -445,6 +449,8 @@ export function App() {
   const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
   /** Gated by built-in plugin `dev.nosuckshell.plugin.file-workspace` (Settings → Plugins & license). */
   const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
+  const [proxmuxSidebarAvailable, setProxmuxSidebarAvailable] = useState(false);
+  const [proxmuxResourceCount, setProxmuxResourceCount] = useState(0);
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -458,7 +464,12 @@ export function App() {
       return "builtin:all";
     }
     const persisted = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (persisted === "builtin:all" || persisted === "builtin:favorites" || persisted?.startsWith("custom:")) {
+    if (
+      persisted === "builtin:all" ||
+      persisted === "builtin:favorites" ||
+      persisted === "builtin:proxmux" ||
+      persisted?.startsWith("custom:")
+    ) {
       return persisted as SidebarViewId;
     }
     return "builtin:all";
@@ -791,26 +802,29 @@ export function App() {
     layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
 
-  const refreshFileWorkspacePlugin = useCallback(async () => {
+  const refreshLicensedPlugins = useCallback(async () => {
     try {
       const rows = await listPlugins();
-      const row = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
-      setFileWorkspacePluginEnabled(row ? row.enabled && row.entitlementOk : true);
+      const fw = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
+      setFileWorkspacePluginEnabled(fw ? fw.enabled && fw.entitlementOk : true);
+      const px = rows.find((r) => r.manifest.id === PROXMUX_PLUGIN_ID);
+      setProxmuxSidebarAvailable(Boolean(px && px.enabled && px.entitlementOk));
     } catch {
       setFileWorkspacePluginEnabled(true);
+      setProxmuxSidebarAvailable(false);
     }
   }, []);
 
   useEffect(() => {
-    void refreshFileWorkspacePlugin();
-  }, [refreshFileWorkspacePlugin]);
+    void refreshLicensedPlugins();
+  }, [refreshLicensedPlugins]);
 
   useEffect(() => {
     if (prevAppSettingsOpenRef.current && !isAppSettingsOpen) {
-      void refreshFileWorkspacePlugin();
+      void refreshLicensedPlugins();
     }
     prevAppSettingsOpenRef.current = isAppSettingsOpen;
-  }, [isAppSettingsOpen, refreshFileWorkspacePlugin]);
+  }, [isAppSettingsOpen, refreshLicensedPlugins]);
 
   useEffect(() => {
     if (!fileWorkspacePluginEnabled) {
@@ -937,17 +951,20 @@ export function App() {
     () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => !row.connected)),
     [filteredHostRows],
   );
-  const sidebarViews = useMemo(
-    () => [
-      { id: "builtin:all" as SidebarViewId, label: "All" },
-      { id: "builtin:favorites" as SidebarViewId, label: "Favorites" },
+  const sidebarViews = useMemo(() => {
+    const views: Array<{ id: SidebarViewId; label: string }> = [
+      { id: "builtin:all", label: "All" },
+      { id: "builtin:favorites", label: "Favorites" },
       ...sortedViewProfiles.map((profile) => ({
         id: `custom:${profile.id}` as SidebarViewId,
         label: profile.name,
       })),
-    ],
-    [sortedViewProfiles],
-  );
+    ];
+    if (proxmuxSidebarAvailable) {
+      views.push({ id: "builtin:proxmux", label: "PROXMUX" });
+    }
+    return views;
+  }, [sortedViewProfiles, proxmuxSidebarAvailable]);
   const highlightedHostAlias = useMemo(() => {
     if (hoveredHostAlias) {
       return hoveredHostAlias;
@@ -2152,6 +2169,16 @@ export function App() {
     }
   }, [selectedSidebarViewId, viewProfiles]);
   useEffect(() => {
+    if (selectedSidebarViewId === "builtin:proxmux" && !proxmuxSidebarAvailable) {
+      setSelectedSidebarViewId("builtin:all");
+    }
+  }, [selectedSidebarViewId, proxmuxSidebarAvailable]);
+  useEffect(() => {
+    if (selectedSidebarViewId === "builtin:proxmux") {
+      setShowAdvancedFilters(false);
+    }
+  }, [selectedSidebarViewId]);
+  useEffect(() => {
     if (!selectedViewProfileIdInSettings) {
       return;
     }
@@ -2932,6 +2959,58 @@ export function App() {
     }
     placeSessionIntoNewOrFreePane(startedSessionId, splitFromPaneIndex);
   };
+
+  const handleProxmuxSshNode = useCallback(
+    async (ctx: { clusterId: string; node: string }) => {
+      const normalizedNode = ctx.node.trim();
+      if (!normalizedNode) return;
+      const match = hosts.find((h) => h.hostName.trim().toLowerCase() === normalizedNode.toLowerCase());
+      const user = match?.user.trim() || metadataStore.defaultUser.trim() || "root";
+      const slug = `${ctx.clusterId}-${normalizedNode}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
+      const safeAlias = `proxmox-${slug}`.slice(0, 120) || "proxmox-node";
+      const host: HostConfig =
+        match ??
+        ({
+          host: safeAlias,
+          hostName: normalizedNode,
+          user,
+          port: 22,
+          identityFile: "",
+          proxyJump: "",
+          proxyCommand: "",
+        } satisfies HostConfig);
+      await connectToHostInNewPane(host);
+    },
+    [hosts, metadataStore.defaultUser, connectToHostInNewPane],
+  );
+
+  const handleProxmuxOpenExternalUrl = useCallback(async (url: string) => {
+    setError("");
+    try {
+      await openExternalUrl(url);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  const handleProxmuxSpice = useCallback(async (ctx: { clusterId: string; node: string; vmid: string }) => {
+    setError("");
+    try {
+      const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchSpiceProxy", {
+        clusterId: ctx.clusterId,
+        node: ctx.node,
+        guestType: "qemu",
+        vmid: ctx.vmid,
+      })) as { ok?: boolean; data?: Record<string, unknown> };
+      if (!out?.ok || out.data == null || typeof out.data !== "object" || Array.isArray(out.data)) {
+        setError("SPICE proxy response was invalid.");
+        return;
+      }
+      await openVirtViewerFromSpicePayload(out.data as Record<string, unknown>);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
 
   const connectLocalShellInNewPane = async (splitFromPaneIndex: number): Promise<void> => {
     setError("");
@@ -4804,7 +4883,22 @@ export function App() {
         showAdvancedFilters={showAdvancedFilters}
         onToggleAdvancedFilters={() => setShowAdvancedFilters((prev) => !prev)}
         onCloseAdvancedFilters={closeAdvancedFilters}
-        filteredHostCount={filteredHostRows.length}
+        listFilterCount={selectedSidebarViewId === "builtin:proxmux" ? proxmuxResourceCount : filteredHostRows.length}
+        showHostAdvancedFilters={selectedSidebarViewId !== "builtin:proxmux"}
+        searchInputPlaceholder={
+          selectedSidebarViewId === "builtin:proxmux" ? "Filter name, node, VMID, status…" : undefined
+        }
+        proxmuxPanel={
+          proxmuxSidebarAvailable ? (
+            <ProxmuxSidebarPanel
+              searchQuery={searchQuery}
+              onResourceCountChange={setProxmuxResourceCount}
+              onSshToProxmoxNode={handleProxmuxSshNode}
+              onOpenProxmoxExternalUrl={handleProxmuxOpenExternalUrl}
+              onOpenProxmoxSpice={handleProxmuxSpice}
+            />
+          ) : null
+        }
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         portFilter={portFilter}
