@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ENTITY_STORE_SCHEMA_VERSION: u32 = 1;
+pub const ENTITY_STORE_SCHEMA_VERSION: u32 = 3;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostKeyRef {
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+    pub usage: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UserObject {
@@ -9,6 +16,17 @@ pub struct UserObject {
     pub name: String,
     #[serde(default)]
     pub username: String,
+    /// When set and this user is linked on a host binding, overrides SSH `HostName` for the session.
+    #[serde(default, rename = "hostName")]
+    pub host_name: String,
+    /// When set and the host binding does not specify `proxyJump`, used as `ProxyJump` for the session.
+    #[serde(default, rename = "proxyJump")]
+    pub proxy_jump: String,
+    /// SSH keys linked to this user (used when the host binding does not specify keys).
+    #[serde(default, rename = "keyRefs")]
+    pub key_refs: Vec<HostKeyRef>,
+    #[serde(default, rename = "tagIds")]
+    pub tag_ids: Vec<String>,
     #[serde(rename = "createdAt")]
     pub created_at: u64,
     #[serde(rename = "updatedAt")]
@@ -21,6 +39,8 @@ pub struct GroupObject {
     pub name: String,
     #[serde(default, rename = "memberUserIds")]
     pub member_user_ids: Vec<String>,
+    #[serde(default, rename = "tagIds")]
+    pub tag_ids: Vec<String>,
     #[serde(rename = "createdAt")]
     pub created_at: u64,
     #[serde(rename = "updatedAt")]
@@ -51,6 +71,8 @@ pub enum SshKeyObject {
         name: String,
         #[serde(rename = "identityFilePath")]
         identity_file_path: String,
+        #[serde(default, rename = "tagIds")]
+        tag_ids: Vec<String>,
         #[serde(rename = "createdAt")]
         created_at: u64,
         #[serde(rename = "updatedAt")]
@@ -66,6 +88,8 @@ pub enum SshKeyObject {
         fingerprint: String,
         #[serde(rename = "publicKey", default)]
         public_key: String,
+        #[serde(default, rename = "tagIds")]
+        tag_ids: Vec<String>,
         #[serde(rename = "createdAt")]
         created_at: u64,
         #[serde(rename = "updatedAt")]
@@ -80,13 +104,6 @@ impl SshKeyObject {
             SshKeyObject::Path { id, .. } | SshKeyObject::Encrypted { id, .. } => id,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HostKeyRef {
-    #[serde(rename = "keyId")]
-    pub key_id: String,
-    pub usage: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

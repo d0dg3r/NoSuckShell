@@ -9,7 +9,14 @@ type HelpSection = {
   rows: HelpRow[];
 };
 
-const helpSections: HelpSection[] = [
+type HelpChapter = {
+  id: string;
+  title: string;
+  intro?: readonly string[];
+  sections: HelpSection[];
+};
+
+const interactionSections: HelpSection[] = [
   {
     title: "Host list",
     rows: [
@@ -34,7 +41,7 @@ const helpSections: HelpSection[] = [
         keys: "-",
       },
       {
-        action: "Edit host, tags, favorite",
+        action: "Edit host, tags, favorite, SSH options",
         mouse: "⋮ button on the row",
         keys: "-",
       },
@@ -119,6 +126,33 @@ const helpSections: HelpSection[] = [
     ],
   },
   {
+    title: "File browser",
+    rows: [
+      {
+        action: "What the colors mean",
+        mouse:
+          "Folder and file names use soft tints (archives, scripts, executables, media, code, text, data). Same idea as many terminal listings—quick visual scan, not a security label.",
+        keys: "-",
+      },
+      {
+        action: "Folders",
+        mouse: "Directories use a distinct link color so they read separately from files.",
+        keys: "-",
+      },
+      {
+        action: "Executables",
+        mouse:
+          "Unix +x bits (or .exe / .bin / …) use the executable tint. Shell scripts (.sh, .ps1, …) stay in the script tint even when executable.",
+        keys: "-",
+      },
+      {
+        action: "Turn off or customize",
+        mouse: "Settings → Files & export: toggle semantic colors and pick per-category colors; this page explains the groups.",
+        keys: "-",
+      },
+    ],
+  },
+  {
     title: "Layouts & navigation",
     rows: [
       {
@@ -145,35 +179,300 @@ const helpSections: HelpSection[] = [
   },
 ];
 
-// Keep this cheatsheet in sync with interaction logic in App.tsx and context-actions.ts.
-export function HelpPanel() {
+const sshSections: HelpSection[] = [
+  {
+    title: "Host key verification (saved hosts)",
+    rows: [
+      {
+        action: "Interactive prompt (default)",
+        mouse:
+          "OpenSSH may ask to confirm new or changed host keys. A modal can offer “Trust host” and optional “Save as default”.",
+        keys: "-",
+      },
+      {
+        action: "Auto-accept new keys",
+        mouse:
+          "Host settings (⋮) → Host key verification → “Auto-accept new keys”. Uses StrictHostKeyChecking=accept-new so new keys are stored without a yes/no prompt—important for ProxyJump where prompts can be easy to miss.",
+        keys: "-",
+      },
+      {
+        action: "Accept any key (insecure)",
+        mouse:
+          "Same dropdown, last option—disables meaningful host-key checks (MITM risk). Only for broken or lab setups.",
+        keys: "-",
+      },
+      {
+        action: "Quick connect",
+        mouse:
+          "Layout & Navigation → “Auto-trust host keys for quick connect” sends accept-new for one-off sessions (no saved host entry).",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "ProxyJump and ProxyCommand",
+    rows: [
+      {
+        action: "Jump via another saved host",
+        mouse:
+          "Host form → Proxy section: “Jump shortcut” lists host aliases; you can still type any ProxyJump string (comma-separated hops supported by OpenSSH). The bastion is a normal host entry, not a separate tab.",
+        keys: "-",
+      },
+      {
+        action: "ProxyCommand presets",
+        mouse:
+          "Preset dropdown fills common patterns (e.g. ssh -W %h:%p bastion, SOCKS via nc). Edit the command line to match your environment.",
+        keys: "-",
+      },
+      {
+        action: "Identity Store → Hosts",
+        mouse:
+          "Per-host binding: same jump shortcut + ProxyJump field, optional ProxyCommand preset and command line. Binding overrides win over store-user defaults where applicable.",
+        keys: "-",
+      },
+      {
+        action: "Identity Store → Users",
+        mouse:
+          "Optional default ProxyJump when a user is linked and the host binding leaves ProxyJump empty.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const identitySections: HelpSection[] = [
+  {
+    title: "What the Identity Store does",
+    rows: [
+      {
+        action: "Users, keys, groups, tags",
+        mouse:
+          "Central place for SSH identities (path or encrypted keys), people-shaped records, and taxonomy. Linked on each host binding.",
+        keys: "-",
+      },
+      {
+        action: "Host bindings",
+        mouse:
+          "Settings → Identity Store → Hosts: pick a config host, optional store user, keys, groups/tags, ProxyJump / ProxyCommand overrides, then Save host binding.",
+        keys: "-",
+      },
+      {
+        action: "Session resolution",
+        mouse:
+          "When you connect, the app merges ~/.ssh/config host fields with the binding and store user (user, HostName, keys, ProxyJump, ProxyCommand, etc.).",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const settingsSections: HelpSection[] = [
+  {
+    title: "Settings tabs (reference)",
+    rows: [
+      { action: "Appearance", mouse: "Density, fonts, list tone, frame mode.", keys: "-" },
+      { action: "Layout & Navigation", mouse: "Split behavior, auto-arrange, broadcast, sidebar pin, quick connect options.", keys: "-" },
+      { action: "Files & export", mouse: "File pane titles, export paths, archive format, semantic file colors.", keys: "-" },
+      { action: "Views", mouse: "Custom host list views (filters and sort).", keys: "-" },
+      { action: "Identity Store", mouse: "Users, keys, groups, tags, per-host bindings (see above).", keys: "-" },
+      { action: "SSH", mouse: "SSH config path override and raw config editor.", keys: "-" },
+      { action: "Data & Backup", mouse: "Encrypted backup export/import.", keys: "-" },
+      { action: "Help", mouse: "This page.", keys: "-" },
+      { action: "About", mouse: "Version and links.", keys: "-" },
+    ],
+  },
+];
+
+const dataSections: HelpSection[] = [
+  {
+    title: "Where data lives",
+    rows: [
+      {
+        action: "SSH config",
+        mouse:
+          "Managed host blocks live in your effective SSH config file (see Settings → SSH). The app can read/write Host entries it manages.",
+        keys: "-",
+      },
+      {
+        action: "App metadata",
+        mouse:
+          "Favorites, tags, last used, host key policy, default SSH user name—stored alongside your SSH directory (e.g. nosuckshell.metadata.json).",
+        keys: "-",
+      },
+      {
+        action: "Entity store",
+        mouse: "Encrypted-at-rest JSON for Identity Store objects (location under the app’s data dir; use Backup to export safely).",
+        keys: "-",
+      },
+      {
+        action: "Layouts & views",
+        mouse: "Saved layout profiles and view profiles as separate persisted files.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "Backups",
+    rows: [
+      {
+        action: "Encrypted backup",
+        mouse:
+          "Settings → Data & Backup: export packs SSH config, metadata, store, layouts, and view profiles. Keep the password safe; see project docs for the threat model.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const limitationsSections: HelpSection[] = [
+  {
+    title: "Known limitations",
+    rows: [
+      {
+        action: "SFTP file browser",
+        mouse:
+          "Uses a direct TCP connection (libssh2). ProxyJump / ProxyCommand are not applied—use a reachable HostName or open files via a terminal session through a bastion.",
+        keys: "-",
+      },
+      {
+        action: "Signing",
+        mouse: "Installers are not code-signed by default; your OS may show a security prompt.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const helpChapters: HelpChapter[] = [
+  {
+    id: "help-overview",
+    title: "Overview",
+    intro: [
+      "NoSuckShell is a workspace for saved SSH hosts, split terminals, drag-and-drop, optional input broadcast, and a dual-pane file browser. Use the links below to jump between chapters.",
+      "While a terminal pane is focused, keystrokes go to the shell—use the toolbar, context menus, footer, or Settings for app actions.",
+    ],
+    sections: [],
+  },
+  {
+    id: "help-interactions",
+    title: "Interactions cheatsheet",
+    intro: [
+      "Quick reference for mouse and keyboard behavior. For trust prompts, see SSH and host keys.",
+    ],
+    sections: interactionSections,
+  },
+  {
+    id: "help-ssh",
+    title: "SSH, proxies, and host keys",
+    intro: [
+      "Terminal SSH is spawned by the system OpenSSH client with options derived from each host’s saved settings and app metadata.",
+    ],
+    sections: sshSections,
+  },
+  {
+    id: "help-identity",
+    title: "Identity Store",
+    intro: [
+      "Optional but powerful: link store users and keys to hosts so sessions pick up the right credentials and proxy defaults.",
+    ],
+    sections: identitySections,
+  },
+  {
+    id: "help-settings",
+    title: "Settings",
+    intro: ["All panels open from the context menu on a terminal pane (or the sidebar gear where available)."],
+    sections: settingsSections,
+  },
+  {
+    id: "help-data",
+    title: "Data, files, and backups",
+    intro: [],
+    sections: dataSections,
+  },
+  {
+    id: "help-limits",
+    title: "Limitations",
+    intro: [],
+    sections: limitationsSections,
+  },
+];
+
+function renderSectionTable(
+  section: HelpSection,
+  resolveHelpShortcutLabel: ((action: string) => string | undefined) | undefined,
+) {
+  return (
+    <section key={section.title} className="help-section">
+      <h4>{section.title}</h4>
+      <div className="help-table-wrap">
+        <table className="help-table">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Details</th>
+              <th>Keyboard</th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.rows.map((row) => {
+              const resolved = resolveHelpShortcutLabel?.(row.action);
+              const keysCell = resolved && resolved.length > 0 ? resolved : row.keys;
+              return (
+                <tr key={`${section.title}:${row.action}`}>
+                  <td>{row.action}</td>
+                  <td>{row.mouse}</td>
+                  <td>{keysCell}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * In-app help: chapters + cheatsheet tables.
+ * Keep in sync with App.tsx, context-actions.ts, features/file-pane-name-kind.ts,
+ * host metadata / session SSH flags, and Identity Store UI.
+ */
+export type HelpPanelProps = {
+  resolveHelpShortcutLabel?: (action: string) => string | undefined;
+  shortcutCheatsheetLines?: Array<{ label: string; keys: string }>;
+};
+
+export function HelpPanel(props: HelpPanelProps = {}) {
+  const { resolveHelpShortcutLabel, shortcutCheatsheetLines } = props;
   return (
     <section className="help-panel">
       <header className="help-panel-header">
-        <h3>Help &amp; cheatsheet</h3>
+        <h3>Help</h3>
         <p className="muted-copy">
-          NoSuckShell combines host management, split panes, drag-and-drop, and optional keyboard broadcast in one
-          workspace. This page summarizes the main mouse and keyboard interactions.
+          Full in-app reference: interactions, SSH and trust behavior, Identity Store, settings, and data locations.
         </p>
       </header>
 
-      {helpSections.map((section) => (
-        <section key={section.title} className="help-section">
-          <h4>{section.title}</h4>
+      {shortcutCheatsheetLines && shortcutCheatsheetLines.length > 0 ? (
+        <section className="help-section" aria-label="Keyboard shortcuts overview">
+          <h4>Keyboard shortcuts</h4>
+          <p className="muted-copy help-chapter-intro">
+            Rebind shortcuts in Settings → Keyboard. Use the leader key, then <strong>K</strong> (default) to jump back
+            here. Chords use physical keys (layout-independent). In a focused terminal, only modified shortcuts and
+            Escape (when a modal is open) are handled by the app.
+          </p>
           <div className="help-table-wrap">
             <table className="help-table">
               <thead>
                 <tr>
                   <th>Action</th>
-                  <th>Mouse / gesture</th>
-                  <th>Keyboard</th>
+                  <th>Shortcut</th>
                 </tr>
               </thead>
               <tbody>
-                {section.rows.map((row) => (
-                  <tr key={`${section.title}:${row.action}`}>
-                    <td>{row.action}</td>
-                    <td>{row.mouse}</td>
+                {shortcutCheatsheetLines.map((row) => (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
                     <td>{row.keys}</td>
                   </tr>
                 ))}
@@ -181,11 +480,31 @@ export function HelpPanel() {
             </table>
           </div>
         </section>
+      ) : null}
+
+      <nav className="help-toc" aria-label="Help chapters">
+        {helpChapters.map((ch) => (
+          <a key={ch.id} className="help-toc-link" href={`#${ch.id}`}>
+            {ch.title}
+          </a>
+        ))}
+      </nav>
+
+      {helpChapters.map((chapter) => (
+        <section key={chapter.id} id={chapter.id} className="help-chapter">
+          <h3 className="help-chapter-title">{chapter.title}</h3>
+          {(chapter.intro ?? []).map((paragraph) => (
+            <p key={paragraph} className="muted-copy help-chapter-intro">
+              {paragraph}
+            </p>
+          ))}
+          {chapter.sections.map((sec) => renderSectionTable(sec, resolveHelpShortcutLabel))}
+        </section>
       ))}
 
       <p className="muted-copy help-note">
-        While a terminal is focused, keys are sent to the shell—there are no global app hotkeys that steal typing.
-        Layout, broadcast, and other actions use the toolbar, context menus, footer, or Settings.
+        For release notes and security details about backups, see the documentation shipped with the repository
+        (CHANGELOG, architecture, backup-security).
       </p>
     </section>
   );

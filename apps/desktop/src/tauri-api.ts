@@ -6,8 +6,15 @@ import type {
   HostConfig,
   HostMetadataStore,
   LayoutProfile,
+  LicensePayload,
+  LicenseStatus,
+  LocalDirEntry,
+  PluginListEntry,
   QuickSshSessionRequest,
+  RemoteSshSpec,
   SessionStarted,
+  SftpDirEntry,
+  SshDirInfo,
   SshKeyObject,
   TagObject,
   UserObject,
@@ -80,6 +87,16 @@ export const saveHost = (host: HostConfig): Promise<void> =>
 
 export const deleteHost = (hostName: string): Promise<void> =>
   invoke("delete_host", { hostName });
+
+export const getSshConfigRaw = (): Promise<string> => invoke("get_ssh_config_raw");
+
+export const saveSshConfigRaw = (content: string): Promise<void> =>
+  invoke("save_ssh_config_raw", { content });
+
+export const getSshDirInfo = (): Promise<SshDirInfo> => invoke("get_ssh_dir_info");
+
+export const setSshDirOverride = (path: string | null): Promise<void> =>
+  invoke("set_ssh_dir_override", { path });
 
 export const startSession = (host: HostConfig): Promise<SessionStarted> =>
   invoke("start_session", { host });
@@ -173,3 +190,113 @@ export const unlockKeyMaterial = (keyId: string, passphrase?: string): Promise<s
 
 export const deleteKeyById = (keyId: string): Promise<void> =>
   invoke("delete_key", { keyId });
+
+export const sftpListRemoteDir = (spec: RemoteSshSpec, path: string): Promise<SftpDirEntry[]> =>
+  invoke("sftp_list_remote_dir", { spec, path });
+
+export const listLocalDir = (path: string): Promise<LocalDirEntry[]> =>
+  invoke("list_local_dir", { path });
+
+export const getLocalHomeCanonicalPath = (): Promise<string> =>
+  invoke("get_local_home_canonical_path");
+
+export const sftpDownloadFile = (
+  spec: RemoteSshSpec,
+  remoteFilePath: string,
+  destDirPath: string,
+): Promise<string> => invoke("sftp_download_file", { spec, remoteFilePath, destDirPath });
+
+export const sftpExportPathsArchive = (
+  spec: RemoteSshSpec,
+  parentPath: string,
+  names: string[],
+  format: string,
+  destDirPath: string,
+  localOutputBaseName: string | null,
+): Promise<string> =>
+  invoke("sftp_export_paths_archive", {
+    spec,
+    parentPath,
+    names,
+    format,
+    destDirPath,
+    localOutputBaseName,
+  });
+
+export const localExportPathsArchive = (
+  parentPathKey: string,
+  names: string[],
+  format: string,
+  destDirPath: string,
+  localOutputBaseName: string | null,
+): Promise<string> =>
+  invoke("local_export_paths_archive", {
+    parentPathKey,
+    names,
+    format,
+    destDirPath,
+    localOutputBaseName,
+  });
+
+export const sftpUploadFile = (
+  spec: RemoteSshSpec,
+  localDirPath: string,
+  localFileName: string,
+  remoteFilePath: string,
+): Promise<void> =>
+  invoke("sftp_upload_file", { spec, localDirPath, localFileName, remoteFilePath });
+
+export const copyLocalFile = (
+  srcDirPath: string,
+  srcName: string,
+  destDirPath: string,
+  destName: string,
+): Promise<string> => invoke("copy_local_file", { srcDirPath, srcName, destDirPath, destName });
+
+export const broadcastFileTransferClipboard = (payload: unknown): Promise<void> =>
+  invoke("broadcast_file_transfer_clipboard", { payload });
+
+export const openAuxWindow = (): Promise<void> => invoke("open_aux_window");
+
+export const createLocalDir = (parentPathKey: string, dirName: string): Promise<void> =>
+  invoke("create_local_dir", { parentPathKey, dirName });
+
+export const deleteLocalEntry = (parentPathKey: string, name: string): Promise<void> =>
+  invoke("delete_local_entry", { parentPathKey, name });
+
+export const renameLocalEntry = (parentPathKey: string, oldName: string, newName: string): Promise<void> =>
+  invoke("rename_local_entry", { parentPathKey, oldName, newName });
+
+export const openLocalEntryInOs = (parentPathKey: string, name: string): Promise<void> =>
+  invoke("open_local_entry_in_os", { parentPathKey, name });
+
+export const sftpCreateDir = (spec: RemoteSshSpec, parentPath: string, dirName: string): Promise<void> =>
+  invoke("sftp_create_dir", { spec, parentPath, dirName });
+
+export const sftpDeleteEntry = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<void> =>
+  invoke("sftp_delete_entry", { spec, parentPath, name });
+
+export const sftpRenameEntry = (
+  spec: RemoteSshSpec,
+  parentPath: string,
+  oldName: string,
+  newName: string,
+): Promise<void> => invoke("sftp_rename_entry", { spec, parentPath, oldName, newName });
+
+export const listPlugins = (): Promise<PluginListEntry[]> => invoke("list_plugins");
+
+export const setPluginEnabled = (pluginId: string, enabled: boolean): Promise<void> =>
+  invoke("set_plugin_enabled", { pluginId, enabled });
+
+export const pluginInvoke = (
+  pluginId: string,
+  method: string,
+  arg: Record<string, unknown>,
+): Promise<unknown> => invoke("plugin_invoke", { pluginId, method, arg });
+
+export const activateLicense = (token: string): Promise<LicensePayload> =>
+  invoke("activate_license", { token });
+
+export const licenseStatus = (): Promise<LicenseStatus> => invoke("license_status");
+
+export const clearLicense = (): Promise<void> => invoke("clear_license");

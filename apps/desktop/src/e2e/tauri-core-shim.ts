@@ -42,6 +42,9 @@ const seedHosts: HostConfig[] = [
 /** Mutable host list for e2e (save_host / delete_host update this; list_hosts reads it). */
 let e2eHosts: HostConfig[] = [...seedHosts];
 
+/** Raw ~/.ssh/config stand-in for settings SSH tab in e2e builds. */
+let e2eSshConfigRaw = `# e2e mock ssh config\nHost demo-server\n  HostName demo.local\n  User ssh-user\n`;
+
 const demoMetadata: HostMetadataStore = {
   defaultUser: "",
   hosts: {
@@ -95,7 +98,7 @@ const demoViewProfiles: ViewProfile[] = [
 ];
 
 const defaultEntityStore = (): EntityStore => ({
-  schemaVersion: 1,
+  schemaVersion: 3,
   updatedAt: now(),
   users: {},
   groups: {},
@@ -126,6 +129,21 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
   switch (cmd) {
     case "list_hosts":
       return e2eHosts;
+    case "get_ssh_config_raw":
+      return e2eSshConfigRaw;
+    case "save_ssh_config_raw": {
+      e2eSshConfigRaw = typeof args?.content === "string" ? args.content : "";
+      return undefined;
+    }
+    case "get_ssh_dir_info":
+      return {
+        defaultPath: "/home/e2e/.ssh",
+        effectivePath: "/home/e2e/.ssh",
+        overridePath: null,
+        userProfile: null,
+      };
+    case "set_ssh_dir_override":
+      return undefined;
     case "list_host_metadata":
       return demoMetadata;
     case "list_layout_profiles":
@@ -202,6 +220,128 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return [] as GroupObject[];
     case "list_tags":
       return [] as TagObject[];
+    case "sftp_list_remote_dir":
+      return [
+        {
+          name: "etc",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          modeOctal: "755",
+          userDisplay: "0",
+          groupDisplay: "0",
+        },
+        {
+          name: "home",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          modeOctal: "755",
+          userDisplay: "0",
+          groupDisplay: "0",
+        },
+        {
+          name: "README.txt",
+          isDir: false,
+          size: 12,
+          mtime: Math.floor(Date.now() / 1000),
+          modeDisplay: "-rw-r--r--",
+          modeOctal: "644",
+          userDisplay: "1000",
+          groupDisplay: "1000",
+        },
+      ];
+    case "list_local_dir":
+      return [
+        {
+          name: "Documents",
+          isDir: true,
+          size: 0,
+          mtime: null,
+          modeDisplay: "drwxr-xr-x",
+          modeOctal: "755",
+          userDisplay: "e2e",
+          groupDisplay: "e2e",
+        },
+        {
+          name: "notes.md",
+          isDir: false,
+          size: 8,
+          mtime: Math.floor(Date.now() / 1000),
+          modeDisplay: "-rw-r--r--",
+          modeOctal: "644",
+          userDisplay: "e2e",
+          groupDisplay: "e2e",
+        },
+      ];
+    case "get_local_home_canonical_path":
+      return "/home/e2e";
+    case "sftp_download_file":
+      return "/home/e2e/Downloads/mock-download.bin";
+    case "sftp_export_paths_archive":
+      return "/home/e2e/Downloads/mock-export.tar.gz";
+    case "local_export_paths_archive":
+      return "/home/e2e/Downloads/mock-local-export.tar.gz";
+    case "sftp_upload_file":
+    case "broadcast_file_transfer_clipboard":
+    case "open_aux_window":
+      return undefined;
+    case "copy_local_file":
+      return "/home/e2e/Documents/copied-file";
+    case "create_local_dir":
+    case "delete_local_entry":
+    case "rename_local_entry":
+    case "open_local_entry_in_os":
+    case "sftp_create_dir":
+    case "sftp_delete_entry":
+    case "sftp_rename_entry":
+      return undefined;
+    case "list_plugins":
+      return [
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.file-workspace",
+            version: "0.0.0-e2e",
+            displayName: "File workspace",
+            capabilities: ["settingsUi"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.demo",
+            version: "0.0.0-e2e",
+            displayName: "Demo plugin",
+            capabilities: ["credentialProvider", "settingsUi"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
+      ];
+    case "set_plugin_enabled":
+      return undefined;
+    case "plugin_invoke": {
+      const method = args?.method as string;
+      if (method === "ping") {
+        return { ok: true, message: "pong", echo: args?.arg ?? {} };
+      }
+      throw new Error(`e2e plugin_invoke: unknown method ${method}`);
+    }
+    case "activate_license":
+      return {
+        v: 1,
+        licenseId: "e2e",
+        entitlements: [],
+        iat: now(),
+        exp: null,
+      };
+    case "license_status":
+      return { active: false, licenseId: null, entitlements: [], exp: null };
+    case "clear_license":
+      return undefined;
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);
   }

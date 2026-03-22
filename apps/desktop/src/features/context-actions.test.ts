@@ -5,6 +5,8 @@ describe("buildPaneContextActions", () => {
   it("disables pane-specific actions when pane is empty", () => {
     const actions = buildPaneContextActions({
       paneSessionId: null,
+      paneSessionKind: "empty",
+      paneFileView: "terminal",
       broadcastModeEnabled: true,
       broadcastCount: 0,
     });
@@ -17,6 +19,8 @@ describe("buildPaneContextActions", () => {
   it("does not expose deprecated mode-switch actions", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: true,
       broadcastCount: 2,
     });
@@ -31,6 +35,8 @@ describe("buildPaneContextActions", () => {
   it("exposes split labels in duplicate mode by default", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
     });
@@ -44,6 +50,8 @@ describe("buildPaneContextActions", () => {
   it("exposes split labels in empty-pane mode", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
       splitMode: "empty",
@@ -58,6 +66,8 @@ describe("buildPaneContextActions", () => {
   it("shows only one broadcast switch action", () => {
     const onActions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
     });
@@ -68,6 +78,8 @@ describe("buildPaneContextActions", () => {
 
     const offActions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: true,
       broadcastCount: 2,
     });
@@ -80,6 +92,8 @@ describe("buildPaneContextActions", () => {
   it("shows only one free move switch action", () => {
     const offActions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
       freeMoveEnabled: false,
@@ -91,6 +105,8 @@ describe("buildPaneContextActions", () => {
 
     const onActions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
       freeMoveEnabled: true,
@@ -101,15 +117,51 @@ describe("buildPaneContextActions", () => {
     expect(onActions.find((item) => item.id === "layout.freeMove.enable")).toBeUndefined();
   });
 
+  it("shows local file browser toggle for local sessions", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "sess-1",
+      paneSessionKind: "local",
+      paneFileView: "terminal",
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+    expect(actions.find((item) => item.id === "pane.toggleLocalFiles")?.label).toBe("Browse local files");
+    expect(actions.find((item) => item.id === "pane.toggleRemoteFiles")).toBeUndefined();
+  });
+
+  it("hides file browser toggles when file workspace plugin is off", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "sess-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
+      fileWorkspaceEnabled: false,
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+    expect(actions.find((item) => item.id === "pane.toggleRemoteFiles")).toBeUndefined();
+    const localOnly = buildPaneContextActions({
+      paneSessionId: "sess-1",
+      paneSessionKind: "local",
+      paneFileView: "terminal",
+      fileWorkspaceEnabled: false,
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+    expect(localOnly.find((item) => item.id === "pane.toggleLocalFiles")).toBeUndefined();
+  });
+
   it("keeps context menu grouping and split order stable", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
       broadcastModeEnabled: false,
       broadcastCount: 0,
     });
     expect(actions.map((item) => item.id)).toEqual([
       "pane.newLocal",
       "pane.quickConnect",
+      "pane.toggleRemoteFiles",
       "layout.split.top",
       "layout.split.left",
       "layout.split.right",

@@ -85,7 +85,7 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Open app settings" }).click();
-  await page.getByRole("button", { name: "Data & Backup" }).click();
+  await page.getByRole("tab", { name: "Data & Backup" }).click();
   await expect(page.getByRole("button", { name: "Export backup" })).toBeVisible();
   await shot(page, "05-backup");
   await page.locator(".app-settings-header").getByRole("button", { name: "Close" }).click();

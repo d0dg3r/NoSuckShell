@@ -1,12 +1,18 @@
 # Application architecture
 
-Concise overview of the **NoSuckShell** desktop app. For deeper product history and MVP notes, see [plans/2026-03-17-ssh-manager-design.md](plans/2026-03-17-ssh-manager-design.md).
+Overview of the **NoSuckShell** desktop app: how the UI, Rust backend, and on-disk data fit together. For product history and early design notes, see [plans/2026-03-17-ssh-manager-design.md](plans/2026-03-17-ssh-manager-design.md). For backup cryptography, see [backup-security.md](backup-security.md).
 
-## Overview
+## Stack
 
-- **Shell:** [Tauri 2](https://v2.tauri.app/) desktop app (Linux, macOS, Windows).
-- **Frontend:** React + Vite (TypeScript), rendered in the system webview.
-- **Backend:** Rust (`apps/desktop/src-tauri`), exposed to the UI via Tauri **commands** and **events**.
+| Layer | Technology |
+| --- | --- |
+| Desktop shell | [Tauri 2](https://v2.tauri.app/) (Linux, macOS, Windows) |
+| UI | React 19 + Vite + TypeScript (system webview) |
+| Backend | Rust crate in `apps/desktop/src-tauri` |
+| IPC | Tauri **commands** (`invoke`) and **events** (`emit` / `listen`) |
+| Terminal | [xterm.js](https://xtermjs.org/) in [`TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx) |
+| SSH in terminal | System `ssh` in a PTY ([`session.rs`](../apps/desktop/src-tauri/src/session.rs)) |
+| SFTP (file pane) | [ssh2](https://crates.io/crates/ssh2) over direct TCP ([`sftp.rs`](../apps/desktop/src-tauri/src/sftp.rs)) |
 
 ## High-level data flow
 
@@ -22,11 +28,11 @@ flowchart LR
   end
   subgraph Rust["Rust backend"]
     E[main.rs commands]
-    F[session / ssh_config / backup / ...]
+    F[session / ssh_config / host_metadata / secure_store / ...]
   end
-  subgraph OS["OS & tools"]
-    G["ssh, PTY"]
-    H["~/.ssh/config, files"]
+  subgraph OS["OS and user data"]
+    G["ssh PTY"]
+    H["SSH dir config + metadata + store files"]
   end
   A --> B
   B --> C
@@ -38,45 +44,126 @@ flowchart LR
   D --> A
 ```
 
-## Frontend
+## Frontend layout
 
-| Area | Location |
+| Area | Location | Notes |
+| --- | --- | --- |
+| Root state and wiring | [`App.tsx`](../apps/desktop/src/App.tsx) | Hosts, sessions, workspaces, settings modal, metadata store sync |
+| Reusable UI | [`components/`](../apps/desktop/src/components/) | Sidebar, panes, modals, settings tabs |
+| Domain logic | [`features/`](../apps/desktop/src/features/) | DnD, split layout, host form helpers, view filters, backup-related types |
+| IPC facade | [`tauri-api.ts`](../apps/desktop/src/tauri-api.ts) | All `invoke` calls in one place |
+| Shared wire types | [`types.ts`](../apps/desktop/src/types.ts) | DTOs aligned with Serde on the Rust side |
+| In-app help | [`HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) | Chaptered help (Settings → Help) |
+
+Refactoring notes for `App.tsx`: [refactoring-app-roadmap.md](refactoring-app-roadmap.md).
+
+## Backend modules (Rust)
+
+Command registration: [`main.rs`](../apps/desktop/src-tauri/src/main.rs) (`tauri::generate_handler![...]`).
+
+| Module | Responsibility |
 | --- | --- |
-| Main UI entry | [`apps/desktop/src/App.tsx`](../apps/desktop/src/App.tsx) |
-| Reusable UI | [`apps/desktop/src/components/`](../apps/desktop/src/components/) |
-| Domain-oriented helpers | [`apps/desktop/src/features/`](../apps/desktop/src/features/) |
-| `invoke` wrappers | [`apps/desktop/src/tauri-api.ts`](../apps/desktop/src/tauri-api.ts) |
-| Shared DTOs / types | [`apps/desktop/src/types.ts`](../apps/desktop/src/types.ts) |
-| Terminal (xterm) | [`apps/desktop/src/components/TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx) |
-| Refactoring notes (`App.tsx`) | [`docs/refactoring-app-roadmap.md`](refactoring-app-roadmap.md) |
+| `session` | Allocate PTY, spawn `ssh` or local shell, pipe stdout/stderr to `session-output` events; `send_input`, resize, kill |
+| `ssh_config` | Parse/render `Host` blocks in the effective SSH config file |
+| `ssh_home` | Resolve SSH directory (default, override from settings) |
+| `host_metadata` | `nosuckshell.metadata.json`: favorites, tags, `lastUsedAt`, `trustHostDefault`, optional `strictHostKeyPolicy` |
+| `secure_store` | Encrypted entity store JSON + `resolve_host_config_for_session` (merge config host + `HostBinding` + linked `UserObject`) |
+| `store_models` | Serde models for users, keys, groups, tags, bindings |
+| `quick_ssh` | Normalize quick-connect payload into `HostConfig` + optional strict-host-key override |
+| `backup` / `key_crypto` | Encrypted backup envelope |
+| `layout_profiles` / `view_profiles` | Persisted JSON for layouts and host-list view profiles |
+| `sftp` | Remote/local file ops over libssh2 (no ProxyJump/ProxyCommand in this path today) |
+| `plugins` | Built-in plugin registry ([`plugins/mod.rs`](../apps/desktop/src-tauri/src/plugins/mod.rs)): `NssPlugin` trait, capabilities, `enrich_resolved_host` after store merge |
+| `license` | Offline Ed25519 license verify/activate ([`license.rs`](../apps/desktop/src-tauri/src/license.rs)); entitlement checks for gated plugins |
 
-The UI calls Rust through `invoke` from `@tauri-apps/api/core` (centralized in `tauri-api.ts`).
+## Plugins and licensing (Phase 1)
 
-## Backend (Rust)
+**Built-in plugins** (Rust modules registered at startup) can implement `NssPlugin`: manifest (id, version, display name, capabilities), optional `required_entitlement`, `enrich_host_config`, and `invoke` for RPC-style calls from the UI.
 
-Command registration lives in [`apps/desktop/src-tauri/src/main.rs`](../apps/desktop/src-tauri/src/main.rs) (`invoke_handler` / `generate_handler![...]`).
+- **Host hook:** After `resolve_host_config_with_store`, [`resolve_host_config_for_session`](../apps/desktop/src-tauri/src/secure_store.rs) calls `plugins::enrich_resolved_host` so Vault/Bitwarden-style providers can adjust `HostConfig` before SSH/SFTP (see demo plugin under [`plugins/demo.rs`](../apps/desktop/src-tauri/src/plugins/demo.rs)).
+- **Settings UI:** Settings → **Plugins & license** ([`AppSettingsPluginsTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsPluginsTab.tsx)): list plugins, enable/disable, paste license token, ping demo plugin.
+- **File workspace:** Built-in plugin `dev.nosuckshell.plugin.file-workspace` ([`plugins/file_workspace.rs`](../apps/desktop/src-tauri/src/plugins/file_workspace.rs)) gates remote/local file browser UI and `sessionFileViews` in [`App.tsx`](../apps/desktop/src/App.tsx) / [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx) / [`context-actions.ts`](../apps/desktop/src/features/context-actions.ts).
+- **License issuance:** Separate HTTP service [`services/license-server`](../services/license-server/) (Ko-fi webhook + admin issue endpoint). Product/legal notes: [licensing.md](licensing.md). [Ko-fi](https://ko-fi.com/) is only the payment/webhook source; signing stays on your server.
 
-| Module | Role |
-| --- | --- |
-| `session` | PTY sessions for SSH / local shells; streams I/O to the UI. |
-| `ssh_config` | Read/write `~/.ssh/config` host entries. |
-| `host_metadata` | App-specific metadata (e.g. last used) alongside SSH config. |
-| `backup` / `key_crypto` | Encrypted backup envelope (see [backup-security.md](backup-security.md)). |
-| `layout_profiles` / `view_profiles` | Saved workspace layouts and view profiles. |
-| `secure_store` / `store_models` | Entity store: host bindings, keys, users, groups, tags (via commands). |
+Future **Phase 2** (not implemented): load third-party code via WASM or signed bundles—same hooks, stricter sandboxing.
 
-## IPC surface
+Planned plugin-shaped features (GitHub settings sync, Bitwarden, HashiCorp Vault, NSS-Commander) are listed with proposed IDs in [roadmap.md](roadmap.md).
 
-Commands are grouped roughly as: **hosts & metadata**, **sessions** (start, input, resize, close), **secure store** (entities, keys), **backup** (export/import), **layout & view profiles**.
+## SSH session path (terminal)
 
-For the authoritative list, see `generate_handler![...]` in `main.rs` and the corresponding `invoke(...)` calls in `tauri-api.ts`.
+1. UI calls `start_session` with a `HostConfig` (alias, HostName, user, port, identity file, `proxyJump`, `proxyCommand`).
+2. `resolve_host_config_for_session` applies the entity store binding and linked user (user string, HostName, keys, proxy fields, etc.), then runs **plugin** `enrich_resolved_host`.
+3. `build_ssh_command` adds OpenSSH flags, including **`StrictHostKeyChecking`** from `host_metadata` for the host alias (or from the quick-connect request for ephemeral sessions).
+4. Child `ssh` runs under a PTY; output is chunked into `SessionOutputEvent` (includes a flag when the known-hosts prompt substring appears).
+
+```mermaid
+sequenceDiagram
+  participant UI as React
+  participant TA as tauri-api
+  participant MR as main.rs
+  participant SS as secure_store
+  participant HM as host_metadata
+  participant SE as session
+  participant SSH as ssh binary
+  UI->>TA: start_session(host)
+  TA->>MR: invoke
+  MR->>SS: resolve_host_config_for_session
+  MR->>HM: load_metadata (inside session build)
+  MR->>SE: start(resolved_host, quick_policy?)
+  SE->>SSH: PTY spawn with -o StrictHostKeyChecking=...
+  SE-->>UI: session-output events
+```
+
+## SFTP path (file browser)
+
+- Resolves host the same way for **saved** hosts (`resolve_host_config_for_session`).
+- Opens **TCP** to `HostName:port` and starts libssh2—**not** the same as `ssh -J` / `ProxyCommand`.
+- Documented limitation: use direct-reachable hosts or rely on terminal + SSH for bastioned paths.
+
+## Identity Store (conceptual)
+
+- **Users** — display name, SSH username, optional per-user HostName / ProxyJump, key references.
+- **Keys** — path-based or encrypted key material in the store.
+- **Host bindings** — per config-host alias: linked user, key refs, groups/tags, `proxyJump`, `legacyProxyCommand`, etc.
+- At session time, binding and user rows override or fill fields on top of the parsed SSH config host.
+
+## IPC surface (categories)
+
+- **Hosts:** list/save/delete hosts, raw config read/write, SSH dir info and override
+- **Metadata:** list/save metadata, touch `lastUsedAt`
+- **Sessions:** start SSH, start local shell, start quick SSH, send input, resize, close
+- **Store:** CRUD-ish commands for encrypted store entities and key unlock
+- **Backup / profiles:** export/import backup, layout and view profile persistence
+- **SFTP:** list/download/upload/rename/… for remote and local panes
+- **Plugins / license:** `list_plugins`, `set_plugin_enabled`, `plugin_invoke`, `activate_license`, `license_status`, `clear_license`
+
+Authoritative list: `generate_handler![...]` in `main.rs` and matching names in `tauri-api.ts`.
 
 ## Events
 
-The backend emits terminal output (and related session signals) as Tauri events. The frontend subscribes with `listen` from `@tauri-apps/api/event`, for example the `session-output` listener in [`TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx) (and related wiring in [`App.tsx`](../apps/desktop/src/App.tsx)).
+- Primary: **`session-output`** — terminal stream + `host_key_prompt` hint for trust UI.
+- Frontend listeners: [`TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx), [`useSessionOutputTrustListener.ts`](../apps/desktop/src/hooks/useSessionOutputTrustListener.ts), and related refs in `App.tsx`.
+
+## On-disk artifacts (typical)
+
+| Artifact | Role |
+| --- | --- |
+| Effective `config` under SSH dir | Managed `Host` blocks |
+| `nosuckshell.metadata.json` | Per-alias UI metadata and host-key policy |
+| Entity store file (under app data) | Identity Store (encrypted) |
+| Layout / view profile JSON | Workspace and sidebar view state |
+| `nosuckshell.plugins.json` | Per-plugin enabled flags (under active SSH dir) |
+| `nosuckshell.license.json` | Verified license payload + signature (under active SSH dir) |
+
+Exact paths depend on platform and optional SSH dir override (see Settings → SSH and `ssh_home`).
 
 ## Related documentation
 
-- Backup cryptography and threat model: [backup-security.md](backup-security.md)
-- Releases: [releases.md](releases.md)
-- Release notes: [CHANGELOG.md](CHANGELOG.md)
+| Doc | Content |
+| --- | --- |
+| [backup-security.md](backup-security.md) | Backup format and threat model |
+| [licensing.md](licensing.md) | License tokens, Ko-fi, entitlements, key rotation |
+| [roadmap.md](roadmap.md) | Planned plugins (GitHub sync, Bitwarden, Vault, NSS-Commander) |
+| [releases.md](releases.md) | Tags and GitHub releases |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
+| [README.md](README.md) (repo root) | Clone, build, run |

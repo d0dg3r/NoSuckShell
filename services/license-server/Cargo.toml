@@ -1,0 +1,19 @@
+[package]
+name = "nosuckshell-license-server"
+version = "0.1.0"
+edition = "2021"
+description = "Ko-fi webhook + signed license token issuer for NoSuckShell"
+license = "MIT"
+
+[dependencies]
+axum = "0.7"
+base64 = "0.22"
+ed25519-dalek = { version = "2.2", default-features = false, features = ["alloc"] }
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.5", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }

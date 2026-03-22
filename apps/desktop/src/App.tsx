@@ -12,7 +12,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   closeSession,
   deleteHost,
@@ -29,6 +28,10 @@ import {
   saveViewProfile,
   deleteViewProfile,
   reorderViewProfiles,
+  getSshConfigRaw,
+  getSshDirInfo,
+  saveSshConfigRaw,
+  setSshDirOverride,
   sendInput,
   listStoreObjects,
   saveStoreObjects,
@@ -39,13 +42,28 @@ import {
   startQuickSshSession,
   startSession,
   touchHostLastUsed,
+  listPlugins,
 } from "./tauri-api";
-import { HostForm } from "./components/HostForm";
+import { AddHostModal } from "./components/AddHostModal";
+import { HostContextMenu } from "./components/HostContextMenu";
+import { HostSidebar } from "./components/HostSidebar";
+import { PaneContextMenu } from "./components/PaneContextMenu";
+import { QuickConnectModal } from "./components/QuickConnectModal";
+import { createSplitPaneRenderer } from "./components/SplitWorkspace";
+import { useAppKeyboardShortcutEngine, type KeyboardShortcutEngineActions } from "./hooks/useAppKeyboardShortcutEngine";
+import { useAppRefSync } from "./hooks/useAppRefSync";
+import { listen } from "@tauri-apps/api/event";
+import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
+import { useWorkspaceBootstrapFromStorage, useWorkspacePersistToStorage } from "./hooks/useWorkspaceLocalStorage";
+import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
+import { TrustHostModal } from "./components/TrustHostModal";
 import {
   AppSettingsPanel,
   type AppSettingsTab,
   type AutoArrangeMode,
   type DensityProfile,
+  type FileExportArchiveFormat,
+  type FileExportDestMode,
   type FrameModePreset,
   type LayoutMode,
   type ListTonePreset,
@@ -61,12 +79,15 @@ const LayoutCommandCenter = lazy(async () => {
   return { default: m.LayoutCommandCenter };
 });
 
-const TerminalPane = lazy(async () => {
-  const m = await import("./components/TerminalPane");
-  return { default: m.TerminalPane };
-});
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { buildPaneContextActions, type ContextActionId } from "./features/context-actions";
+import { FILE_WORKSPACE_PLUGIN_ID } from "./features/builtin-plugin-ids";
+import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
+import {
+  FILE_DND_PAYLOAD_MIME,
+  parseFileDragPayload,
+  type FileDragPayload,
+} from "./features/file-pane-dnd";
+import { setFileTransferClipboardFromEvent } from "./features/file-transfer-clipboard";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -107,523 +128,234 @@ import type {
   LayoutSplitTreeNode,
   PaneLayoutItem,
   QuickSshSessionRequest,
-  SessionOutputEvent,
+  RemoteSshSpec,
+  StrictHostKeyPolicy,
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
+  SshDirInfo,
 } from "./types";
 import logoTextTransparent from "../../../img/logo_text_transparent.png";
 import logoTransparent from "../../../img/logo_tranparent.png";
+import {
+  allowNativeBrowserContextMenu,
+  createDefaultEntityStore,
+  createDefaultHostBinding,
+  createDefaultHostMetadata,
+  createDefaultMetadataStore,
+  emptyHost,
+  normalizeEntityStore,
+} from "./features/app-bootstrap";
+import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
+import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
+import {
+  effectiveStrictHostKeyPolicy,
+  metadataPatchForHostKeyPolicy,
+} from "./features/host-metadata-policy";
+import { createId } from "./features/app-id";
+import {
+  AUTO_ARRANGE_MODE_STORAGE_KEY,
+  DEFAULT_BACKUP_PATH,
+  DENSITY_PROFILE_STORAGE_KEY,
+  FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY,
+  FILE_EXPORT_DEST_MODE_STORAGE_KEY,
+  FILE_EXPORT_PATH_KEY_STORAGE_KEY,
+  FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY,
+  DENSITY_TERMINAL_BASE_FONT,
+  FRAME_MODE_PRESET_STORAGE_KEY,
+  LAYOUT_MODE_STORAGE_KEY,
+  LIST_TONE_PRESET_STORAGE_KEY,
+  MOBILE_STACKED_MEDIA,
+  QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY,
+  QUICK_CONNECT_MODE_STORAGE_KEY,
+  SETTINGS_OPEN_MODE_STORAGE_KEY,
+  SIDEBAR_AUTO_HIDE_DELAY_MS,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_PINNED_STORAGE_KEY,
+  SIDEBAR_VIEW_STORAGE_KEY,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+  SPLIT_RATIO_PRESET_STORAGE_KEY,
+  SPLIT_RATIO_PRESET_VALUE,
+  TERMINAL_FONT_FAMILY_BY_PRESET,
+  TERMINAL_FONT_MAX,
+  TERMINAL_FONT_MIN,
+  TERMINAL_FONT_OFFSET_MAX,
+  TERMINAL_FONT_OFFSET_MIN,
+  TERMINAL_FONT_OFFSET_STORAGE_KEY,
+  TERMINAL_FONT_PRESET_STORAGE_KEY,
+  UI_FONT_PRESET_STORAGE_KEY,
+  clampSidebarWidth,
+  parseFileExportArchiveFormat,
+  parseFileExportDestMode,
+  parseStoredAutoArrangeMode,
+  readLayoutMode,
+  readSplitRatioPreset,
+} from "./features/app-preferences";
+import { formatChordDisplay } from "./features/keyboard-shortcuts-display";
+import { KEYBOARD_SHORTCUT_DEFINITIONS } from "./features/keyboard-shortcuts-registry";
+import type { KeyboardShortcutCommandId, KeyChord, StoredShortcutMap } from "./features/keyboard-shortcuts-types";
+import {
+  KEYBOARD_SHORTCUTS_STORAGE_KEY,
+  effectiveLeaderChord,
+  mergeChordMap,
+  parseStoredShortcutMap,
+} from "./features/keyboard-shortcuts-storage";
+import { resolveFileExportDestPath } from "./features/file-export-dest";
+import {
+  applyFilePaneSemanticNameColorVarsToDocument,
+  readFilePaneSemanticNameColorsFromStorage,
+  writeFilePaneSemanticNameColorsToStorage,
+  type FilePaneSemanticNameColorsStored,
+} from "./features/file-pane-semantic-name-colors-prefs";
+import { DND_PAYLOAD_MIME, type DragPayload, type PaneDropZone, resolvePaneDropZoneFromOverlay } from "./features/pane-dnd";
+import {
+  type AutoArrangeActiveMode,
+  type ContextMenuState,
+  type HostStatusFilter,
+  type QuickConnectDraft,
+  type QuickConnectWizardStep,
+  type SavedSshSessionTab,
+  type SessionTab,
+  type SidebarViewId,
+  type SplitMode,
+  type TrustPromptRequest,
+  createQuickConnectDraft,
+} from "./features/session-model";
+import {
+  cloneSplitTree,
+  collectPaneOrder,
+  createEqualGridSplitTree,
+  createLeafNode,
+  createTreeFromPaneCount,
+  isLayoutGridDimensionsValid,
+  parseSplitTree,
+  rebalanceSplitTree,
+  removePaneFromTree,
+  replacePaneInTree,
+  serializeSplitTree,
+  updateSplitRatioInTree,
+  type SplitAxis,
+  type SplitResizeState,
+  type SplitTreeNode,
+} from "./features/split-tree";
+import {
+  appendSessionToWorkspaceSnapshot,
+  clonePaneLayouts,
+  cloneWorkspaceSnapshot,
+  compactSplitSlotsByPaneOrder,
+  createEmptyWorkspaceSnapshot,
+  DEFAULT_WORKSPACE_ID,
+  type WorkspaceSnapshot,
+} from "./features/workspace-snapshot";
 
-const emptyHost = (): HostConfig => ({
-  host: "",
-  hostName: "",
-  user: "",
-  port: 22,
-  identityFile: "",
-  proxyJump: "",
-  proxyCommand: "",
-});
+function parseHostTagDraftToSortedTags(draft: string): string[] {
+  return Array.from(
+    new Set(
+      draft
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
 
-const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => ({
-  hostName: "",
-  user: defaultUser.trim(),
-  identityFile: "",
-  proxyJump: "",
-  proxyCommand: "",
-});
-
-type SavedSshSessionTab = {
-  id: string;
-  kind: "sshSaved";
-  hostAlias: string;
-};
-type QuickSshSessionTab = {
-  id: string;
-  kind: "sshQuick";
-  label: string;
-  request: QuickSshSessionRequest;
-};
-type LocalSessionTab = {
-  id: string;
-  kind: "local";
-  label: string;
-};
-type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab;
-type QuickConnectDraft = {
-  hostName: string;
-  user: string;
-  identityFile: string;
-  proxyJump: string;
-  proxyCommand: string;
-};
-
-type HostStatusFilter = "all" | "connected" | "disconnected";
-
-type QuickConnectWizardStep = 1 | 2;
-type AutoArrangeActiveMode = "a" | "b" | "c";
-type SidebarViewId = "builtin:all" | "builtin:favorites" | `custom:${string}`;
-type SplitMode = "duplicate" | "empty";
-type WorkspaceSnapshot = {
-  id: string;
-  name: string;
-  splitSlots: Array<string | null>;
-  paneLayouts: PaneLayoutItem[];
-  splitTree: SplitTreeNode;
-  activePaneIndex: number;
-  activeSessionId: string;
-};
-type DragPayload =
-  | { type: "session"; sessionId: string }
-  | { type: "machine"; hostAlias: string };
-type PaneDropZone = "left" | "right" | "top" | "bottom" | "center";
-type ContextMenuState = {
-  visible: boolean;
-  x: number;
-  y: number;
-  paneIndex: number | null;
-  splitMode: SplitMode;
-};
-type SplitAxis = "horizontal" | "vertical";
-type SplitLeafNode = { id: string; type: "leaf"; paneIndex: number };
-type SplitContainerNode = {
-  id: string;
-  type: "split";
-  axis: SplitAxis;
-  ratio: number;
-  first: SplitTreeNode;
-  second: SplitTreeNode;
-};
-type SplitTreeNode = SplitLeafNode | SplitContainerNode;
-type SplitResizeState = { splitId: string; axis: SplitAxis };
-type TrustPromptRequest = { sessionId: string; hostAlias: string };
-const DND_PAYLOAD_MIME = "application/x-nosuckshell-dnd";
-const DEFAULT_SPLIT_RATIO = 0.6;
-const MIN_SPLIT_RATIO = 0.2;
-const MAX_SPLIT_RATIO = 0.8;
-
-const SIDEBAR_MIN_WIDTH = 240;
-const SIDEBAR_MAX_WIDTH = 520;
-const SIDEBAR_DEFAULT_WIDTH = 280;
-const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
-const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
-const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
-const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
-const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
-const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
-const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
-const UI_FONT_PRESET_STORAGE_KEY = "nosuckshell.ui.fontPreset";
-const TERMINAL_FONT_PRESET_STORAGE_KEY = "nosuckshell.terminal.fontPreset";
-const QUICK_CONNECT_MODE_STORAGE_KEY = "nosuckshell.quickConnect.mode";
-const QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY = "nosuckshell.quickConnect.autoTrust";
-const SPLIT_RATIO_PRESET_STORAGE_KEY = "nosuckshell.layout.splitRatioPreset";
-const AUTO_ARRANGE_MODE_STORAGE_KEY = "nosuckshell.layout.autoArrangeMode";
-
-const parseStoredAutoArrangeMode = (raw: string | null): AutoArrangeMode => {
-  if (raw === "off" || raw === "a" || raw === "b" || raw === "c" || raw === "free") {
-    return raw;
-  }
-  return "c";
-};
-const WORKSPACES_STORAGE_KEY = "nosuckshell.layout.workspaces.v1";
-const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
-const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
-const DEFAULT_WORKSPACE_ID = "workspace-main";
-const SPLIT_RATIO_PRESET_VALUE: Record<SplitRatioPreset, number> = {
-  "50-50": 0.5,
-  "60-40": 0.6,
-  "70-30": 0.7,
-};
-const TERMINAL_FONT_FAMILY_BY_PRESET: Record<TerminalFontPreset, string> = {
-  "jetbrains-mono":
-    '"JetBrains Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-  "ibm-plex-mono":
-    '"IBM Plex Mono", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-  "source-code-pro":
-    '"Source Code Pro", "NoSuckShell Nerd Font", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono", monospace',
-};
-const DENSITY_TERMINAL_BASE_FONT: Record<DensityProfile, number> = {
-  aggressive: 12,
-  balanced: 13,
-  safe: 14,
-};
-const TERMINAL_FONT_OFFSET_MIN = -3;
-const TERMINAL_FONT_OFFSET_MAX = 6;
-const TERMINAL_FONT_MIN = 9;
-const TERMINAL_FONT_MAX = 22;
-const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
-const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
-/** Must match CSS breakpoint for stacked-mobile shell */
-const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
-
-const createId = (): string => {
-  let suffix: string;
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    const arr = new Uint32Array(1);
-    crypto.getRandomValues(arr);
-    suffix = arr[0].toString(36).padStart(8, "0").slice(0, 8);
-  } else {
-    suffix = Math.random().toString(36).slice(2, 10);
-  }
-  return `${Date.now()}-${suffix}`;
-};
-const hasTauriTransformCallback = (): boolean => {
-  if (import.meta.env.VITE_E2E === "true") {
-    return true;
-  }
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { transformCallback?: unknown } })
-    .__TAURI_INTERNALS__;
-  return typeof tauriInternals?.transformCallback === "function";
-};
-
-/** Block WebKit/Electron default context menu app-wide except in real text fields. */
-const allowNativeBrowserContextMenu = (target: EventTarget | null): boolean => {
-  if (!(target instanceof Element)) {
-    return false;
-  }
-  if (target.closest("textarea, select, [contenteditable='true'], [contenteditable='']")) {
-    return true;
-  }
-  const input = target.closest("input");
-  if (!input) {
-    return false;
-  }
-  const type = (input as HTMLInputElement).type;
+function hostConfigsEqual(a: HostConfig, b: HostConfig): boolean {
   return (
-    type === "text" ||
-    type === "search" ||
-    type === "password" ||
-    type === "email" ||
-    type === "url" ||
-    type === "tel" ||
-    type === "number" ||
-    type === "date" ||
-    type === "time" ||
-    type === "datetime-local" ||
-    type === ""
+    a.host === b.host &&
+    a.hostName === b.hostName &&
+    a.user === b.user &&
+    a.port === b.port &&
+    a.identityFile === b.identityFile &&
+    a.proxyJump === b.proxyJump &&
+    a.proxyCommand === b.proxyCommand
   );
-};
+}
 
-const clampSidebarWidth = (value: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
-const readLayoutMode = (): LayoutMode => {
-  if (typeof window === "undefined") {
-    return "auto";
+function sidebarSavedHostBinding(
+  menuAlias: string,
+  hosts: HostConfig[],
+  entityStore: EntityStore,
+  metadataHosts: HostMetadataStore["hosts"],
+): HostBinding {
+  const existing = entityStore.hostBindings[menuAlias];
+  if (existing) {
+    return existing;
   }
-  const persisted = window.localStorage.getItem(LAYOUT_MODE_STORAGE_KEY);
-  return persisted === "wide" || persisted === "compact" ? persisted : "auto";
-};
-const readSplitRatioPreset = (): SplitRatioPreset => {
-  if (typeof window === "undefined") {
-    return "60-40";
-  }
-  const persisted = window.localStorage.getItem(SPLIT_RATIO_PRESET_STORAGE_KEY);
-  return persisted === "50-50" || persisted === "60-40" || persisted === "70-30" ? persisted : "60-40";
-};
-const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
-const createDefaultEntityStore = (): EntityStore => ({
-  schemaVersion: 1,
-  updatedAt: 0,
-  users: {},
-  groups: {},
-  keys: {},
-  tags: {},
-  hostBindings: {},
-});
-const createDefaultHostMetadata = (): HostMetadata => ({ favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false });
-const createLeafNode = (paneIndex: number): SplitLeafNode => ({ id: `leaf-${paneIndex}`, type: "leaf", paneIndex });
-const cloneSplitTree = (node: SplitTreeNode): SplitTreeNode =>
-  node.type === "leaf"
-    ? { ...node }
-    : {
-        ...node,
-        first: cloneSplitTree(node.first),
-        second: cloneSplitTree(node.second),
-      };
-const clonePaneLayouts = (layouts: PaneLayoutItem[]): PaneLayoutItem[] => layouts.map((entry) => ({ ...entry }));
-const cloneWorkspaceSnapshot = (snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
-  ...snapshot,
-  splitSlots: [...snapshot.splitSlots],
-  paneLayouts: clonePaneLayouts(snapshot.paneLayouts),
-  splitTree: cloneSplitTree(snapshot.splitTree),
-});
-const rebalanceSplitTree = (node: SplitTreeNode): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node;
-  }
-  const nextFirst = rebalanceSplitTree(node.first);
-  const nextSecond = rebalanceSplitTree(node.second);
-  const nextRatio = 0.5;
-  if (nextFirst === node.first && nextSecond === node.second && node.ratio === nextRatio) {
-    return node;
-  }
+  const host = hosts.find((h) => h.host === menuAlias);
   return {
-    ...node,
-    ratio: nextRatio,
-    first: nextFirst,
-    second: nextSecond,
+    ...createDefaultHostBinding(),
+    proxyJump: host?.proxyJump ?? "",
+    legacyUser: host?.user ?? "",
+    legacyTags: metadataHosts[menuAlias]?.tags ?? [],
+    legacyIdentityFile: host?.identityFile ?? "",
+    legacyProxyJump: host?.proxyJump ?? "",
+    legacyProxyCommand: host?.proxyCommand ?? "",
   };
-};
-const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOrder: number[]): Array<string | null> => {
-  if (paneOrder.length === 0) {
-    return slots;
-  }
-  const maxPaneIndex = Math.max(0, ...paneOrder);
-  const next = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
-  paneOrder.forEach((paneIndex) => {
-    next[paneIndex] = slots[paneIndex] ?? null;
-  });
-  if (next.length !== slots.length) {
-    return next;
-  }
-  for (let index = 0; index < next.length; index += 1) {
-    if (next[index] !== slots[index]) {
-      return next;
-    }
-  }
-  return slots;
-};
+}
 
-/** Must match `.pane-drop-zones` in styles.css (size + grid fr ratios). */
-const PANE_DROP_OVERLAY = {
-  widthPx: 190,
-  widthMaxPct: 0.88,
-  widthCap: 220,
-  heightPx: 160,
-  heightMaxPct: 0.78,
-  heightCap: 190,
-  gapPx: 5,
-  /** 1fr + 1.2fr + 1fr */
-  frSum: 3.2,
-} as const;
-
-const getPaneDropOverlaySize = (paneWidth: number, paneHeight: number): { w: number; h: number } => {
-  const w = Math.min(
-    PANE_DROP_OVERLAY.widthCap,
-    Math.min(PANE_DROP_OVERLAY.widthPx, paneWidth * PANE_DROP_OVERLAY.widthMaxPct),
+function sidebarBindingPickerDirty(a: HostBinding, b: HostBinding): boolean {
+  return (
+    a.userId !== b.userId ||
+    a.legacyUser !== b.legacyUser ||
+    a.proxyJump !== b.proxyJump ||
+    a.legacyProxyJump !== b.legacyProxyJump ||
+    a.legacyIdentityFile !== b.legacyIdentityFile ||
+    JSON.stringify(a.keyRefs) !== JSON.stringify(b.keyRefs)
   );
-  const h = Math.min(
-    PANE_DROP_OVERLAY.heightCap,
-    Math.min(PANE_DROP_OVERLAY.heightPx, paneHeight * PANE_DROP_OVERLAY.heightMaxPct),
-  );
-  return { w, h };
-};
+}
 
-const resolvePaneDropZoneFromOverlay = (
-  clientX: number,
-  clientY: number,
-  bounds: Pick<DOMRect, "left" | "top" | "width" | "height">,
-): PaneDropZone => {
-  const { w, h } = getPaneDropOverlaySize(bounds.width, bounds.height);
-  const left = bounds.left + (bounds.width - w) / 2;
-  const top = bounds.top + (bounds.height - h) / 2;
-  const lx = Math.max(0, Math.min(w, clientX - left));
-  const ly = Math.max(0, Math.min(h, clientY - top));
+function syncSidebarHostWithStore(
+  host: HostConfig,
+  draft: HostBinding,
+  storeKeys: SshKeyObject[],
+  storeUsers: UserObject[],
+  allHosts: HostConfig[],
+): { host: HostConfig; binding: HostBinding } {
+  let r = normalizeHostIdentityWithBinding(host, draft, storeKeys);
+  r = normalizeHostUserWithBinding(r.host, r.binding, storeUsers);
+  r = normalizeHostProxyJumpWithBinding(r.host, r.binding, jumpHostCandidates(allHosts, host.host));
+  return r;
+}
 
-  const { frSum, gapPx } = PANE_DROP_OVERLAY;
-  const trackW = w - 2 * gapPx;
-  const trackH = h - 2 * gapPx;
-  const col0w = (trackW * 1) / frSum;
-  const col1w = (trackW * 1.2) / frSum;
-  const row0h = (trackH * 1) / frSum;
-  const row1h = (trackH * 1.2) / frSum;
-  const x1 = col0w;
-  const x2 = col0w + gapPx + col1w;
-  const y1 = row0h;
-  const y2 = row0h + gapPx + row1h;
-
-  const col = lx < x1 ? 0 : lx < x2 ? 1 : 2;
-  const row = ly < y1 ? 0 : ly < y2 ? 1 : 2;
-
-  if (row === 1 && col === 1) return "center";
-  if (row === 0 && col === 1) return "top";
-  if (row === 2 && col === 1) return "bottom";
-  if (row === 1 && col === 0) return "left";
-  if (row === 1 && col === 2) return "right";
-
-  const midTop = { x: w / 2, y: 0 };
-  const midBottom = { x: w / 2, y: h };
-  const midLeft = { x: 0, y: h / 2 };
-  const midRight = { x: w, y: h / 2 };
-  const dist = (ax: number, ay: number) => Math.hypot(lx - ax, ly - ay);
-
-  if (row === 0 && col === 0) {
-    return dist(midTop.x, midTop.y) < dist(midLeft.x, midLeft.y) ? "top" : "left";
+/** Dirty check for the host whose inline sidebar settings row is open (`openHostMenuHostAlias`). */
+function isSidebarHostSettingsDirty(
+  menuAlias: string,
+  hosts: HostConfig[],
+  metadataHosts: HostMetadataStore["hosts"],
+  currentHost: HostConfig,
+  tagDraft: string,
+  hostKeyPolicyDraft: StrictHostKeyPolicy,
+  entityStore: EntityStore,
+  sidebarHostBindingDraft: HostBinding,
+): boolean {
+  if (!menuAlias.trim()) {
+    return false;
   }
-  if (row === 0 && col === 2) {
-    return dist(midTop.x, midTop.y) < dist(midRight.x, midRight.y) ? "top" : "right";
+  const saved = hosts.find((h) => h.host === menuAlias);
+  if (!saved) {
+    return false;
   }
-  if (row === 2 && col === 0) {
-    return dist(midBottom.x, midBottom.y) < dist(midLeft.x, midLeft.y) ? "bottom" : "left";
+  if (currentHost.host !== menuAlias) {
+    return true;
   }
-  return dist(midBottom.x, midBottom.y) < dist(midRight.x, midRight.y) ? "bottom" : "right";
-};
-
-const createEmptyWorkspaceSnapshot = (id: string, name: string): WorkspaceSnapshot => {
-  const splitSlots = createInitialPaneState();
-  return {
-    id,
-    name,
-    splitSlots,
-    paneLayouts: createPaneLayoutsFromSlots(splitSlots),
-    splitTree: createLeafNode(0),
-    activePaneIndex: 0,
-    activeSessionId: "",
-  };
-};
-const collectPaneOrder = (node: SplitTreeNode): number[] =>
-  node.type === "leaf" ? [node.paneIndex] : [...collectPaneOrder(node.first), ...collectPaneOrder(node.second)];
-
-/** Places a new session into a workspace snapshot (free pane or new split). Used for host connect → chosen workspace. */
-const appendSessionToWorkspaceSnapshot = (
-  targetSnapshot: WorkspaceSnapshot,
-  sessionId: string,
-  splitRatioDefaultValue: number,
-): WorkspaceSnapshot => {
-  const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
-  const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
-  const nextTargetPaneIndex =
-    typeof firstFreePaneIndex === "number"
-      ? firstFreePaneIndex
-      : Math.max(-1, ...targetPaneOrder) + 1;
-  const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
-  const nextTargetPaneLayouts = clonePaneLayouts(targetSnapshot.paneLayouts);
-  if (!nextTargetPaneLayouts[nextTargetPaneIndex]) {
-    nextTargetPaneLayouts[nextTargetPaneIndex] = createPaneLayoutItem();
+  if (!hostConfigsEqual(currentHost, saved)) {
+    return true;
   }
-  const nextTargetSplitTree: SplitTreeNode =
-    typeof firstFreePaneIndex === "number"
-      ? cloneSplitTree(targetSnapshot.splitTree)
-      : {
-          id: `split-workspace-${createId()}`,
-          type: "split",
-          axis: "vertical",
-          ratio: splitRatioDefaultValue,
-          first: cloneSplitTree(targetSnapshot.splitTree),
-          second: createLeafNode(nextTargetPaneIndex),
-        };
-  return {
-    ...cloneWorkspaceSnapshot(targetSnapshot),
-    splitSlots: nextTargetSlots,
-    paneLayouts: nextTargetPaneLayouts,
-    splitTree: nextTargetSplitTree,
-    activePaneIndex: nextTargetPaneIndex,
-    activeSessionId: sessionId,
-  };
-};
-
-const replacePaneInTree = (
-  node: SplitTreeNode,
-  targetPaneIndex: number,
-  createReplacement: (leaf: SplitLeafNode) => SplitTreeNode,
-): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node.paneIndex === targetPaneIndex ? createReplacement(node) : node;
+  const savedBinding = sidebarSavedHostBinding(menuAlias, hosts, entityStore, metadataHosts);
+  if (sidebarBindingPickerDirty(sidebarHostBindingDraft, savedBinding)) {
+    return true;
   }
-  return {
-    ...node,
-    first: replacePaneInTree(node.first, targetPaneIndex, createReplacement),
-    second: replacePaneInTree(node.second, targetPaneIndex, createReplacement),
-  };
-};
-const updateSplitRatioInTree = (node: SplitTreeNode, splitId: string, ratio: number): SplitTreeNode => {
-  if (node.type === "leaf") {
-    return node;
+  const savedTags = [...(metadataHosts[menuAlias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
+  const draftTags = parseHostTagDraftToSortedTags(tagDraft);
+  if (savedTags.length !== draftTags.length) {
+    return true;
   }
-  if (node.id === splitId) {
-    return { ...node, ratio: Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio)) };
+  if (savedTags.some((t, i) => t !== draftTags[i])) {
+    return true;
   }
-  return {
-    ...node,
-    first: updateSplitRatioInTree(node.first, splitId, ratio),
-    second: updateSplitRatioInTree(node.second, splitId, ratio),
-  };
-};
-const removePaneFromTree = (node: SplitTreeNode, targetPane: number): SplitTreeNode | null => {
-  if (node.type === "leaf") {
-    return node.paneIndex === targetPane ? null : node;
-  }
-  const nextFirst = removePaneFromTree(node.first, targetPane);
-  const nextSecond = removePaneFromTree(node.second, targetPane);
-  if (!nextFirst && !nextSecond) {
-    return null;
-  }
-  if (!nextFirst) {
-    return nextSecond;
-  }
-  if (!nextSecond) {
-    return nextFirst;
-  }
-  return {
-    ...node,
-    first: nextFirst,
-    second: nextSecond,
-  };
-};
-const createTreeFromPaneCount = (paneCount: number): SplitTreeNode => {
-  const count = Math.max(1, paneCount);
-  let tree: SplitTreeNode = createLeafNode(0);
-  for (let paneIndex = 1; paneIndex < count; paneIndex += 1) {
-    tree = {
-      id: `split-${paneIndex}`,
-      type: "split",
-      axis: "vertical",
-      ratio: DEFAULT_SPLIT_RATIO,
-      first: tree,
-      second: createLeafNode(paneIndex),
-    };
-  }
-  return tree;
-};
-const serializeSplitTree = (node: SplitTreeNode): LayoutSplitTreeNode => {
-  if (node.type === "leaf") {
-    return {
-      id: node.id,
-      type: "leaf",
-      paneIndex: node.paneIndex,
-    };
-  }
-  return {
-    id: node.id,
-    type: "split",
-    axis: node.axis,
-    ratio: node.ratio,
-    first: serializeSplitTree(node.first),
-    second: serializeSplitTree(node.second),
-  };
-};
-const parseSplitTree = (raw: LayoutSplitTreeNode | null | undefined): SplitTreeNode | null => {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-  if (raw.type === "leaf") {
-    if (typeof raw.paneIndex !== "number" || !Number.isInteger(raw.paneIndex) || raw.paneIndex < 0) {
-      return null;
-    }
-    return createLeafNode(raw.paneIndex);
-  }
-  if (raw.type === "split") {
-    const first = parseSplitTree(raw.first);
-    const second = parseSplitTree(raw.second);
-    if (!first || !second) {
-      return null;
-    }
-    return {
-      id: typeof raw.id === "string" && raw.id.length > 0 ? raw.id : `split-fallback`,
-      type: "split",
-      axis: raw.axis === "horizontal" ? "horizontal" : "vertical",
-      ratio:
-        typeof raw.ratio === "number" && Number.isFinite(raw.ratio)
-          ? Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, raw.ratio))
-          : DEFAULT_SPLIT_RATIO,
-      first,
-      second,
-    };
-  }
-  return null;
-};
+  const savedMeta = metadataHosts[menuAlias] ?? createDefaultHostMetadata();
+  return hostKeyPolicyDraft !== effectiveStrictHostKeyPolicy(savedMeta);
+}
 
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
@@ -667,9 +399,17 @@ export function App() {
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
   const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
+  const [keyboardShortcutChords, setKeyboardShortcutChords] = useState<Record<KeyboardShortcutCommandId, KeyChord>>(() =>
+    mergeChordMap(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
+  );
+  const [keyboardLeaderChord, setKeyboardLeaderChord] = useState<KeyChord>(() =>
+    effectiveLeaderChord(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
+  );
+  const [sshConfigRaw, setSshConfigRaw] = useState<string>("");
+  const [sshDirInfo, setSshDirInfo] = useState<SshDirInfo | null>(null);
+  const [sshDirOverrideDraft, setSshDirOverrideDraft] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<HostStatusFilter>("all");
-  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
   const [recentOnly, setRecentOnly] = useState<boolean>(false);
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>("all");
   const [portFilter, setPortFilter] = useState<string>("");
@@ -683,6 +423,9 @@ export function App() {
   const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
   const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
   const [tagDraft, setTagDraft] = useState<string>("");
+  const [hostKeyPolicyDraft, setHostKeyPolicyDraft] = useState<StrictHostKeyPolicy>("ask");
+  const [sidebarHostBindingDraft, setSidebarHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
+  const [addHostBindingDraft, setAddHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupExportPassword, setBackupExportPassword] = useState<string>("");
@@ -691,6 +434,10 @@ export function App() {
   const [trustPromptQueue, setTrustPromptQueue] = useState<TrustPromptRequest[]>([]);
   const [saveTrustHostAsDefault, setSaveTrustHostAsDefault] = useState<boolean>(true);
   const [splitSlots, setSplitSlots] = useState<Array<string | null>>(() => createInitialPaneState());
+  /** Per SSH/local session: file browser vs terminal (keyed by session id so layout changes do not remap views). */
+  const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
+  /** Gated by built-in plugin `dev.nosuckshell.plugin.file-workspace` (Settings → Plugins & license). */
+  const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -716,6 +463,10 @@ export function App() {
   const [layoutProfileName, setLayoutProfileName] = useState<string>("");
   const [saveLayoutWithHosts, setSaveLayoutWithHosts] = useState<boolean>(false);
   const [isLayoutCommandCenterOpen, setIsLayoutCommandCenterOpen] = useState<boolean>(false);
+  const [layoutTargetWorkspaceId, setLayoutTargetWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
+  const [layoutSwitchToTargetAfterApply, setLayoutSwitchToTargetAfterApply] = useState<boolean>(false);
+  const [layoutMirrorWorkspaceIdOnSave, setLayoutMirrorWorkspaceIdOnSave] = useState<string>("");
+  const layoutCommandCenterWasOpenRef = useRef<boolean>(false);
   const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
@@ -758,6 +509,33 @@ export function App() {
     }
     const persisted = window.localStorage.getItem(FRAME_MODE_PRESET_STORAGE_KEY);
     return persisted === "cleaner" || persisted === "clearer" || persisted === "balanced" ? persisted : "balanced";
+  });
+  const [showFullPathInFilePaneTitle, setShowFullPathInFilePaneTitle] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY) === "true";
+  });
+  const [filePaneSemanticNameColors, setFilePaneSemanticNameColors] = useState<FilePaneSemanticNameColorsStored>(() =>
+    readFilePaneSemanticNameColorsFromStorage(),
+  );
+  const [fileExportDestMode, setFileExportDestMode] = useState<FileExportDestMode>(() => {
+    if (typeof window === "undefined") {
+      return "fixed";
+    }
+    return parseFileExportDestMode(window.localStorage.getItem(FILE_EXPORT_DEST_MODE_STORAGE_KEY));
+  });
+  const [fileExportPathKey, setFileExportPathKey] = useState<string>(() => {
+    if (typeof window === "undefined") {
+      return "Downloads";
+    }
+    return window.localStorage.getItem(FILE_EXPORT_PATH_KEY_STORAGE_KEY) ?? "Downloads";
+  });
+  const [fileExportArchiveFormat, setFileExportArchiveFormat] = useState<FileExportArchiveFormat>(() => {
+    if (typeof window === "undefined") {
+      return "tarGz";
+    }
+    return parseFileExportArchiveFormat(window.localStorage.getItem(FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY));
   });
   const [terminalFontOffset, setTerminalFontOffset] = useState<number>(() => {
     if (typeof window === "undefined") {
@@ -852,11 +630,15 @@ export function App() {
   const orphanSeenSessionIdsRef = useRef<Set<string>>(new Set());
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
+  const localFilePanePathsRef = useRef<Record<number, string>>({});
+  const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
+  const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
   const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const lastAutoArrangeBeforeFreeRef = useRef<AutoArrangeActiveMode>("c");
+  const prevAppSettingsOpenRef = useRef(false);
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
   const shouldSplitAsEmpty = (
@@ -937,14 +719,54 @@ export function App() {
         .filter((workspace): workspace is WorkspaceSnapshot => Boolean(workspace)),
     [workspaceOrder, workspaceSnapshots],
   );
+  const layoutCommandWorkspaceOptions = useMemo(
+    () => workspaceTabs.map((workspace) => ({ id: workspace.id, name: workspace.name })),
+    [workspaceTabs],
+  );
+  const resolvedLayoutTargetWorkspaceId = useMemo(() => {
+    if (workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)) {
+      return layoutTargetWorkspaceId;
+    }
+    return activeWorkspaceId;
+  }, [activeWorkspaceId, layoutTargetWorkspaceId, workspaceTabs]);
+  useEffect(() => {
+    if (isLayoutCommandCenterOpen && !layoutCommandCenterWasOpenRef.current) {
+      setLayoutTargetWorkspaceId(activeWorkspaceId);
+      setLayoutSwitchToTargetAfterApply(false);
+      setLayoutMirrorWorkspaceIdOnSave("");
+    }
+    layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
+  }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
+
+  const refreshFileWorkspacePlugin = useCallback(async () => {
+    try {
+      const rows = await listPlugins();
+      const row = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
+      setFileWorkspacePluginEnabled(row ? row.enabled && row.entitlementOk : true);
+    } catch {
+      setFileWorkspacePluginEnabled(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshFileWorkspacePlugin();
+  }, [refreshFileWorkspacePlugin]);
+
+  useEffect(() => {
+    if (prevAppSettingsOpenRef.current && !isAppSettingsOpen) {
+      void refreshFileWorkspacePlugin();
+    }
+    prevAppSettingsOpenRef.current = isAppSettingsOpen;
+  }, [isAppSettingsOpen, refreshFileWorkspacePlugin]);
+
+  useEffect(() => {
+    if (!fileWorkspacePluginEnabled) {
+      setSessionFileViews({});
+    }
+  }, [fileWorkspacePluginEnabled]);
+
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
-  const activeHostMetadata = useMemo(() => {
-    if (!activeHost) {
-      return createDefaultHostMetadata();
-    }
-    return metadataStore.hosts[activeHost] ?? createDefaultHostMetadata();
-  }, [activeHost, metadataStore.hosts]);
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
     for (const metadata of Object.values(metadataStore.hosts)) {
@@ -1002,9 +824,6 @@ export function App() {
         if (statusFilter === "disconnected" && row.connected) {
           return false;
         }
-        if (favoritesOnly && !row.metadata.favorite) {
-          return false;
-        }
         if (selectedTagFilter !== "all" && !row.metadata.tags.includes(selectedTagFilter)) {
           return false;
         }
@@ -1056,7 +875,7 @@ export function App() {
         }
         return a.host.host.localeCompare(b.host.host);
       });
-  }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
+  }, [hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
   const connectedHostRows = useMemo(
     () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => row.connected)),
     [filteredHostRows],
@@ -1120,31 +939,59 @@ export function App() {
     },
     [hosts, metadataStore.defaultUser],
   );
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
-  useEffect(() => {
-    metadataStoreRef.current = metadataStore;
-  }, [metadataStore]);
-  useEffect(() => {
-    quickConnectAutoTrustRef.current = quickConnectAutoTrust;
-  }, [quickConnectAutoTrust]);
+  useAppRefSync({
+    sessionsRef,
+    sessions,
+    metadataStoreRef,
+    metadataStore,
+    quickConnectAutoTrustRef,
+    quickConnectAutoTrust,
+  });
   useEffect(() => {
     if (!activeTrustPrompt) {
       return;
     }
     setSaveTrustHostAsDefault(true);
   }, [activeTrustPrompt?.sessionId]);
-  const resolvePaneIdentity = useCallback(
-    (paneIndex: number): string => {
+  const onFilePaneTitleChange = useCallback((paneIndex: number, payload: { short: string; full: string } | null) => {
+    if (payload === null) {
+      delete filePaneTitlesRef.current[paneIndex];
+    } else {
+      filePaneTitlesRef.current[paneIndex] = payload;
+    }
+    setFilePaneTitleEpoch((n) => n + 1);
+  }, []);
+
+  const resolvePaneLabel = useCallback(
+    (paneIndex: number): { display: string; title: string } => {
       const paneSessionId = splitSlots[paneIndex] ?? null;
       if (!paneSessionId) {
-        return "Drop it on me";
+        const t = "Drop it on me";
+        return { display: t, title: t };
+      }
+      const fileView = fileWorkspacePluginEnabled ? (sessionFileViews[paneSessionId] ?? "terminal") : "terminal";
+      if (fileView === "local" || fileView === "remote") {
+        const payload = filePaneTitlesRef.current[paneIndex];
+        if (payload) {
+          return {
+            display: showFullPathInFilePaneTitle ? payload.full : payload.short,
+            title: payload.full,
+          };
+        }
       }
       const paneSession = sessionById.get(paneSessionId) ?? null;
-      return resolveSessionTitle(paneSession);
+      const label = resolveSessionTitle(paneSession);
+      return { display: label, title: label };
     },
-    [resolveSessionTitle, sessionById, splitSlots],
+    [
+      resolveSessionTitle,
+      sessionById,
+      splitSlots,
+      sessionFileViews,
+      showFullPathInFilePaneTitle,
+      filePaneTitleEpoch,
+      fileWorkspacePluginEnabled,
+    ],
   );
   const load = async () => {
     const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles, loadedStore] = await Promise.all([
@@ -1158,7 +1005,7 @@ export function App() {
     setMetadataStore(loadedMetadata);
     setLayoutProfiles(loadedProfiles);
     setViewProfiles(loadedViewProfiles);
-    setEntityStore(loadedStore);
+    setEntityStore(normalizeEntityStore(loadedStore));
     setSelectedLayoutProfileId((prev) => {
       if (prev && loadedProfiles.some((profile) => profile.id === prev)) {
         return prev;
@@ -1179,79 +1026,80 @@ export function App() {
     });
   };
 
+  const handleSaveSshConfig = useCallback(async () => {
+    setError("");
+    try {
+      await saveSshConfigRaw(sshConfigRaw);
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }, [sshConfigRaw]);
+
   useEffect(() => {
     void load().catch((e: unknown) => setError(String(e)));
   }, []);
+
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!isAppSettingsOpen || activeAppSettingsTab !== "ssh") {
       return;
     }
-    const raw = window.localStorage.getItem(WORKSPACES_STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as {
-        order?: string[];
-        activeWorkspaceId?: string;
-        snapshots?: Record<string, WorkspaceSnapshot>;
-      };
-      const order = Array.isArray(parsed.order) ? parsed.order.filter((entry): entry is string => typeof entry === "string") : [];
-      const snapshots = parsed.snapshots ?? {};
-      if (order.length === 0) {
-        return;
-      }
-      const normalizedOrder = order.filter((workspaceId) => {
-        const snapshot = snapshots[workspaceId];
-        return Boolean(snapshot && Array.isArray(snapshot.splitSlots) && snapshot.splitTree);
-      });
-      if (normalizedOrder.length === 0) {
-        return;
-      }
-      const normalizedSnapshots = normalizedOrder.reduce<Record<string, WorkspaceSnapshot>>((acc, workspaceId) => {
-        const snapshot = snapshots[workspaceId];
-        if (!snapshot) {
-          return acc;
+    let cancelled = false;
+    void Promise.all([getSshConfigRaw(), getSshDirInfo()])
+      .then(([raw, info]) => {
+        if (!cancelled) {
+          setSshConfigRaw(raw);
+          setSshDirInfo(info);
+          setSshDirOverrideDraft(info.overridePath ?? "");
         }
-        acc[workspaceId] = {
-          ...snapshot,
-          id: snapshot.id || workspaceId,
-          name: snapshot.name || workspaceId,
-          splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
-          paneLayouts: Array.isArray(snapshot.paneLayouts)
-            ? snapshot.paneLayouts.map((entry) => ({ ...entry }))
-            : createPaneLayoutsFromSlots(createInitialPaneState()),
-          splitTree: snapshot.splitTree ? cloneSplitTree(snapshot.splitTree) : createLeafNode(0),
-          activePaneIndex: Number.isInteger(snapshot.activePaneIndex) ? snapshot.activePaneIndex : 0,
-          activeSessionId: typeof snapshot.activeSessionId === "string" ? snapshot.activeSessionId : "",
-        };
-        return acc;
-      }, {});
-      const fallbackWorkspaceId = normalizedOrder[0] ?? DEFAULT_WORKSPACE_ID;
-      const nextActiveWorkspaceId =
-        typeof parsed.activeWorkspaceId === "string" && normalizedSnapshots[parsed.activeWorkspaceId]
-          ? parsed.activeWorkspaceId
-          : fallbackWorkspaceId;
-      const nextActiveSnapshot = normalizedSnapshots[nextActiveWorkspaceId];
-      if (!nextActiveSnapshot) {
-        return;
-      }
-      isApplyingWorkspaceSnapshotRef.current = true;
-      setWorkspaceOrder(normalizedOrder);
-      setWorkspaceSnapshots(normalizedSnapshots);
-      setActiveWorkspaceId(nextActiveWorkspaceId);
-      setSplitSlots([...nextActiveSnapshot.splitSlots]);
-      setPaneLayouts(clonePaneLayouts(nextActiveSnapshot.paneLayouts));
-      setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
-      setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
-      setActiveSession(nextActiveSnapshot.activeSessionId);
-      queueMicrotask(() => {
-        isApplyingWorkspaceSnapshotRef.current = false;
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(String(e));
+        }
       });
-    } catch {
-      // ignore broken persisted workspace data
+    return () => {
+      cancelled = true;
+    };
+  }, [isAppSettingsOpen, activeAppSettingsTab]);
+
+  const handleApplySshDirOverride = useCallback(async () => {
+    setError("");
+    try {
+      const t = sshDirOverrideDraft.trim();
+      await setSshDirOverride(t === "" ? null : t);
+      const info = await getSshDirInfo();
+      setSshDirInfo(info);
+      setSshDirOverrideDraft(info.overridePath ?? "");
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
+    }
+  }, [sshDirOverrideDraft]);
+
+  const handleResetSshDirOverride = useCallback(async () => {
+    setError("");
+    try {
+      await setSshDirOverride(null);
+      const info = await getSshDirInfo();
+      setSshDirInfo(info);
+      setSshDirOverrideDraft("");
+      await load();
+    } catch (e: unknown) {
+      setError(String(e));
     }
   }, []);
+  useWorkspaceBootstrapFromStorage({
+    isApplyingWorkspaceSnapshotRef,
+    setWorkspaceOrder,
+    setWorkspaceSnapshots,
+    setActiveWorkspaceId,
+    setSplitSlots,
+    setPaneLayouts,
+    setSplitTree,
+    setActivePaneIndex,
+    setActiveSession,
+  });
 
   const storeUsers = useMemo<UserObject[]>(() => Object.values(entityStore.users), [entityStore.users]);
   const storeGroups = useMemo<GroupObject[]>(() => Object.values(entityStore.groups), [entityStore.groups]);
@@ -1301,7 +1149,17 @@ export function App() {
       ...entityStore,
       users: {
         ...entityStore.users,
-        [id]: { id, name: username, username, createdAt: now, updatedAt: now },
+        [id]: {
+          id,
+          name: username,
+          username,
+          hostName: "",
+          proxyJump: "",
+          keyRefs: [],
+          tagIds: [],
+          createdAt: now,
+          updatedAt: now,
+        },
       },
       updatedAt: now,
     };
@@ -1320,7 +1178,7 @@ export function App() {
       ...entityStore,
       groups: {
         ...entityStore.groups,
-        [id]: { id, name, memberUserIds: [], createdAt: now, updatedAt: now },
+        [id]: { id, name, memberUserIds: [], tagIds: [], createdAt: now, updatedAt: now },
       },
       updatedAt: now,
     };
@@ -1347,6 +1205,258 @@ export function App() {
     await persistEntityStore(next);
   }, [entityStore, persistEntityStore, storeTagDraft]);
 
+  const importStoreUsersFromHosts = useCallback(async () => {
+    const seen = new Set(
+      storeUsers.map((u) => (u.username || u.name).trim().toLowerCase()).filter(Boolean),
+    );
+    let next: EntityStore = { ...entityStore, users: { ...entityStore.users } };
+    const now = Date.now();
+    let added = false;
+    for (const h of hosts) {
+      const u = h.user?.trim();
+      if (!u) {
+        continue;
+      }
+      const key = u.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const id = `user-${createId()}`;
+      next.users[id] = {
+        id,
+        name: u,
+        username: u,
+        hostName: "",
+        proxyJump: "",
+        keyRefs: [],
+        tagIds: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      added = true;
+    }
+    if (!added) {
+      return;
+    }
+    next.updatedAt = now;
+    await persistEntityStore(next);
+  }, [entityStore, hosts, persistEntityStore, storeUsers]);
+
+  const updateStoreUser = useCallback(
+    async (
+      userId: string,
+      patch: Partial<Pick<UserObject, "name" | "username" | "hostName" | "proxyJump" | "keyRefs" | "tagIds">>,
+    ) => {
+      const cur = entityStore.users[userId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        users: {
+          ...entityStore.users,
+          [userId]: { ...cur, ...patch, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreUser = useCallback(
+    async (userId: string) => {
+      const nextUsers = { ...entityStore.users };
+      delete nextUsers[userId];
+      const nextGroups: EntityStore["groups"] = Object.fromEntries(
+        Object.entries(entityStore.groups).map(([gid, g]) => [
+          gid,
+          { ...g, memberUserIds: g.memberUserIds.filter((id) => id !== userId), updatedAt: Date.now() },
+        ]),
+      );
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          b.userId === userId ? { ...b, userId: undefined } : b,
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        users: nextUsers,
+        groups: nextGroups,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const setStoreUserGroupMembership = useCallback(
+    async (userId: string, groupIds: string[]) => {
+      const now = Date.now();
+      const want = new Set(groupIds);
+      const nextGroups = { ...entityStore.groups };
+      for (const [gid, g] of Object.entries(nextGroups)) {
+        const has = g.memberUserIds.includes(userId);
+        const should = want.has(gid);
+        if (has === should) {
+          continue;
+        }
+        nextGroups[gid] = {
+          ...g,
+          memberUserIds: should
+            ? [...g.memberUserIds, userId]
+            : g.memberUserIds.filter((id) => id !== userId),
+          updatedAt: now,
+        };
+      }
+      await persistEntityStore({ ...entityStore, groups: nextGroups, updatedAt: now });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const updateStoreGroup = useCallback(
+    async (groupId: string, patch: Partial<Pick<GroupObject, "name" | "memberUserIds" | "tagIds">>) => {
+      const cur = entityStore.groups[groupId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        groups: {
+          ...entityStore.groups,
+          [groupId]: { ...cur, ...patch, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreGroup = useCallback(
+    async (groupId: string) => {
+      const nextGroups = { ...entityStore.groups };
+      delete nextGroups[groupId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          { ...b, groupIds: b.groupIds.filter((id) => id !== groupId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        groups: nextGroups,
+        hostBindings: nextBindings,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const updateStoreTag = useCallback(
+    async (tagId: string, name: string) => {
+      const cur = entityStore.tags[tagId];
+      if (!cur) {
+        return;
+      }
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return;
+      }
+      const now = Date.now();
+      await persistEntityStore({
+        ...entityStore,
+        tags: {
+          ...entityStore.tags,
+          [tagId]: { ...cur, name: trimmed, updatedAt: now },
+        },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const deleteStoreTag = useCallback(
+    async (tagId: string) => {
+      const nextTags = { ...entityStore.tags };
+      delete nextTags[tagId];
+      const nextBindings: EntityStore["hostBindings"] = Object.fromEntries(
+        Object.entries(entityStore.hostBindings).map(([alias, b]) => [
+          alias,
+          { ...b, tagIds: b.tagIds.filter((id) => id !== tagId) },
+        ]),
+      );
+      const nextUsers: EntityStore["users"] = Object.fromEntries(
+        Object.entries(entityStore.users).map(([id, u]) => [
+          id,
+          { ...u, tagIds: u.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      const nextGroups: EntityStore["groups"] = Object.fromEntries(
+        Object.entries(entityStore.groups).map(([id, g]) => [
+          id,
+          { ...g, tagIds: g.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      const nextKeys: EntityStore["keys"] = Object.fromEntries(
+        Object.entries(entityStore.keys).map(([kid, k]) => [
+          kid,
+          { ...k, tagIds: k.tagIds.filter((tid) => tid !== tagId) },
+        ]),
+      );
+      await persistEntityStore({
+        ...entityStore,
+        tags: nextTags,
+        hostBindings: nextBindings,
+        users: nextUsers,
+        groups: nextGroups,
+        keys: nextKeys,
+        updatedAt: Date.now(),
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const patchStoreKey = useCallback(
+    async (keyId: string, patch: { tagIds: string[] }) => {
+      const cur = entityStore.keys[keyId];
+      if (!cur) {
+        return;
+      }
+      const now = Date.now();
+      const nextKey: SshKeyObject =
+        cur.type === "path"
+          ? { ...cur, tagIds: patch.tagIds, updatedAt: now }
+          : { ...cur, tagIds: patch.tagIds, updatedAt: now };
+      await persistEntityStore({
+        ...entityStore,
+        keys: { ...entityStore.keys, [keyId]: nextKey },
+        updatedAt: now,
+      });
+    },
+    [entityStore, persistEntityStore],
+  );
+
+  const reorderUserStoreKeys = useCallback(
+    async (userId: string, index: number, direction: "up" | "down") => {
+      const user = entityStore.users[userId];
+      if (!user || user.keyRefs.length < 2) {
+        return;
+      }
+      const j = direction === "up" ? index - 1 : index + 1;
+      if (j < 0 || j >= user.keyRefs.length) {
+        return;
+      }
+      const refs = [...user.keyRefs];
+      [refs[index], refs[j]] = [refs[j], refs[index]];
+      const keyRefs = refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
+      await updateStoreUser(userId, { keyRefs });
+    },
+    [entityStore.users, updateStoreUser],
+  );
+
   const addStorePathKey = useCallback(async () => {
     const name = storePathKeyNameDraft.trim();
     const identityFilePath = storePathKeyPathDraft.trim();
@@ -1360,6 +1470,7 @@ export function App() {
       id,
       name,
       identityFilePath,
+      tagIds: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -1379,24 +1490,30 @@ export function App() {
     if (!name || !privateKeyPem) {
       return;
     }
-    const created = await createEncryptedKey(
-      name,
-      privateKeyPem,
-      storeEncryptedPublicKeyDraft.trim(),
-      storePassphrase.trim() || undefined,
-    );
-    const next: EntityStore = {
-      ...entityStore,
-      keys: {
-        ...entityStore.keys,
-        [created.id]: created,
-      },
-      updatedAt: Date.now(),
-    };
-    setStoreEncryptedKeyNameDraft("");
-    setStoreEncryptedPrivateKeyDraft("");
-    setStoreEncryptedPublicKeyDraft("");
-    await persistEntityStore(next);
+    setError("");
+    try {
+      const created = await createEncryptedKey(
+        name,
+        privateKeyPem,
+        storeEncryptedPublicKeyDraft.trim(),
+        storePassphrase.trim() || undefined,
+      );
+      const withTags = { ...created, tagIds: created.tagIds ?? [] } as SshKeyObject;
+      const next: EntityStore = {
+        ...entityStore,
+        keys: {
+          ...entityStore.keys,
+          [created.id]: withTags,
+        },
+        updatedAt: Date.now(),
+      };
+      setStoreEncryptedKeyNameDraft("");
+      setStoreEncryptedPrivateKeyDraft("");
+      setStoreEncryptedPublicKeyDraft("");
+      await persistEntityStore(next);
+    } catch (error: unknown) {
+      setError(String(error));
+    }
   }, [
     entityStore,
     persistEntityStore,
@@ -1417,10 +1534,17 @@ export function App() {
           { ...binding, keyRefs: binding.keyRefs.filter((entry) => entry.keyId !== keyId) },
         ]),
       );
+      const nextUsers: EntityStore["users"] = Object.fromEntries(
+        Object.entries(entityStore.users).map(([id, user]) => [
+          id,
+          { ...user, keyRefs: user.keyRefs.filter((entry) => entry.keyId !== keyId) },
+        ]),
+      );
       await persistEntityStore({
         ...entityStore,
         keys: nextKeys,
         hostBindings: nextBindings,
+        users: nextUsers,
         updatedAt: Date.now(),
       });
     },
@@ -1429,7 +1553,12 @@ export function App() {
 
   const unlockStoreKey = useCallback(
     async (keyId: string) => {
-      await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+      setError("");
+      try {
+        await unlockKeyMaterial(keyId, storePassphrase.trim() || undefined);
+      } catch (error: unknown) {
+        setError(String(error));
+      }
     },
     [storePassphrase],
   );
@@ -1452,53 +1581,30 @@ export function App() {
   }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
 
 
+  useSessionOutputTrustListener({
+    sessionsRef,
+    quickConnectAutoTrustRef,
+    metadataStoreRef,
+    setError,
+    setTrustPromptQueue,
+  });
+
   useEffect(() => {
-    if (!hasTauriTransformCallback()) {
+    if (import.meta.env.VITE_E2E === "true") {
       return;
     }
-    let unlisten: UnlistenFn | null = null;
-    void listen<SessionOutputEvent>("session-output", (event) => {
-      if (!event.payload.host_key_prompt) {
-        return;
-      }
-      const sessionId = event.payload.session_id;
-      const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
-      if (session?.kind === "sshQuick" && quickConnectAutoTrustRef.current) {
-        void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
-        return;
-      }
-      const trustHostAlias = session?.kind === "sshSaved" ? session.hostAlias : "";
-      if (trustHostAlias) {
-        const metadata = metadataStoreRef.current.hosts[trustHostAlias] ?? null;
-        if (metadata?.trustHostDefault) {
-          void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
-          return;
-        }
-      }
-      const promptHostLabel =
-        session?.kind === "sshSaved"
-          ? session.hostAlias
-          : session?.kind === "sshQuick"
-            ? session.label
-            : session?.kind === "local"
-              ? "local-shell"
-              : "unknown";
-      setTrustPromptQueue((prev) => {
-        if (prev.some((entry) => entry.sessionId === sessionId)) {
-          return prev;
-        }
-        return [...prev, { sessionId, hostAlias: promptHostLabel }];
+    let unlisten: (() => void) | undefined;
+    void listen<FileDragPayload>("nossuck-file-clipboard", (ev) => {
+      setFileTransferClipboardFromEvent(ev.payload as FileDragPayload);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        /* plain Vite preview without Tauri */
       });
-    }).then((fn) => {
-      unlisten = fn;
-    }).catch(() => {
-      // Tauri event bridge can be temporarily unavailable during dev reload.
-    });
-
     return () => {
-      if (unlisten) {
-        void unlisten();
-      }
+      unlisten?.();
     };
   }, []);
 
@@ -1525,6 +1631,27 @@ export function App() {
     setBroadcastTargets((prev) => sanitizeBroadcastTargets(prev, sessionIds));
     setTrustPromptQueue((prev) => prev.filter((entry) => sessionIds.includes(entry.sessionId)));
   }, [sessionIds]);
+
+  useEffect(() => {
+    setSessionFileViews((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [sid, view] of Object.entries(prev)) {
+        if (view !== "remote") {
+          continue;
+        }
+        const session = sessions.find((s) => s.id === sid);
+        if (!session || session.kind !== "sshSaved") {
+          continue;
+        }
+        if (!hosts.some((h) => h.host === session.hostAlias)) {
+          delete next[sid];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [hosts, sessions]);
 
   useEffect(() => {
     const assignedSessionIds = new Set<string>([
@@ -1768,6 +1895,24 @@ export function App() {
     window.localStorage.setItem(FRAME_MODE_PRESET_STORAGE_KEY, frameModePreset);
   }, [frameModePreset]);
   useEffect(() => {
+    window.localStorage.setItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY, String(showFullPathInFilePaneTitle));
+  }, [showFullPathInFilePaneTitle]);
+  useEffect(() => {
+    writeFilePaneSemanticNameColorsToStorage(filePaneSemanticNameColors);
+  }, [filePaneSemanticNameColors]);
+  useEffect(() => {
+    applyFilePaneSemanticNameColorVarsToDocument(filePaneSemanticNameColors.colors);
+  }, [filePaneSemanticNameColors.colors]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_DEST_MODE_STORAGE_KEY, fileExportDestMode);
+  }, [fileExportDestMode]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_PATH_KEY_STORAGE_KEY, fileExportPathKey);
+  }, [fileExportPathKey]);
+  useEffect(() => {
+    window.localStorage.setItem(FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY, fileExportArchiveFormat);
+  }, [fileExportArchiveFormat]);
+  useEffect(() => {
     window.localStorage.setItem(TERMINAL_FONT_OFFSET_STORAGE_KEY, String(terminalFontOffset));
   }, [terminalFontOffset]);
   useEffect(() => {
@@ -1797,19 +1942,7 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
   }, [layoutMode]);
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(
-      WORKSPACES_STORAGE_KEY,
-      JSON.stringify({
-        order: workspaceOrder,
-        activeWorkspaceId,
-        snapshots: workspaceSnapshots,
-      }),
-    );
-  }, [activeWorkspaceId, workspaceOrder, workspaceSnapshots]);
+  useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
     if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
       return;
@@ -2006,33 +2139,137 @@ export function App() {
   }, []);
 
   const toggleHostMenu = (host: HostConfig) => {
-    setOpenHostMenuHostAlias((prev) => {
-      if (prev === host.host) {
-        return "";
+    if (openHostMenuHostAlias === host.host) {
+      setOpenHostMenuHostAlias("");
+      return;
+    }
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (
+        !window.confirm(
+          "You have unsaved changes for this host. Discard them and open another host's settings?",
+        )
+      ) {
+        return;
       }
-      setActiveHost(host.host);
-      setCurrentHost(host);
-      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-      return host.host;
-    });
+    }
+    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+      host,
+      draft,
+      storeKeys,
+      storeUsers,
+      hosts,
+    );
+    setOpenHostMenuHostAlias(host.host);
+    setActiveHost(host.host);
+    setCurrentHost(syncedHost);
+    setSidebarHostBindingDraft(syncedBinding);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
   };
 
   const openHostMenuForHost = (host: HostConfig) => {
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (
+        !window.confirm(
+          "You have unsaved changes for this host. Discard them and open another host's settings?",
+        )
+      ) {
+        return;
+      }
+    }
+    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+      host,
+      draft,
+      storeKeys,
+      storeUsers,
+      hosts,
+    );
     setActiveHost(host.host);
-    setCurrentHost(host);
+    setCurrentHost(syncedHost);
+    setSidebarHostBindingDraft(syncedBinding);
     setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
     setOpenHostMenuHostAlias(host.host);
   };
 
   const toggleHostSelection = (host: HostConfig) => {
-    setActiveHost((prev) => {
-      if (prev === host.host) {
-        return "";
+    if (activeHost === host.host) {
+      setActiveHost("");
+      if (openHostMenuHostAlias === host.host) {
+        setOpenHostMenuHostAlias("");
       }
+      return;
+    }
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (!window.confirm("You have unsaved changes for this host. Discard them and switch?")) {
+        return;
+      }
+    }
+    setActiveHost(host.host);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
+    if (openHostMenuHostAlias) {
+      const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+      const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+        host,
+        draft,
+        storeKeys,
+        storeUsers,
+        hosts,
+      );
+      setCurrentHost(syncedHost);
+      setSidebarHostBindingDraft(syncedBinding);
+      setOpenHostMenuHostAlias(host.host);
+    } else {
       setCurrentHost(host);
-      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-      return host.host;
-    });
+    }
   };
 
   const clearPendingRemoveConfirm = useCallback(() => {
@@ -2112,6 +2349,7 @@ export function App() {
     await upsertHostMetadata(hostAlias, (current) => ({
       ...current,
       tags: normalizedTags,
+      ...metadataPatchForHostKeyPolicy(hostKeyPolicyDraft),
     }));
   };
 
@@ -2136,11 +2374,15 @@ export function App() {
   const clearFilters = () => {
     setSearchQuery("");
     setStatusFilter("all");
-    setFavoritesOnly(false);
     setRecentOnly(false);
     setSelectedTagFilter("all");
     setPortFilter("");
+    setShowAdvancedFilters(false);
   };
+
+  const closeAdvancedFilters = useCallback(() => {
+    setShowAdvancedFilters(false);
+  }, []);
 
   const selectViewProfileForSettings = (profileId: string) => {
     setSelectedViewProfileIdInSettings(profileId);
@@ -2274,7 +2516,13 @@ export function App() {
     setError("");
     try {
       const normalizedAlias = currentHost.host.trim();
-      await Promise.all([saveHost(currentHost), saveTagsForHost(normalizedAlias)]);
+      await saveHost(currentHost);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [normalizedAlias]: sidebarHostBindingDraft },
+        updatedAt: Date.now(),
+      });
+      await saveTagsForHost(normalizedAlias);
       await load();
     } catch (e) {
       setError(String(e));
@@ -2304,6 +2552,8 @@ export function App() {
         const cleared = emptyHost();
         setCurrentHost(cleared);
         setTagDraft("");
+        setHostKeyPolicyDraft("ask");
+        setSidebarHostBindingDraft(createDefaultHostBinding());
       }
       if (activeHost === normalizedAlias) {
         setActiveHost("");
@@ -2331,6 +2581,7 @@ export function App() {
 
   const openAddHostModal = () => {
     setNewHostDraft(emptyHost());
+    setAddHostBindingDraft(createDefaultHostBinding());
     setIsQuickAddMenuOpen(false);
     setOpenHostMenuHostAlias("");
     setIsAddHostModalOpen(true);
@@ -2339,6 +2590,7 @@ export function App() {
   const closeAddHostModal = () => {
     setIsAddHostModalOpen(false);
     setNewHostDraft(emptyHost());
+    setAddHostBindingDraft(createDefaultHostBinding());
   };
 
   const openQuickConnectModal = (paneIndex: number | null = null) => {
@@ -2364,6 +2616,15 @@ export function App() {
     setQuickConnectWizardStep(1);
     setPendingQuickConnectPaneIndex(null);
   };
+
+  useEffect(() => {
+    const payload: StoredShortcutMap = {
+      version: 1,
+      chords: keyboardShortcutChords,
+      leaderChord: keyboardLeaderChord,
+    };
+    window.localStorage.setItem(KEYBOARD_SHORTCUTS_STORAGE_KEY, JSON.stringify(payload));
+  }, [keyboardShortcutChords, keyboardLeaderChord]);
 
   const handleSettingsHeaderPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
@@ -2391,7 +2652,13 @@ export function App() {
   const createHost = async () => {
     setError("");
     try {
+      const alias = newHostDraft.host.trim();
       await saveHost(newHostDraft);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [alias]: addHostBindingDraft },
+        updatedAt: Date.now(),
+      });
       await load();
       closeAddHostModal();
     } catch (e) {
@@ -2555,6 +2822,7 @@ export function App() {
       identityFile: normalizedDraft.identityFile,
       proxyJump: normalizedDraft.proxyJump,
       proxyCommand: normalizedDraft.proxyCommand,
+      ...(quickConnectAutoTrust ? { strictHostKeyPolicy: "accept-new" as const } : {}),
     };
   };
 
@@ -2713,7 +2981,11 @@ export function App() {
       return lastInternalDragPayloadRef.current;
     }
     try {
-      const parsed = JSON.parse(encoded) as Partial<DragPayload>;
+      const parsedObj = JSON.parse(encoded) as Record<string, unknown>;
+      if (parsedObj.kind === "local" || parsedObj.kind === "remote") {
+        return null;
+      }
+      const parsed = parsedObj as Partial<DragPayload>;
       const result =
         parsed.type === "session" && typeof parsed.sessionId === "string" && parsed.sessionId.length > 0
           ? ({ type: "session", sessionId: parsed.sessionId } as DragPayload)
@@ -2753,6 +3025,12 @@ export function App() {
           height: rawBounds.height,
         }
       : null;
+    const fileRaw = event.dataTransfer.getData(FILE_DND_PAYLOAD_MIME);
+    const filePlain = parseFileDragPayload(event.dataTransfer.getData("text/plain") || "");
+    if ((fileRaw && parseFileDragPayload(fileRaw)) || filePlain) {
+      lastInternalDragPayloadRef.current = null;
+      return;
+    }
     const payload = parseDragPayload(event);
     if (!payload) {
       lastInternalDragPayloadRef.current = null;
@@ -2853,25 +3131,27 @@ export function App() {
         const existingSession =
           sessions.find((session) => session.kind === "sshSaved" && session.hostAlias === payload.hostAlias) ?? null;
         if (existingSession) {
-          if (oldSessionId && oldSessionId !== existingSession.id) {
-            await closeSessionById(oldSessionId);
-          }
           setSplitSlots((prev) =>
             assignSessionToPane(removeSessionFromSlots(prev, existingSession.id), paneIndex, existingSession.id),
           );
           setActivePaneIndex(paneIndex);
           setActiveSession(existingSession.id);
+          if (oldSessionId && oldSessionId !== existingSession.id) {
+            await closeSessionById(oldSessionId);
+          }
           lastInternalDragPayloadRef.current = null;
           return;
         }
-        if (oldSessionId) {
-          await closeSessionById(oldSessionId);
-        }
         const newSessionId = await connectToHost(hostConfig);
-        if (newSessionId) {
-          setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, newSessionId));
-          setActivePaneIndex(paneIndex);
-          setActiveSession(newSessionId);
+        if (!newSessionId) {
+          lastInternalDragPayloadRef.current = null;
+          return;
+        }
+        setSplitSlots((prev) => assignSessionToPane(prev, paneIndex, newSessionId));
+        setActivePaneIndex(paneIndex);
+        setActiveSession(newSessionId);
+        if (oldSessionId && oldSessionId !== newSessionId) {
+          await closeSessionById(oldSessionId);
         }
         lastInternalDragPayloadRef.current = null;
         return;
@@ -2892,6 +3172,9 @@ export function App() {
   };
 
   const resolveDropEffect = (event: ReactDragEvent): DataTransfer["dropEffect"] => {
+    if (event.dataTransfer.types.includes(FILE_DND_PAYLOAD_MIME)) {
+      return "copy";
+    }
     const payload = parseDragPayload(event);
     if (!payload) {
       if (!missingDragPayloadLoggedRef.current && draggingKind !== null) {
@@ -2992,6 +3275,14 @@ export function App() {
 
   const closeSessionById = async (sessionId: string) => {
     await closeSession(sessionId);
+    setSessionFileViews((prev) => {
+      if (!(sessionId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
     setSessions((prev) => prev.filter((session) => session.id !== sessionId));
     setActiveSession((prev) => (prev === sessionId ? "" : prev));
     setSplitSlots((prev) => removeSessionFromSlots(prev, sessionId));
@@ -3048,6 +3339,7 @@ export function App() {
     );
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
+    setSessionFileViews({});
     if (withLayoutReset) {
       resetPaneLayout();
     }
@@ -3076,7 +3368,7 @@ export function App() {
       if (saveTrustHostAsDefault && promptSession?.kind === "sshSaved") {
         await upsertHostMetadata(promptSession.hostAlias, (current) => ({
           ...current,
-          trustHostDefault: true,
+          ...metadataPatchForHostKeyPolicy("accept-new"),
         }));
       }
       await sendInput(activeTrustPrompt.sessionId, "yes\n");
@@ -3126,6 +3418,7 @@ export function App() {
     setSplitSlots((prev) => clearPaneAtIndex(prev, paneIndex));
   };
   const resetPaneLayout = () => {
+    setSessionFileViews({});
     const resetSlots: Array<string | null> = [null];
     setSplitSlots(resetSlots);
     setPaneLayouts(createPaneLayoutsFromSlots(resetSlots));
@@ -3170,6 +3463,7 @@ export function App() {
   };
   const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
     isApplyingWorkspaceSnapshotRef.current = true;
+    setSessionFileViews({});
     setSplitSlots([...snapshot.splitSlots]);
     setPaneLayouts(clonePaneLayouts(snapshot.paneLayouts));
     setSplitTree(cloneSplitTree(snapshot.splitTree));
@@ -3254,6 +3548,97 @@ export function App() {
     },
     [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
   );
+
+  const applyRuntimeSplitTreeToWorkspace = useCallback(
+    (workspaceId: string, tree: SplitTreeNode) => {
+      const nextTree = cloneSplitTree(tree);
+      const nextPaneOrder = collectPaneOrder(nextTree);
+      const maxPaneIndex = Math.max(0, ...nextPaneOrder);
+      const newSlots = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
+      const nextLayouts = createPaneLayoutsFromSlots(newSlots);
+
+      if (workspaceId === activeWorkspaceId) {
+        setSplitTree(nextTree);
+        setSplitSlots(newSlots);
+        setPaneLayouts(nextLayouts);
+        setActivePaneIndex(nextPaneOrder[0] ?? 0);
+        setActiveSession("");
+        nextPaneIndexRef.current = maxPaneIndex + 1;
+        nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
+        return;
+      }
+
+      setWorkspaceSnapshots((prev) => {
+        const snap = prev[workspaceId];
+        if (!snap) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [workspaceId]: {
+            ...snap,
+            splitTree: nextTree,
+            splitSlots: newSlots,
+            paneLayouts: nextLayouts,
+            activePaneIndex: nextPaneOrder[0] ?? 0,
+            activeSessionId: "",
+          },
+        };
+      });
+    },
+    [activeWorkspaceId],
+  );
+
+  const handleApplyLayoutPresetFromCommandCenter = useCallback(
+    (serialized: LayoutSplitTreeNode) => {
+      const parsed = parseSplitTree(serialized);
+      if (!parsed) {
+        return;
+      }
+      const targetWorkspaceId = workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)
+        ? layoutTargetWorkspaceId
+        : activeWorkspaceId;
+      applyRuntimeSplitTreeToWorkspace(targetWorkspaceId, parsed);
+      if (layoutSwitchToTargetAfterApply && targetWorkspaceId !== activeWorkspaceId) {
+        switchWorkspace(targetWorkspaceId);
+      }
+      setIsLayoutCommandCenterOpen(false);
+    },
+    [
+      activeWorkspaceId,
+      applyRuntimeSplitTreeToWorkspace,
+      layoutSwitchToTargetAfterApply,
+      layoutTargetWorkspaceId,
+      switchWorkspace,
+      workspaceTabs,
+    ],
+  );
+
+  const handleApplyCustomGridFromCommandCenter = useCallback(
+    (rows: number, cols: number) => {
+      if (!isLayoutGridDimensionsValid(rows, cols)) {
+        return;
+      }
+      const tree = createEqualGridSplitTree(rows, cols);
+      const targetWorkspaceId = workspaceTabs.some((workspace) => workspace.id === layoutTargetWorkspaceId)
+        ? layoutTargetWorkspaceId
+        : activeWorkspaceId;
+      applyRuntimeSplitTreeToWorkspace(targetWorkspaceId, tree);
+      if (layoutSwitchToTargetAfterApply && targetWorkspaceId !== activeWorkspaceId) {
+        switchWorkspace(targetWorkspaceId);
+      }
+      setIsLayoutCommandCenterOpen(false);
+    },
+    [
+      activeWorkspaceId,
+      applyRuntimeSplitTreeToWorkspace,
+      layoutSwitchToTargetAfterApply,
+      layoutTargetWorkspaceId,
+      switchWorkspace,
+      workspaceTabs,
+    ],
+  );
+
   const sendSessionToWorkspace = useCallback(
     (sessionId: string, targetWorkspaceId: string) => {
       const sourcePaneIndex = splitSlots.findIndex((slot) => slot === sessionId);
@@ -3403,6 +3788,59 @@ export function App() {
       case "pane.quickConnect":
         openQuickConnectModal(paneIndex);
         break;
+      case "pane.toggleRemoteFiles": {
+        if (!fileWorkspacePluginEnabled) {
+          break;
+        }
+        const sid = splitSlots[paneIndex] ?? null;
+        if (!sid) {
+          break;
+        }
+        const session = sessions.find((s) => s.id === sid);
+        if (!session || (session.kind !== "sshSaved" && session.kind !== "sshQuick")) {
+          break;
+        }
+        setSessionFileViews((prev) => {
+          const cur = prev[sid] ?? "terminal";
+          if (cur === "remote") {
+            const next = { ...prev };
+            delete next[sid];
+            return next;
+          }
+          if (session.kind === "sshSaved") {
+            const hostEntry = hosts.find((h) => h.host === session.hostAlias);
+            if (!hostEntry) {
+              queueMicrotask(() => setError(`Host '${session.hostAlias}' not found.`));
+              return prev;
+            }
+          }
+          return { ...prev, [sid]: "remote" };
+        });
+        break;
+      }
+      case "pane.toggleLocalFiles": {
+        if (!fileWorkspacePluginEnabled) {
+          break;
+        }
+        const sidLocal = splitSlots[paneIndex] ?? null;
+        if (!sidLocal) {
+          break;
+        }
+        const sessionLocal = sessions.find((s) => s.id === sidLocal);
+        if (!sessionLocal || sessionLocal.kind !== "local") {
+          break;
+        }
+        setSessionFileViews((prev) => {
+          const cur = prev[sidLocal] ?? "terminal";
+          if (cur === "local") {
+            const next = { ...prev };
+            delete next[sidLocal];
+            return next;
+          }
+          return { ...prev, [sidLocal]: "local" };
+        });
+        break;
+      }
       case "pane.clear":
         await closeSessionInPane(paneIndex);
         break;
@@ -3478,9 +3916,11 @@ export function App() {
   };
   const revealSidebar = () => {
     clearSidebarHideTimeout();
-    if (!isSidebarPinned) {
-      setIsSidebarVisible(true);
-    }
+    setIsSidebarVisible(true);
+  };
+  const toggleHostSidebar = () => {
+    clearSidebarHideTimeout();
+    setIsSidebarVisible((prev) => !prev);
   };
   const maybeHideSidebar = () => {
     if (isSidebarPinned || isSidebarResizing) {
@@ -3493,6 +3933,128 @@ export function App() {
       hideSidebarTimeoutRef.current = null;
     }, SIDEBAR_AUTO_HIDE_DELAY_MS);
   };
+
+  const focusNextPaneFromShortcut = useCallback(() => {
+    if (paneOrder.length === 0) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    const base = idx >= 0 ? idx : 0;
+    const next = paneOrder[(base + 1) % paneOrder.length];
+    setActivePaneIndex(next);
+    const sid = splitSlots[next];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [paneOrder, activePaneIndex, splitSlots, requestTerminalFocus]);
+
+  const focusPreviousPaneFromShortcut = useCallback(() => {
+    if (paneOrder.length === 0) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    const base = idx >= 0 ? idx : 0;
+    const prev = paneOrder[(base - 1 + paneOrder.length) % paneOrder.length];
+    setActivePaneIndex(prev);
+    const sid = splitSlots[prev];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [paneOrder, activePaneIndex, splitSlots, requestTerminalFocus]);
+
+  const shortcutSnapshotRef = useRef({ overlayOpen: false });
+  const keyboardShortcutSuspendEscapeRef = useRef(false);
+  const shortcutActionsRef = useRef<KeyboardShortcutEngineActions>({
+    openSettings: () => {},
+    toggleSidebar: () => {},
+    openQuickConnect: () => {},
+    openLayoutCommandCenter: () => {},
+    focusNextPane: () => {},
+    focusPreviousPane: () => {},
+    dismissPrimaryOverlay: () => {},
+    openSettingsKeyboardTab: () => {},
+  });
+
+  shortcutSnapshotRef.current = {
+    overlayOpen:
+      Boolean(hostContextMenu) ||
+      contextMenu.visible ||
+      Boolean(activeTrustPrompt) ||
+      isQuickConnectModalOpen ||
+      isAddHostModalOpen ||
+      isLayoutCommandCenterOpen ||
+      isAppSettingsOpen,
+  };
+
+  shortcutActionsRef.current = {
+    openSettings: () => setIsAppSettingsOpen(true),
+    toggleSidebar: () => toggleHostSidebar(),
+    openQuickConnect: () => openQuickConnectModal(null),
+    openLayoutCommandCenter: () => setIsLayoutCommandCenterOpen(true),
+    focusNextPane: () => focusNextPaneFromShortcut(),
+    focusPreviousPane: () => focusPreviousPaneFromShortcut(),
+    dismissPrimaryOverlay: () => {
+      if (hostContextMenu) {
+        setHostContextMenu(null);
+        return;
+      }
+      if (contextMenu.visible) {
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+        return;
+      }
+      if (activeTrustPrompt) {
+        dismissTrustPrompt(activeTrustPrompt.sessionId);
+        return;
+      }
+      if (isQuickConnectModalOpen) {
+        closeQuickConnectModal();
+        return;
+      }
+      if (isAddHostModalOpen) {
+        closeAddHostModal();
+        return;
+      }
+      if (isLayoutCommandCenterOpen) {
+        setIsLayoutCommandCenterOpen(false);
+        return;
+      }
+      if (isAppSettingsOpen) {
+        setIsAppSettingsOpen(false);
+      }
+    },
+    openSettingsKeyboardTab: () => {
+      setIsAppSettingsOpen(true);
+      setActiveAppSettingsTab("keyboard");
+    },
+  };
+
+  useAppKeyboardShortcutEngine(
+    keyboardShortcutChords,
+    keyboardLeaderChord,
+    () => shortcutSnapshotRef.current,
+    shortcutActionsRef,
+    keyboardShortcutSuspendEscapeRef,
+  );
+
+  const resolveHelpShortcutLabel = useCallback(
+    (action: string) => {
+      const def = KEYBOARD_SHORTCUT_DEFINITIONS.find((d) => d.helpAction === action);
+      if (!def) {
+        return undefined;
+      }
+      return formatChordDisplay(keyboardShortcutChords[def.id]);
+    },
+    [keyboardShortcutChords],
+  );
+
+  const shortcutCheatsheetLines = useMemo(() => {
+    const leaderLine = { label: "Leader key (then follow-up key)", keys: formatChordDisplay(keyboardLeaderChord) };
+    const rest = KEYBOARD_SHORTCUT_DEFINITIONS.map((d) => ({
+      label: d.label,
+      keys: formatChordDisplay(keyboardShortcutChords[d.id]),
+    }));
+    return [leaderLine, ...rest];
+  }, [keyboardShortcutChords, keyboardLeaderChord]);
 
   const splitFocusedPane = (
     direction: "left" | "right" | "top" | "bottom",
@@ -3608,6 +4170,9 @@ export function App() {
   };
 
   const saveCurrentLayoutProfile = async () => {
+    const structureSnapshot = cloneSplitTree(splitTree);
+    const mirrorWorkspaceId = layoutMirrorWorkspaceIdOnSave;
+    const mirrorFromWorkspaceId = activeWorkspaceId;
     const trimmedName = layoutProfileName.trim();
     const fallbackName = selectedLayoutProfile?.name ?? `Layout ${new Date().toLocaleString()}`;
     const name = trimmedName.length > 0 ? trimmedName : fallbackName;
@@ -3668,6 +4233,13 @@ export function App() {
     setLayoutProfileName(profile.name);
     if (!next.some((entry) => entry.id === profile.id)) {
       setSelectedLayoutProfileId(next[0]?.id ?? "");
+    }
+    if (
+      mirrorWorkspaceId &&
+      mirrorWorkspaceId !== mirrorFromWorkspaceId &&
+      workspaceSnapshots[mirrorWorkspaceId]
+    ) {
+      applyRuntimeSplitTreeToWorkspace(mirrorWorkspaceId, structureSnapshot);
     }
   };
 
@@ -3760,23 +4332,6 @@ export function App() {
     nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
   };
 
-  const applyLayoutPresetTree = (serialized: LayoutSplitTreeNode) => {
-    const parsed = parseSplitTree(serialized);
-    if (!parsed) {
-      return;
-    }
-    const nextPaneOrder = collectPaneOrder(parsed);
-    const maxPaneIndex = Math.max(0, ...nextPaneOrder);
-    const newSlots = Array.from({ length: maxPaneIndex + 1 }, () => null as string | null);
-    setSplitTree(parsed);
-    setSplitSlots(newSlots);
-    setPaneLayouts(createPaneLayoutsFromSlots(newSlots));
-    setActivePaneIndex(nextPaneOrder[0] ?? 0);
-    setActiveSession("");
-    nextPaneIndexRef.current = maxPaneIndex + 1;
-    nextSplitIdRef.current = Math.max(1, nextPaneOrder.length);
-  };
-
   const deleteSelectedLayoutProfile = async () => {
     if (!selectedLayoutProfileId) {
       return;
@@ -3797,564 +4352,141 @@ export function App() {
     await deleteSelectedLayoutProfile();
   };
 
-  const renderSplitNode = (node: SplitTreeNode) => {
-    if (node.type === "leaf") {
-      const paneIndex = node.paneIndex;
-      const paneSessionId = splitSlots[paneIndex] ?? null;
-      const paneIdentity = resolvePaneIdentity(paneIndex);
-      const isHoverTarget = highlightedHostPaneIndices.has(paneIndex);
-      const isHoverDimmed = hasHighlightedHostTargets && !isHoverTarget;
-      const isDropOverlayVisible =
-        (draggingKind === "machine" || draggingKind === "session") &&
-        dragOverPaneIndex === paneIndex &&
-        activeDropZonePaneIndex === paneIndex;
-      const isSelfPaneDrop =
-        draggingKind === "session" &&
-        draggingSessionIdRef.current != null &&
-        splitSlots.findIndex((s) => s === draggingSessionIdRef.current) === paneIndex;
-      const hasPaneSession = Boolean(paneSessionId);
-      const canClosePane = paneOrder.length > 1;
-      const isPaneBroadcastTarget = paneSessionId ? broadcastTargets.has(paneSessionId) : false;
-      const isToolbarExpanded = expandedPaneToolbarIndices.has(paneIndex);
-      const allVisibleAlreadyTargeted =
-        isBroadcastModeEnabled &&
-        visiblePaneSessionIds.length > 0 &&
-        visiblePaneSessionIds.every((sessionId) => broadcastTargets.has(sessionId));
-      return (
-        <div
-          key={`pane-${paneIndex}`}
-          data-pane-index={paneIndex}
-          className={`split-pane ${activePaneIndex === paneIndex ? "is-focused" : ""} ${
-            dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
-          } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
-            isHoverDimmed ? "is-host-hover-dimmed" : ""
-          } ${highlightedHostAlias ? "is-host-hovering" : ""}`}
-          draggable={false}
-          onClick={() => {
-            setActivePaneIndex(paneIndex);
-            if (paneSessionId) {
-              setActiveSession(paneSessionId);
-              requestTerminalFocus(paneSessionId);
-            }
-          }}
-          onDragOverCapture={(event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = resolveDropEffect(event);
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setDragOverPaneIndex(paneIndex);
-            setActiveDropZonePaneIndex(paneIndex);
-            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
-            setActiveDropZone(
-              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
-            );
-          }}
-          onDragEnterCapture={(event) => {
-            event.preventDefault();
-            setDragOverPaneIndex(paneIndex);
-            const bounds = event.currentTarget.getBoundingClientRect();
-            setActiveDropZonePaneIndex(paneIndex);
-            const emptyForHostOverlay = draggingKind === "machine" && !paneSessionId;
-            setActiveDropZone(
-              emptyForHostOverlay ? "center" : resolvePaneDropZone(event.clientX, event.clientY, bounds),
-            );
-          }}
-          onDragLeave={(event) => {
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              return;
-            }
-            setDragOverPaneIndex((prev) => (prev === paneIndex ? null : prev));
-            setActiveDropZonePaneIndex((prev) => (prev === paneIndex ? null : prev));
-            setActiveDropZone(null);
-          }}
-          onDropCapture={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            void handlePaneDrop(event, paneIndex);
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setHostContextMenu(null);
-            const initialSplitMode: SplitMode = shouldSplitAsEmpty(event) ? "empty" : "duplicate";
-            setContextMenu({
-              visible: true,
-              x: event.clientX,
-              y: event.clientY,
-              paneIndex,
-              splitMode: initialSplitMode,
-            });
-          }}
-        >
-          {isDropOverlayVisible && draggingKind === "machine" && !hasPaneSession && (
-            <div className="pane-drop-zones pane-drop-zones-host-empty" aria-hidden="true">
-              <span className="pane-drop-host-empty-label">Drop to open here</span>
-            </div>
-          )}
-          {isDropOverlayVisible && !(draggingKind === "machine" && !hasPaneSession) && (
-            <div className="pane-drop-zones" aria-hidden="true">
-              <div className={`pane-drop-zone pane-drop-zone-top ${activeDropZone === "top" ? "is-active" : ""}`}>Top</div>
-              <div className={`pane-drop-zone pane-drop-zone-left ${activeDropZone === "left" ? "is-active" : ""}`}>Left</div>
-              <div
-                className={`pane-drop-zone pane-drop-zone-center ${activeDropZone === "center" ? "is-active" : ""}`}
-              >
-                {draggingKind === "machine"
-                  ? "Replace"
-                  : isSelfPaneDrop
-                    ? "–"
-                    : "Swap"}
-              </div>
-              <div className={`pane-drop-zone pane-drop-zone-right ${activeDropZone === "right" ? "is-active" : ""}`}>
-                Right
-              </div>
-              <div
-                className={`pane-drop-zone pane-drop-zone-bottom ${activeDropZone === "bottom" ? "is-active" : ""}`}
-              >
-                Bottom
-              </div>
-            </div>
-          )}
-          <div
-            className={`split-pane-label ${activePaneIndex === paneIndex ? "is-active" : ""} ${
-              isToolbarExpanded ? "is-toolbar-expanded" : ""
-            }`}
-            draggable={Boolean(paneSessionId)}
-            onDragStart={(event) => {
-              if (!paneSessionId) {
-                return;
-              }
-              draggingSessionIdRef.current = paneSessionId;
-              setDragPayload(event, { type: "session", sessionId: paneSessionId });
-              setDraggingKind("session");
-              missingDragPayloadLoggedRef.current = false;
-            }}
-            onDragEnd={() => {
-              draggingSessionIdRef.current = null;
-              setDraggingKind(null);
-              setDragOverPaneIndex(null);
-              setActiveDropZonePaneIndex(null);
-              setActiveDropZone(null);
-              missingDragPayloadLoggedRef.current = false;
-            }}
-          >
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-nav">
-              <span className="split-pane-label-title" title={paneIdentity}>
-                {paneIdentity}
-              </span>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
-                  isToolbarExpanded ? "is-expanded" : ""
-                }`}
-                title={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
-                aria-label={isToolbarExpanded ? "Collapse toolbar actions" : "Expand toolbar actions"}
-                aria-pressed={isToolbarExpanded}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setExpandedPaneToolbarIndices((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(paneIndex)) {
-                      next.delete(paneIndex);
-                    } else {
-                      next.add(paneIndex);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <span aria-hidden="true">{isToolbarExpanded ? "▾" : "▸"}</span>
-              </button>
-            </div>
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane left"
-                aria-label={`Split pane ${paneIndex + 1} left`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.left", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-vertical split-icon-vertical-normal" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane right"
-                aria-label={`Split pane ${paneIndex + 1} right`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.right", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-vertical split-icon-vertical-inverse" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane top"
-                aria-label={`Split pane ${paneIndex + 1} top`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.top", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-horizontal split-icon-horizontal-normal" aria-hidden="true" />
-              </button>
-              <button
-                className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
-                title="Split pane bottom"
-                aria-label={`Split pane ${paneIndex + 1} bottom`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("layout.split.bottom", paneIndex, { eventLike: event });
-                }}
-              >
-                <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
-              </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn ${isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
-                title={
-                  isBroadcastModeEnabled
-                    ? "Broadcast enabled — click to turn off"
-                    : "Broadcast disabled — click to send keyboard to multiple panes"
-                }
-                aria-label={
-                  isBroadcastModeEnabled ? "Turn off broadcast to multiple panes" : "Turn on broadcast to multiple panes"
-                }
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setBroadcastMode(!isBroadcastModeEnabled);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-broadcast" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="2.2" />
-                  <path d="M8.6 8.8a4.8 4.8 0 0 0 0 6.4" />
-                  <path d="M15.4 8.8a4.8 4.8 0 0 1 0 6.4" />
-                  <path d="M6.2 6.3a8.3 8.3 0 0 0 0 11.4" />
-                  <path d="M17.8 6.3a8.3 8.3 0 0 1 0 11.4" />
-                </svg>
-              </button>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn ${
-                  isBroadcastModeEnabled && isPaneBroadcastTarget ? "is-broadcast-active" : ""
-                }`}
-                title="Toggle pane target"
-                aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
-                disabled={!isBroadcastModeEnabled || !hasPaneSession}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("broadcast.togglePaneTarget", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-target" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="6.4" />
-                  <circle cx="12" cy="12" r="2.3" />
-                </svg>
-              </button>
-              <button
-                className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-broadcast-all ${
-                  allVisibleAlreadyTargeted ? "is-broadcast-active" : ""
-                }`}
-                title="Target all visible panes"
-                aria-label="Target all visible panes"
-                disabled={!isBroadcastModeEnabled}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("broadcast.selectAllVisible", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-all" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="6.2" cy="12.4" r="2.1" />
-                  <circle cx="12" cy="7.1" r="2.1" />
-                  <circle cx="17.8" cy="12.4" r="2.1" />
-                  <path d="M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" />
-                </svg>
-              </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
-              <button
-                className="btn action-icon-btn pane-toolbar-btn"
-                title="Close session in pane"
-                aria-label={`Close session in pane ${paneIndex + 1}`}
-                disabled={!hasPaneSession}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.clear", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-close-session" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5.2" y="6.2" width="13.6" height="11.6" rx="2.2" />
-                  <path d="M9.5 10l5 5M14.5 10l-5 5" />
-                </svg>
-              </button>
-              <button
-                className="btn action-icon-btn action-icon-btn-danger pane-toolbar-btn"
-                title="Close pane and session"
-                aria-label={`Close pane ${paneIndex + 1} and its session`}
-                disabled={!canClosePane}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleContextAction("pane.close", paneIndex);
-                }}
-              >
-                <svg className="pane-toolbar-svg pane-toolbar-svg-close-pane" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          {paneSessionId ? (
-            <Suspense
-              fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
-            >
-              <TerminalPane
-                sessionId={paneSessionId}
-                onUserInput={handleTerminalInput}
-                fontSize={terminalFontSize}
-                fontFamily={terminalFontFamily}
-              />
-            </Suspense>
-          ) : (
-            <div className="empty-pane split-empty-pane">
-              <p className="split-empty-pane-copy">One click and we both get what we want</p>
-              <button
-                type="button"
-                className="split-empty-pane-logo-btn"
-                title="Open local terminal in this pane"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void connectLocalShellInPane(paneIndex);
-                }}
-              >
-                <img src={logoTransparent} alt="Open local terminal in this pane" className="split-empty-pane-image" />
-              </button>
-              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
-                Or drop that host right here - I&apos;m waiting
-              </p>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const firstRatio = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, node.ratio));
-    const secondRatio = 1 - firstRatio;
-    const dividerClass = node.axis === "horizontal" ? "split-node-divider vertical" : "split-node-divider horizontal";
-
-    return (
-      <div
-        key={node.id}
-        className={`split-node split-node-${node.axis}`}
-        ref={(element) => {
-          splitNodeRefs.current[node.id] = element;
-        }}
-      >
-        <div className="split-node-child" style={{ flexBasis: `${firstRatio * 100}%` }}>
-          {renderSplitNode(node.first)}
-        </div>
-        <div
-          className={dividerClass}
-          role="separator"
-          aria-orientation={node.axis === "horizontal" ? "vertical" : "horizontal"}
-          onPointerDown={startSplitResize(node.id, node.axis)}
-        />
-        <div className="split-node-child" style={{ flexBasis: `${secondRatio * 100}%` }}>
-          {renderSplitNode(node.second)}
-        </div>
-      </div>
-    );
-  };
-
-  const renderHostRow = (row: HostRowViewModel, key: string) => (
-    <div
-      key={key}
-      className="host-row"
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setContextMenu((prev) => ({ ...prev, visible: false }));
-        setHostContextMenu({
-          x: event.clientX,
-          y: event.clientY,
-          host: row.host,
-        });
-      }}
-    >
-      <div
-        className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
-          activeHost === row.host.host ? "is-active" : ""
-        } ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`}
-      >
-        <button
-          className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
-            row.metadata.favorite ? "is-active" : ""
-          }`}
-          aria-label={`Toggle favorite for ${row.host.host}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void toggleFavoriteForHost(row.host.host);
-          }}
-        >
-          ★
-        </button>
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={`SSH host ${row.host.host}`}
-          className="host-item"
-          onClick={() => {
-            if (suppressHostClickAliasRef.current) {
-              const suppressedAlias = suppressHostClickAliasRef.current;
-              suppressHostClickAliasRef.current = null;
-              if (suppressedAlias === row.host.host) {
-                return;
-              }
-            }
-            toggleHostSelection(row.host);
-          }}
-          onMouseEnter={() => {
-            // Only enable hover affordances for connected hosts to avoid flicker on disconnected rows
-            if (row.connected) {
-              setHoveredHostAlias(row.host.host);
-            }
-          }}
-          onMouseLeave={() => {
-            if (row.connected) {
-              setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
-            }
-          }}
-          onDoubleClick={() => {
-            void connectToHostInNewPane(row.host);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              if (activeHost !== row.host.host) {
-                setActiveHost(row.host.host);
-              }
-              void connectToHostInNewPane(row.host);
-            }
-          }}
-          draggable
-          onDragStart={(event) => {
-            suppressHostClickAliasRef.current = row.host.host;
-            setDragPayload(event, { type: "machine", hostAlias: row.host.host });
-            setDraggingKind("machine");
-            missingDragPayloadLoggedRef.current = false;
-          }}
-          onDragEnd={() => {
-            setDraggingKind(null);
-            setDragOverPaneIndex(null);
-            missingDragPayloadLoggedRef.current = false;
-          }}
-        >
-          <span className="host-item-main">{row.host.host}</span>
-          <span className="host-user-badge">{row.displayUser}</span>
-        </div>
-        <div className="host-row-actions">
-          <button
-            className={`host-settings-inline-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
-            aria-label={`Open host settings for ${row.host.host}`}
-            title={`Open host settings for ${row.host.host}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleHostMenu(row.host);
-            }}
-          >
-            ⋮
-          </button>
-        </div>
-      </div>
-      <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
-        {openHostMenuHostAlias === row.host.host && (
-          <div className="host-slide-content">
-            <HostForm host={currentHost} onChange={setCurrentHost} />
-            <div className="host-meta-edit">
-              <label className="field">
-                <span className="field-label">Tags (comma separated)</span>
-                <input
-                  className="input"
-                  value={tagDraft}
-                  onChange={(event) => setTagDraft(event.target.value)}
-                  placeholder="prod, home, lab"
-                />
-              </label>
-              <label className="field checkbox-field">
-                <input
-                  className="checkbox-input"
-                  type="checkbox"
-                  checked={activeHostMetadata.favorite}
-                  onChange={() => void toggleFavoriteForHost(activeHost)}
-                />
-                <span className="field-label">Favorite</span>
-              </label>
-            </div>
-            <div className="action-row host-slide-actions">
-              <button
-                className="btn icon-btn"
-                aria-label="Save tags"
-                title="Save tags"
-                onClick={() => {
-                  void saveTagsForActiveHost().catch((e: unknown) => setError(String(e)));
-                }}
-              >
-                #
-              </button>
-              <button
-                className="btn btn-primary icon-btn"
-                aria-label="Save settings"
-                title="Save settings"
-                onClick={onSave}
-                disabled={!canSave}
-              >
-                ✓
-              </button>
-              <button
-                className={`btn btn-danger icon-btn ${
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "btn-danger-confirm"
-                    : ""
-                }`}
-                onClick={() => handleRemoveHostIntent(currentHost.host, "settings")}
-                disabled={!currentHost.host || !hosts.some((host) => host.host === currentHost.host)}
-                aria-label={
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "Confirm remove host"
-                    : "Remove host"
-                }
-                title={
-                  pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings"
-                    ? "Confirm remove host"
-                    : "Remove host"
-                }
-              >
-                {pendingRemoveConfirm?.hostAlias === currentHost.host && pendingRemoveConfirm.scope === "settings" ? "!" : "×"}
-              </button>
-            </div>
-            {error && <p className="error-text">{error}</p>}
-          </div>
-        )}
-      </div>
-    </div>
+  const paneFileViewForPane = useCallback(
+    (paneIndex: number) => {
+      if (!fileWorkspacePluginEnabled) {
+        return "terminal";
+      }
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return "terminal";
+      }
+      return sessionFileViews[sid] ?? "terminal";
+    },
+    [fileWorkspacePluginEnabled, splitSlots, sessionFileViews],
   );
+
+  const paneContextSessionKindForPane = useCallback(
+    (paneIndex: number): PaneContextSessionKind => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return "empty";
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session) {
+        return "empty";
+      }
+      return session.kind === "local" ? "local" : "ssh";
+    },
+    [splitSlots, sessions],
+  );
+
+  const remoteSshSpecForPane = useCallback(
+    (paneIndex: number): RemoteSshSpec | null => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind === "local") {
+        return null;
+      }
+      if (session.kind === "sshSaved") {
+        const hostEntry = hosts.find((h) => h.host === session.hostAlias);
+        if (!hostEntry) {
+          return null;
+        }
+        return { kind: "saved", host: hostEntry };
+      }
+      return { kind: "quick", request: session.request };
+    },
+    [splitSlots, sessions, hosts],
+  );
+
+  const onLocalFilePanePathChange = useCallback((paneIndex: number, pathKey: string) => {
+    localFilePanePathsRef.current[paneIndex] = pathKey;
+  }, []);
+
+  const getFileExportDestPath = useCallback(async () => {
+    return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
+  }, [fileExportDestMode, fileExportPathKey]);
+
+  const renderSplitNode = createSplitPaneRenderer({
+    splitSlots,
+    activePaneIndex,
+    paneOrder,
+    resolvePaneLabel,
+    showFullPathInFilePaneTitle,
+    highlightedHostPaneIndices,
+    hasHighlightedHostTargets,
+    highlightedHostAlias,
+    draggingKind,
+    dragOverPaneIndex,
+    activeDropZonePaneIndex,
+    activeDropZone,
+    draggingSessionIdRef,
+    setActivePaneIndex,
+    setActiveSession,
+    requestTerminalFocus,
+    setDragOverPaneIndex,
+    setActiveDropZonePaneIndex,
+    setActiveDropZone,
+    resolveDropEffect,
+    resolvePaneDropZone,
+    handlePaneDrop,
+    setHostContextMenu,
+    setContextMenu,
+    shouldSplitAsEmpty,
+    expandedPaneToolbarIndices,
+    setExpandedPaneToolbarIndices,
+    handleContextAction,
+    isBroadcastModeEnabled,
+    setBroadcastMode,
+    visiblePaneSessionIds,
+    broadcastTargets,
+    terminalFontSize,
+    terminalFontFamily,
+    handleTerminalInput,
+    connectLocalShellInPane,
+    logoTransparentSrc: logoTransparent,
+    splitNodeRefs,
+    startSplitResize,
+    setDragPayload,
+    setDraggingKind,
+    missingDragPayloadLoggedRef,
+    paneFileViewForPane,
+    paneContextSessionKindForPane,
+    remoteSshSpecForPane,
+    onLocalFilePanePathChange,
+    getFileExportDestPath,
+    fileExportArchiveFormat,
+    onFilePaneTitleChange,
+    semanticFileNameColors: filePaneSemanticNameColors.enabled,
+    fileWorkspacePluginEnabled,
+  });
 
   const appShellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     "--shell-grid-gap": isSidebarOpen ? "var(--space-2)" : "var(--space-1)",
-    "--sidebar-resize-track-width": isSidebarOpen ? "8px" : "0px",
+    "--sidebar-resize-track-width": isSidebarOpen ? "12px" : "0px",
   } as CSSProperties;
   const contextMenuPaneSessionId =
     contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
+  const contextPaneSessionKindForMenu: PaneContextSessionKind = (() => {
+    if (!contextMenuPaneSessionId) {
+      return "empty";
+    }
+    const session = sessions.find((s) => s.id === contextMenuPaneSessionId);
+    if (!session) {
+      return "empty";
+    }
+    return session.kind === "local" ? "local" : "ssh";
+  })();
+  const contextPaneFileViewForMenu =
+    !fileWorkspacePluginEnabled || !contextMenuPaneSessionId
+      ? "terminal"
+      : (sessionFileViews[contextMenuPaneSessionId] ?? "terminal");
   const workspaceSendTargets =
     contextMenuPaneSessionId && workspaceTabs.length > 1
       ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
@@ -4385,308 +4517,183 @@ export function App() {
         event.preventDefault();
       }}
     >
-      <button
-        type="button"
-        className={`left-rail-edge-handle ${isSidebarPinned ? "is-pinned" : "is-unpinned"}`}
-        aria-label={isSidebarPinned ? "Unpin sidebar (auto-hide enabled)" : "Pin sidebar (always visible)"}
-        title={isSidebarPinned ? "Pinned sidebar - click to enable auto-hide" : "Auto-hide sidebar - click to pin"}
-        onMouseEnter={revealSidebar}
-        onMouseLeave={maybeHideSidebar}
-        onClick={toggleSidebarPinned}
-      >
-        {isSidebarPinned ? "◧" : "◨"}
-      </button>
-      <aside
-        className={`left-rail panel ${isSidebarOpen ? "is-visible" : "is-hidden"} ${
-          isSidebarPinned ? "is-pinned" : "is-unpinned"
-        }`}
-        onMouseEnter={revealSidebar}
-        onMouseLeave={maybeHideSidebar}
-      >
-        <header className="brand">
-          <div
-            className={`brand-bar${isQuickAddMenuOpen ? " is-quick-add-open" : ""}`}
-            ref={quickAddMenuRef}
-          >
-            <div className="brand-logo-area">
-              <img src={logoTextTransparent} alt="NoSuckShell logo" className="brand-logo" />
-            </div>
-            <div className="brand-add-column">
-              <div className="brand-primary-add-wrap brand-toolbar-cluster">
-                <button
-                  type="button"
-                  className="btn brand-app-settings-btn"
-                  aria-label="Open app settings"
-                  title="App settings"
-                  onClick={() => setIsAppSettingsOpen(true)}
-                >
-                  <svg className="settings-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      fill="currentColor"
-                      d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.72-1.68-.97l-.38-2.65A.51.51 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.58-1.68.97l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.63c-.04.34-.07.67-.07.98s.03.66.07.97l-2.11 1.63c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.68.97l.38 2.65c.03.24.24.43.5.43h4c.25 0 .46-.18.49-.42l.38-2.65c.62-.24 1.16-.57 1.68-.97l2.49 1c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.63z"
-                    />
-                  </svg>
-                </button>
-                <div className="quick-add-wrap brand-quick-add-wrap brand-primary-add-inner">
-                  <button
-                    className="btn host-plus-btn"
-                    aria-label="Open add menu"
-                    title="Add host"
-                    onClick={() => setIsQuickAddMenuOpen((prev) => !prev)}
-                  >
-                    <svg className="add-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 6v12M6 12h12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            {isQuickAddMenuOpen && (
-              <div className="quick-add-menu" role="menu">
-                <button className="quick-add-menu-item" onClick={() => void connectLocalShellInNewPane(activePaneIndex)}>
-                  New local terminal
-                </button>
-                <button className="quick-add-menu-item" onClick={() => openQuickConnectModal()}>
-                  Quick connect terminal
-                </button>
-                <button className="quick-add-menu-item" onClick={openAddHostModal}>
-                  Add host
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add group
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add user
-                </button>
-                <button className="quick-add-menu-item" disabled>
-                  Add key
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
-
-        <section className="host-filter-card">
-          <div className="sidebar-view-tabs" role="tablist" aria-label="Sidebar views">
-            {sidebarViews.map((view) => (
-              <button
-                key={view.id}
-                className={`tab-pill sidebar-view-tab ${selectedSidebarViewId === view.id ? "is-active" : ""}`}
-                role="tab"
-                aria-selected={selectedSidebarViewId === view.id}
-                onClick={() => setSelectedSidebarViewId(view.id)}
-                title={view.label}
-              >
-                {view.label}
-              </button>
-            ))}
-          </div>
-          <div className="filter-head-row">
-            <input
-              className="input host-search-input"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search alias, hostname, user"
-            />
-            <button
-              className={`btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`}
-              onClick={() => setShowAdvancedFilters((prev) => !prev)}
-              aria-expanded={showAdvancedFilters}
-              aria-controls="advanced-host-filters"
-            >
-              Filters {showAdvancedFilters ? "−" : "+"}
-            </button>
-            <span className="pill-muted">{filteredHostRows.length}</span>
-          </div>
-          <div id="advanced-host-filters" className={`advanced-filters ${showAdvancedFilters ? "is-open" : ""}`}>
-            <div className="filter-row">
-              <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as HostStatusFilter)}>
-                <option value="all">All status</option>
-                <option value="connected">Connected</option>
-                <option value="disconnected">Disconnected</option>
-              </select>
-              <input
-                className="input"
-                type="number"
-                value={portFilter}
-                onChange={(event) => setPortFilter(event.target.value)}
-                placeholder="Port"
-              />
-            </div>
-            <div className="filter-row">
-              <select className="input" value={selectedTagFilter} onChange={(event) => setSelectedTagFilter(event.target.value)}>
-                <option value="all">All tags</option>
-                {availableTags.map((tag) => (
-                  <option key={tag} value={tag}>
-                    {tag}
-                  </option>
-                ))}
-              </select>
-              <button className={`btn ${favoritesOnly ? "btn-primary" : ""}`} onClick={() => setFavoritesOnly((prev) => !prev)}>
-                Favorites
-              </button>
-            </div>
-            <div className="filter-row">
-              <button className={`btn ${recentOnly ? "btn-primary" : ""}`} onClick={() => setRecentOnly((prev) => !prev)}>
-                Recent
-              </button>
-              <button className="btn" onClick={clearFilters}>
-                Reset filters
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <div className="host-list">
-          {filteredHostRows.length === 0 ? (
-            <div className="empty-pane">
-              <p>No hosts match the active filters.</p>
-              <span>Adjust or reset filters to show hosts.</span>
-            </div>
-          ) : (
-            <>
-              {connectedHostRows.length > 0 && (
-                <div className="host-list-top">
-                  <p className="host-list-section-title">Connected</p>
-                  {connectedHostRows.map((row, index) =>
-                    renderHostRow(row, `connected-${row.host.host}-${row.host.port}-${index}`),
-                  )}
-                </div>
-              )}
-              <div className="host-list-scroll">
-                {otherHostRows.map((row, index) => renderHostRow(row, `other-${row.host.host}-${row.host.port}-${index}`))}
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
       <div
-        className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize host sidebar"
-        onPointerDown={startSidebarResize}
-      />
-
-      <section className="right-dock panel">
-        <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
-          {workspaceTabs.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              role="tab"
-              aria-selected={workspace.id === activeWorkspaceId}
-              className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
-              onClick={() => switchWorkspace(workspace.id)}
-              onDragOver={(event) => {
-                const payload = parseDragPayload(event);
-                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-                if (shouldReject) {
-                  return;
-                }
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event) => {
-                const payload = parseDragPayload(event);
-                const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-                if (shouldReject) {
-                  return;
-                }
-                event.preventDefault();
-                sendSessionToWorkspace(payload.sessionId, workspace.id);
-              }}
-            >
-              {workspace.name}
-            </button>
-          ))}
-          <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
-            + Workspace
-          </button>
-          {workspaceTabs.length > 1 && (
-            <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
-              Remove current
-            </button>
-          )}
-        </div>
-        <div className="sessions-workspace">
-          <div className="sessions-zone">
-            <div className="session-pane-canvas">
-              <div
-                className={`terminal-grid ${splitResizeState ? `is-pane-resizing is-pane-resizing-${splitResizeState.axis}` : ""}${
-                  isStackedShell && mobileShellTab === "terminal" ? " is-mobile-terminal-pager" : ""
-                }`}
+        className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}
+        onMouseEnter={() => {
+          if (!isSidebarPinned && !isSidebarOpen) {
+            revealSidebar();
+          }
+        }}
+      >
+        {!isSidebarOpen && (
+          <button
+            type="button"
+            className="btn sidebar-rail-toggle-btn"
+            aria-label="Expand host sidebar"
+            title="Expand host sidebar"
+            onClick={() => {
+              clearSidebarHideTimeout();
+              setIsSidebarVisible(true);
+            }}
+          >
+            <svg className="sidebar-rail-toggle-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <g
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                {isStackedShell && mobileShellTab === "terminal" ? (
-                  <div className="mobile-terminal-pager">
-                    {paneOrder.length > 1 ? (
-                      <div className="mobile-terminal-pager-controls" role="toolbar" aria-label="Terminal pager">
-                        <button
-                          type="button"
-                          className="btn mobile-terminal-pager-nav"
-                          onClick={() => nudgeMobilePager(-1)}
-                          aria-label="Previous terminal"
-                        >
-                          ‹
-                        </button>
-                        <span className="mobile-terminal-pager-status" aria-live="polite">
-                          {(() => {
-                            const pos = paneOrder.indexOf(activePaneIndex);
-                            return `${pos >= 0 ? pos + 1 : 1} / ${paneOrder.length}`;
-                          })()}
-                        </span>
-                        <button
-                          type="button"
-                          className="btn mobile-terminal-pager-nav"
-                          onClick={() => nudgeMobilePager(1)}
-                          aria-label="Next terminal"
-                        >
-                          ›
-                        </button>
-                      </div>
-                    ) : null}
-                    <div
-                      ref={mobilePagerRef}
-                      className="mobile-terminal-pager-viewport"
-                      onScroll={handleMobilePagerScroll}
-                    >
-                      {paneOrder.map((paneIndex) => (
-                        <div key={paneIndex} className="mobile-terminal-slide">
-                          {renderSplitNode(createLeafNode(paneIndex))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  renderSplitNode(splitTree)
-                )}
-              </div>
-            </div>
-            <div className="sessions-footer" role="status">
-              <div className="sessions-footer-meta">
-                <div className="footer-layout-controls">
-                  <button
-                    type="button"
-                    className="btn btn-primary footer-layout-command-btn"
-                    onClick={() => setIsLayoutCommandCenterOpen(true)}
-                    aria-label="Open layout command center"
-                    title="Layouts, templates, session cleanup"
-                  >
-                    Layouts
-                  </button>
-                  <div className="sessions-footer-status">
-                    <span className={`context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`}>
-                      Broadcast: {isBroadcastModeEnabled ? "enabled" : "disabled"} ({broadcastTargets.size} targets)
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+                <path d="M9 7.5l5.25 4.5L9 16.5" />
+                <path d="M14.25 7.5l5.25 4.5-5.25 4.5" />
+              </g>
+            </svg>
+          </button>
+        )}
+      </div>
+      {!isStackedShell && !isSidebarPinned && !isSidebarOpen ? (
+        <div
+          className="left-rail-hover-reveal-zone"
+          aria-hidden
+          onMouseEnter={revealSidebar}
+        />
+      ) : null}
+      <HostSidebar
+        isSidebarOpen={isSidebarOpen}
+        isSidebarPinned={isSidebarPinned}
+        onToggleSidebarPinned={toggleSidebarPinned}
+        onMouseEnter={revealSidebar}
+        onMouseLeave={maybeHideSidebar}
+        logoSrc={logoTextTransparent}
+        isQuickAddMenuOpen={isQuickAddMenuOpen}
+        quickAddMenuRef={quickAddMenuRef}
+        onOpenSettings={() => setIsAppSettingsOpen(true)}
+        onToggleQuickAddMenu={() => setIsQuickAddMenuOpen((prev) => !prev)}
+        onConnectLocalInActivePane={() => void connectLocalShellInNewPane(activePaneIndex)}
+        onOpenQuickConnect={() => openQuickConnectModal()}
+        onOpenAddHost={openAddHostModal}
+        sidebarViews={sidebarViews}
+        selectedSidebarViewId={selectedSidebarViewId}
+        onSelectSidebarView={setSelectedSidebarViewId}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        showAdvancedFilters={showAdvancedFilters}
+        onToggleAdvancedFilters={() => setShowAdvancedFilters((prev) => !prev)}
+        onCloseAdvancedFilters={closeAdvancedFilters}
+        filteredHostCount={filteredHostRows.length}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        portFilter={portFilter}
+        onPortFilterChange={setPortFilter}
+        availableTags={availableTags}
+        selectedTagFilter={selectedTagFilter}
+        onSelectedTagFilterChange={setSelectedTagFilter}
+        recentOnly={recentOnly}
+        onToggleRecent={() => setRecentOnly((prev) => !prev)}
+        onClearFilters={clearFilters}
+        connectedHostRows={connectedHostRows}
+        otherHostRows={otherHostRows}
+        hostListRowBridge={{
+          activeHost,
+          openHostMenuHostAlias,
+          currentHost,
+          setCurrentHost,
+          hosts,
+          tagDraft,
+          setTagDraft,
+          hostKeyPolicyDraft,
+          setHostKeyPolicyDraft,
+          storeKeys,
+          storeUsers,
+          sidebarHostBindingDraft,
+          setSidebarHostBindingDraft,
+          error,
+          canSave,
+          pendingRemoveConfirm,
+          suppressHostClickAliasRef,
+          setContextMenu,
+          setHostContextMenu,
+          setHoveredHostAlias,
+          setActiveHost,
+          setDragOverPaneIndex,
+          setError,
+          toggleFavoriteForHost,
+          toggleHostSelection,
+          connectToHostInNewPane,
+          setDragPayload,
+          setDraggingKind,
+          missingDragPayloadLoggedRef,
+          toggleHostMenu,
+          onSave,
+          saveTagsForActiveHost,
+          handleRemoveHostIntent,
+        }}
+      />
+      <div className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}>
+        <div
+          className="sidebar-resize-track"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize host sidebar"
+          onPointerDown={startSidebarResize}
+        />
+        <button
+          type="button"
+          className="btn sidebar-rail-toggle-btn sidebar-rail-toggle-btn--on-separator"
+          aria-expanded={isSidebarOpen}
+          aria-label="Collapse host sidebar"
+          title="Collapse host sidebar"
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleHostSidebar();
+          }}
+        >
+          <svg className="sidebar-rail-toggle-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <g
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M14.75 7.5L9.5 12l5.25 4.5" />
+              <path d="M19.5 7.5l-5.25 4.5 5.25 4.5" />
+            </g>
+          </svg>
+        </button>
+      </div>
+
+      <TerminalWorkspaceDock
+        workspaceTabs={workspaceTabs}
+        activeWorkspaceId={activeWorkspaceId}
+        switchWorkspace={switchWorkspace}
+        parseDragPayload={parseDragPayload}
+        sendSessionToWorkspace={sendSessionToWorkspace}
+        createWorkspace={createWorkspace}
+        removeWorkspace={removeWorkspace}
+        splitResizeState={splitResizeState}
+        isStackedShell={isStackedShell}
+        mobileShellTab={mobileShellTab}
+        paneOrder={paneOrder}
+        activePaneIndex={activePaneIndex}
+        nudgeMobilePager={nudgeMobilePager}
+        mobilePagerRef={mobilePagerRef}
+        handleMobilePagerScroll={handleMobilePagerScroll}
+        splitTree={splitTree}
+        renderSplitNode={renderSplitNode}
+        onOpenLayoutCommandCenter={() => setIsLayoutCommandCenterOpen(true)}
+        isBroadcastModeEnabled={isBroadcastModeEnabled}
+        broadcastTargetCount={broadcastTargets.size}
+      />
       {isAppSettingsOpen && (
         <AppSettingsPanel
+          keyboardShortcutChords={keyboardShortcutChords}
+          setKeyboardShortcutChords={setKeyboardShortcutChords}
+          keyboardLeaderChord={keyboardLeaderChord}
+          setKeyboardLeaderChord={setKeyboardLeaderChord}
+          resolveHelpShortcutLabel={resolveHelpShortcutLabel}
+          shortcutCheatsheetLines={shortcutCheatsheetLines}
+          keyboardShortcutSuspendEscapeRef={keyboardShortcutSuspendEscapeRef}
           settingsOpenMode={settingsOpenMode}
           setSettingsOpenMode={setSettingsOpenMode}
           onCloseSettings={() => setIsAppSettingsOpen(false)}
@@ -4709,6 +4716,16 @@ export function App() {
           setListTonePreset={setListTonePreset}
           frameModePreset={frameModePreset}
           setFrameModePreset={setFrameModePreset}
+          showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
+          setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+          fileExportDestMode={fileExportDestMode}
+          setFileExportDestMode={setFileExportDestMode}
+          fileExportPathKey={fileExportPathKey}
+          setFileExportPathKey={setFileExportPathKey}
+          fileExportArchiveFormat={fileExportArchiveFormat}
+          setFileExportArchiveFormat={setFileExportArchiveFormat}
+          filePaneSemanticNameColors={filePaneSemanticNameColors}
+          setFilePaneSemanticNameColors={setFilePaneSemanticNameColors}
           layoutMode={layoutMode}
           setLayoutMode={setLayoutMode}
           splitRatioPreset={splitRatioPreset}
@@ -4765,6 +4782,16 @@ export function App() {
           storeTagDraft={storeTagDraft}
           setStoreTagDraft={setStoreTagDraft}
           addStoreTag={addStoreTag}
+          importStoreUsersFromHosts={importStoreUsersFromHosts}
+          updateStoreUser={updateStoreUser}
+          deleteStoreUser={deleteStoreUser}
+          setStoreUserGroupMembership={setStoreUserGroupMembership}
+          updateStoreGroup={updateStoreGroup}
+          deleteStoreGroup={deleteStoreGroup}
+          updateStoreTag={updateStoreTag}
+          deleteStoreTag={deleteStoreTag}
+          patchStoreKey={patchStoreKey}
+          reorderUserStoreKeys={reorderUserStoreKeys}
           storePathKeyNameDraft={storePathKeyNameDraft}
           setStorePathKeyNameDraft={setStorePathKeyNameDraft}
           storePathKeyPathDraft={storePathKeyPathDraft}
@@ -4784,6 +4811,14 @@ export function App() {
           storeBindingDraft={storeBindingDraft}
           setStoreBindingDraft={setStoreBindingDraft}
           saveHostBindingDraft={saveHostBindingDraft}
+          sshConfigRaw={sshConfigRaw}
+          setSshConfigRaw={setSshConfigRaw}
+          onSaveSshConfig={handleSaveSshConfig}
+          sshDirInfo={sshDirInfo}
+          sshDirOverrideDraft={sshDirOverrideDraft}
+          setSshDirOverrideDraft={setSshDirOverrideDraft}
+          onApplySshDirOverride={handleApplySshDirOverride}
+          onResetSshDirOverride={handleResetSshDirOverride}
         />
       )}
       {isLayoutCommandCenterOpen && (
@@ -4812,385 +4847,101 @@ export function App() {
             onSaveProfile={() => void saveCurrentLayoutProfile()}
             pendingDeleteProfileId={pendingLayoutProfileDeleteId}
             onDeleteProfileIntent={() => void handleDeleteSelectedLayoutProfileIntent()}
-            onApplyPreset={(tree) => {
-              applyLayoutPresetTree(tree);
-              setIsLayoutCommandCenterOpen(false);
-            }}
+            onApplyPreset={handleApplyLayoutPresetFromCommandCenter}
+            onApplyCustomGrid={handleApplyCustomGridFromCommandCenter}
             onCloseAllIntent={(withLayoutReset) => void handleCloseAllIntent(withLayoutReset)}
             pendingCloseAllIntent={pendingCloseAllIntent}
             previewTree={layoutCommandCenterPreviewTree}
             applyProfileDisabled={!selectedLayoutProfileId}
             saveDisabled={false}
             closeActionsDisabled={sessions.length === 0}
+            workspaceOptions={layoutCommandWorkspaceOptions}
+            activeWorkspaceId={activeWorkspaceId}
+            layoutTargetWorkspaceId={resolvedLayoutTargetWorkspaceId}
+            onLayoutTargetWorkspaceChange={setLayoutTargetWorkspaceId}
+            layoutSwitchToTargetAfterApply={layoutSwitchToTargetAfterApply}
+            onLayoutSwitchToTargetAfterApplyChange={setLayoutSwitchToTargetAfterApply}
+            layoutMirrorWorkspaceIdOnSave={layoutMirrorWorkspaceIdOnSave}
+            onLayoutMirrorWorkspaceIdOnSaveChange={setLayoutMirrorWorkspaceIdOnSave}
           />
         </Suspense>
       )}
       {isAddHostModalOpen && (
-        <div className="app-settings-overlay" onClick={closeAddHostModal}>
-          <section className="app-settings-modal panel add-host-modal" onClick={(event) => event.stopPropagation()}>
-            <header className="panel-header">
-              <h2>Add host</h2>
-              <button className="btn" onClick={closeAddHostModal}>
-                Cancel
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <HostForm host={newHostDraft} onChange={setNewHostDraft} />
-              <div className="action-row">
-                <button className="btn" onClick={closeAddHostModal}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={createHost} disabled={!canCreateHost}>
-                  Add host
-                </button>
-              </div>
-              {error && <p className="error-text">{error}</p>}
-            </div>
-          </section>
-        </div>
+        <AddHostModal
+          newHostDraft={newHostDraft}
+          onChangeNewHost={setNewHostDraft}
+          storeKeys={storeKeys}
+          storeUsers={storeUsers}
+          sshHosts={hosts}
+          hostBindingDraft={addHostBindingDraft}
+          onHostBindingDraftChange={setAddHostBindingDraft}
+          onClose={closeAddHostModal}
+          onCreateHost={createHost}
+          canCreateHost={canCreateHost}
+          error={error}
+        />
       )}
       {isQuickConnectModalOpen && (
-        <div className="app-settings-overlay" onClick={closeQuickConnectModal}>
-          <section
-            className="app-settings-modal panel add-host-modal"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={handleQuickConnectModalKeyDown}
-          >
-            <header className="panel-header">
-              <h2>Quick connect</h2>
-              <button className="btn" onClick={closeQuickConnectModal}>
-                Cancel
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <p className="muted-copy quick-connect-shortcuts">
-                Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users.
-              </p>
-              {quickConnectMode === "wizard" && (
-                <div className="quick-connect-mode-wrap">
-                  <p className="field-help">
-                    Step {quickConnectWizardStep}/2 -{" "}
-                    {quickConnectWizardStep === 1 ? "Provide host target" : "Choose or type user"}
-                  </p>
-                  {quickConnectWizardStep === 1 && (
-                    <label className="field">
-                      <span className="field-label">Host</span>
-                      <input
-                        className="input"
-                        value={quickConnectDraft.hostName}
-                        onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            proceedQuickConnectWizard();
-                          }
-                        }}
-                        placeholder="server.local:2222 or [2001:db8::1]:2200"
-                        autoFocus
-                      />
-                    </label>
-                  )}
-                  {quickConnectWizardStep === 2 && (
-                    <>
-                      <label className="field">
-                        <span className="field-label">User</span>
-                        <input
-                          className="input"
-                          value={quickConnectDraft.user}
-                          onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
-                          onKeyDown={handleQuickConnectUserInputKeyDown}
-                          placeholder="Default or custom user"
-                          autoFocus
-                        />
-                      </label>
-                      {quickConnectUserOptions.length > 0 && (
-                        <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                          {quickConnectUserOptions.map((user) => (
-                            <button
-                              key={user}
-                              type="button"
-                              className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
-                              onClick={() => {
-                                applyQuickConnectUser(user);
-                              }}
-                            >
-                              {user}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-              {quickConnectMode === "smart" && (
-                <div className="quick-connect-mode-wrap">
-                  <label className="field">
-                    <span className="field-label">Host</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.hostName}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, hostName: event.target.value }))}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void connectQuickSshInNewPane();
-                        }
-                      }}
-                      placeholder="example.com or 10.0.0.8:2222"
-                      autoFocus
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">User</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.user}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, user: event.target.value }))}
-                      onKeyDown={handleQuickConnectUserInputKeyDown}
-                      placeholder="Default or custom user"
-                    />
-                  </label>
-                  {quickConnectUserOptions.length > 0 && (
-                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                      {quickConnectUserOptions.map((user) => (
-                        <button
-                          key={user}
-                          type="button"
-                          className={`btn ${quickConnectDraft.user.trim() === user ? "btn-primary" : ""}`}
-                          onClick={() => {
-                            applyQuickConnectUser(user);
-                          }}
-                        >
-                          {user}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {quickConnectMode === "command" && (
-                <div className="quick-connect-mode-wrap">
-                  <label className="field">
-                    <span className="field-label">Target command</span>
-                    <input
-                      className="input"
-                      value={quickConnectCommandInput}
-                      onChange={(event) => setQuickConnectCommandInput(event.target.value)}
-                      onKeyDown={handleQuickConnectCommandInputKeyDown}
-                      placeholder="user@host:22"
-                      autoFocus
-                    />
-                  </label>
-                  {quickConnectUserOptions.length > 0 && (
-                    <div className="quick-connect-user-list" role="listbox" aria-label="Known users">
-                      {quickConnectUserOptions.map((user) => (
-                        <button
-                          key={user}
-                          type="button"
-                          className={`btn ${quickConnectCommandInput.trim().startsWith(`${user}@`) ? "btn-primary" : ""}`}
-                          onClick={() => {
-                            const targetPart = quickConnectCommandInput.includes("@")
-                              ? quickConnectCommandInput.slice(quickConnectCommandInput.indexOf("@"))
-                              : "@";
-                            setQuickConnectCommandInput(`${user}${targetPart}`);
-                          }}
-                        >
-                          {user}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <p className="field-help">
-                    Supports `user@host`, `user@host:port`, and `user@[2001:db8::1]:2200`.
-                  </p>
-                </div>
-              )}
-              {(quickConnectMode !== "wizard" || quickConnectWizardStep === 2) && (
-                <>
-                  <label className="field">
-                    <span className="field-label">Identity file</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.identityFile}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, identityFile: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Proxy jump</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.proxyJump}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyJump: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Proxy command</span>
-                    <input
-                      className="input"
-                      value={quickConnectDraft.proxyCommand}
-                      onChange={(event) => setQuickConnectDraft((prev) => ({ ...prev, proxyCommand: event.target.value }))}
-                      placeholder="Optional"
-                    />
-                  </label>
-                </>
-              )}
-              <div className="action-row">
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
-                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
-                    Back
-                  </button>
-                )}
-                <button className="btn" onClick={closeQuickConnectModal}>
-                  Cancel
-                </button>
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 1 ? (
-                  <button className="btn btn-primary" onClick={proceedQuickConnectWizard}>
-                    Next
-                  </button>
-                ) : (
-                  <button className="btn btn-primary" onClick={() => void connectQuickSshInNewPane()}>
-                    Connect
-                  </button>
-                )}
-                {quickConnectMode === "wizard" && quickConnectWizardStep === 2 && (
-                  <button className="btn" onClick={() => setQuickConnectWizardStep(1)}>
-                    Back
-                  </button>
-                )}
-              </div>
-              {error && <p className="error-text">{error}</p>}
-            </div>
-          </section>
-        </div>
+        <QuickConnectModal
+          quickConnectMode={quickConnectMode}
+          quickConnectWizardStep={quickConnectWizardStep}
+          onWizardStepChange={setQuickConnectWizardStep}
+          quickConnectDraft={quickConnectDraft}
+          onQuickConnectDraftChange={setQuickConnectDraft}
+          quickConnectCommandInput={quickConnectCommandInput}
+          onQuickConnectCommandInputChange={setQuickConnectCommandInput}
+          quickConnectUserOptions={quickConnectUserOptions}
+          onClose={closeQuickConnectModal}
+          onModalKeyDown={handleQuickConnectModalKeyDown}
+          onProceedWizard={proceedQuickConnectWizard}
+          onUserInputKeyDown={handleQuickConnectUserInputKeyDown}
+          onCommandInputKeyDown={handleQuickConnectCommandInputKeyDown}
+          onApplyUser={applyQuickConnectUser}
+          onConnect={() => void connectQuickSshInNewPane()}
+          error={error}
+        />
       )}
       {activeTrustPrompt && (
-        <div className="app-settings-overlay" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-          <section
-            className="app-settings-modal panel trust-host-modal"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={handleTrustPromptKeyDown}
-          >
-            <header className="panel-header">
-              <h2>Trust host key</h2>
-              <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-                Close
-              </button>
-            </header>
-            <div className="app-settings-content">
-              <p className="muted-copy">
-                Session <strong>{activeTrustPrompt.sessionId}</strong> requests trust confirmation for host{" "}
-                <strong>{activeTrustPrompt.hostAlias}</strong>.
-              </p>
-              <label className="field checkbox-field trust-default-checkbox">
-                <input
-                  className="checkbox-input"
-                  type="checkbox"
-                  checked={saveTrustHostAsDefault}
-                  onChange={(event) => setSaveTrustHostAsDefault(event.target.checked)}
-                />
-                <span className="field-label">Save as default for this host</span>
-              </label>
-              <div className="action-row">
-                <button className="btn" onClick={() => dismissTrustPrompt(activeTrustPrompt.sessionId)}>
-                  Dismiss
-                </button>
-                <button className="btn btn-primary" onClick={() => void acceptTrustPrompt()} autoFocus>
-                  Trust host
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+        <TrustHostModal
+          prompt={activeTrustPrompt}
+          saveTrustHostAsDefault={saveTrustHostAsDefault}
+          onSaveTrustDefaultChange={setSaveTrustHostAsDefault}
+          onClose={dismissTrustPrompt}
+          onAccept={acceptTrustPrompt}
+          onKeyDown={handleTrustPromptKeyDown}
+        />
       )}
       {contextMenu.visible && contextMenu.paneIndex !== null && (
-        <div
-          className="context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          role="menu"
-          onContextMenuCapture={(event) => {
-            event.preventDefault();
-          }}
-        >
-          {buildPaneContextActions({
-            paneSessionId: splitSlots[contextMenu.paneIndex] ?? null,
-            canClosePane: paneOrder.length > 1,
-            broadcastModeEnabled: isBroadcastModeEnabled,
-            broadcastCount: broadcastTargets.size,
-            splitMode: contextMenu.splitMode,
-            freeMoveEnabled: autoArrangeMode === "free",
-          }).map((action) => (
-            <button
-              key={action.id}
-              className={`context-menu-item ${action.separatorAbove ? "separator-above" : ""}`}
-              disabled={action.disabled}
-              onClick={(event) =>
-                void handleContextAction(action.id, contextMenu.paneIndex ?? 0, {
-                  preferredSplitMode: contextMenu.splitMode,
-                  eventLike: event,
-                })
-              }
-            >
-              {action.label}
-            </button>
-          ))}
-          {workspaceSendTargets.map((workspace, index) => (
-            <button
-              key={`send-${workspace.id}`}
-              className={`context-menu-item ${index === 0 ? "separator-above" : ""}`}
-              onClick={() => {
-                if (!contextMenuPaneSessionId) {
-                  return;
-                }
-                sendSessionToWorkspace(contextMenuPaneSessionId, workspace.id);
-                setContextMenu((prev) => ({ ...prev, visible: false }));
-              }}
-            >
-              Send to {workspace.name}
-            </button>
-          ))}
-          {workspaceSendPlaceholder && (
-            <button type="button" className="context-menu-item separator-above" disabled>
-              Send to other workspace (add another workspace tab)
-            </button>
-          )}
-        </div>
+        <PaneContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          paneIndex={contextMenu.paneIndex}
+          splitMode={contextMenu.splitMode}
+          paneSessionId={splitSlots[contextMenu.paneIndex] ?? null}
+          paneSessionKind={contextPaneSessionKindForMenu}
+          paneFileView={contextPaneFileViewForMenu}
+          fileWorkspaceEnabled={fileWorkspacePluginEnabled}
+          canClosePane={paneOrder.length > 1}
+          broadcastModeEnabled={isBroadcastModeEnabled}
+          broadcastCount={broadcastTargets.size}
+          freeMoveEnabled={autoArrangeMode === "free"}
+          workspaceSendTargets={workspaceSendTargets}
+          workspaceSendPlaceholder={workspaceSendPlaceholder}
+          onSendToWorkspace={sendSessionToWorkspace}
+          onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
+          onPaneAction={handleContextAction}
+        />
       )}
       {hostContextMenu && (
-        <div
-          className="context-menu"
-          style={{ left: hostContextMenu.x, top: hostContextMenu.y }}
-          role="menu"
-          onContextMenuCapture={(event) => {
-            event.preventDefault();
-          }}
-        >
-          {workspaceTabs.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              className="context-menu-item"
-              onClick={() => {
-                void connectToHostInWorkspace(hostContextMenu.host, workspace.id);
-                setHostContextMenu(null);
-              }}
-            >
-              Connect in {workspace.name}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="context-menu-item separator-above"
-            onClick={() => {
-              openHostMenuForHost(hostContextMenu.host);
-              setHostContextMenu(null);
-            }}
-          >
-            Edit host
-          </button>
-        </div>
+        <HostContextMenu
+          x={hostContextMenu.x}
+          y={hostContextMenu.y}
+          host={hostContextMenu.host}
+          workspaces={workspaceTabs}
+          onConnectInWorkspace={connectToHostInWorkspace}
+          onEditHost={openHostMenuForHost}
+          onClose={() => setHostContextMenu(null)}
+        />
       )}
       {isStackedShell && (
         <nav className="mobile-shell-tabbar" aria-label="Mobile workspace">

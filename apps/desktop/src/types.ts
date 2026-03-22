@@ -8,11 +8,16 @@ export type HostConfig = {
   proxyCommand: string;
 };
 
+/** OpenSSH StrictHostKeyChecking modes persisted per host (kebab-case JSON, matches Rust). */
+export type StrictHostKeyPolicy = "ask" | "accept-new" | "no";
+
 export type HostMetadata = {
   favorite: boolean;
   tags: string[];
   lastUsedAt: number | null;
   trustHostDefault: boolean;
+  /** When set, drives SSH `-o StrictHostKeyChecking=…` for saved hosts. */
+  strictHostKeyPolicy?: StrictHostKeyPolicy;
 };
 
 export type HostMetadataStore = {
@@ -23,10 +28,21 @@ export type HostMetadataStore = {
 export type StoreSchemaVersion = 1;
 export type KeyKdf = "argon2id";
 
+export type HostKeyRef = {
+  keyId: string;
+  usage: string;
+};
+
 export type UserObject = {
   id: string;
   name: string;
   username: string;
+  /** When set and this user is linked on a host binding, overrides SSH HostName for the session. */
+  hostName: string;
+  /** When set and the host binding has no ProxyJump, used as ProxyJump for the session. */
+  proxyJump: string;
+  keyRefs: HostKeyRef[];
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -35,6 +51,7 @@ export type GroupObject = {
   id: string;
   name: string;
   memberUserIds: string[];
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -51,6 +68,7 @@ export type PathSshKeyObject = {
   id: string;
   name: string;
   identityFilePath: string;
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -65,16 +83,12 @@ export type EncryptedSshKeyObject = {
   nonce: string;
   fingerprint: string;
   publicKey: string;
+  tagIds: string[];
   createdAt: number;
   updatedAt: number;
 };
 
 export type SshKeyObject = PathSshKeyObject | EncryptedSshKeyObject;
-
-export type HostKeyRef = {
-  keyId: string;
-  usage: "primary" | "proxy" | string;
-};
 
 export type HostBinding = {
   userId?: string;
@@ -105,6 +119,14 @@ export type BackupPayload = {
   exportedAt: number;
 };
 
+/** Paths for OpenSSH data root (`config`, store, etc.). From `get_ssh_dir_info`. */
+export type SshDirInfo = {
+  defaultPath: string;
+  effectivePath: string;
+  overridePath: string | null;
+  userProfile: string | null;
+};
+
 export type SessionOutputEvent = {
   session_id: string;
   chunk: string;
@@ -122,7 +144,40 @@ export type QuickSshSessionRequest = {
   identityFile: string;
   proxyJump: string;
   proxyCommand: string;
+  /** Overrides metadata for Quick Connect sessions. */
+  strictHostKeyPolicy?: StrictHostKeyPolicy;
 };
+
+export type SftpDirEntry = {
+  name: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+  /** Permission mode string only, e.g. `drwxr-xr-x` (owner/group are separate fields). */
+  modeDisplay: string;
+  /** Permission bits only, e.g. `755`. */
+  modeOctal: string;
+  /** Numeric uid from the server when available. */
+  userDisplay: string;
+  /** Numeric gid from the server when available. */
+  groupDisplay: string;
+};
+
+export type LocalDirEntry = {
+  name: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+  /** Permission mode string only; owner/group are in `userDisplay` / `groupDisplay`. */
+  modeDisplay: string;
+  modeOctal: string;
+  userDisplay: string;
+  groupDisplay: string;
+};
+
+export type RemoteSshSpec =
+  | { kind: "saved"; host: HostConfig }
+  | { kind: "quick"; request: QuickSshSessionRequest };
 
 export type PaneLayoutItem = {
   id: string;
@@ -218,4 +273,34 @@ export type ViewProfile = {
   sortRules: ViewSortRule[];
   createdAt: number;
   updatedAt: number;
+};
+
+export type PluginCapability = "credentialProvider" | "settingsUi" | "hostMetadataEnricher";
+
+export type PluginManifest = {
+  id: string;
+  version: string;
+  displayName: string;
+  capabilities: PluginCapability[];
+};
+
+export type PluginListEntry = {
+  manifest: PluginManifest;
+  enabled: boolean;
+  entitlementOk: boolean;
+};
+
+export type LicensePayload = {
+  v: number;
+  licenseId: string;
+  entitlements: string[];
+  iat: number;
+  exp?: number | null;
+};
+
+export type LicenseStatus = {
+  active: boolean;
+  licenseId: string | null;
+  entitlements: string[];
+  exp: number | null;
 };
