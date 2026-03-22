@@ -189,6 +189,10 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     hostSettingsTabRemoveConfirmActive,
     toggleFavoriteForHost,
     toggleJumpHostForHost,
+    proxmuxOpenWebConsolesInPane,
+    setProxmuxOpenWebConsolesInPane,
+    proxmuxOpenWebConsolesInAppWebviewWindow,
+    setProxmuxOpenWebConsolesInAppWebviewWindow,
   } = props;
 
   const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
@@ -442,7 +446,14 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             />
           )}
           {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}
-          {activeAppSettingsTab === "proxmux" && <AppSettingsProxmuxTab />}
+          {activeAppSettingsTab === "proxmux" && (
+            <AppSettingsProxmuxTab
+              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
+              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
+              openWebConsolesInDedicatedAppWindow={proxmuxOpenWebConsolesInAppWebviewWindow}
+              setOpenWebConsolesInDedicatedAppWindow={setProxmuxOpenWebConsolesInAppWebviewWindow}
+            />
+          )}
           {activeAppSettingsTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}

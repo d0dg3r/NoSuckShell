@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { buildPaneContextActions } from "./context-actions";
 
 describe("buildPaneContextActions", () => {
+  it("disables broadcast target toggle for web panes", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "web-1",
+      paneSessionKind: "web",
+      paneFileView: "terminal",
+      broadcastModeEnabled: true,
+      broadcastCount: 0,
+    });
+    expect(actions.find((item) => item.id === "broadcast.togglePaneTarget")?.disabled).toBe(true);
+  });
+
   it("disables pane-specific actions when pane is empty", () => {
     const actions = buildPaneContextActions({
       paneSessionId: null,

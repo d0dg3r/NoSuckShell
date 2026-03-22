@@ -21,6 +21,11 @@ const LocalFilePane = lazy(async () => {
   return { default: m.LocalFilePane };
 });
 
+const WebPane = lazy(async () => {
+  const m = await import("./WebPane");
+  return { default: m.WebPane };
+});
+
 export type SplitPaneRendererBridge = {
   splitSlots: Array<string | null>;
   activePaneIndex: number;
@@ -60,6 +65,8 @@ export type SplitPaneRendererBridge = {
   isBroadcastModeEnabled: boolean;
   setBroadcastMode: (enabled: boolean) => void;
   visiblePaneSessionIds: string[];
+  /** Panes that accept terminal keyboard broadcast (excludes web iframe panes). */
+  broadcastEligibleVisiblePaneSessionIds: string[];
   broadcastTargets: Set<string>;
   terminalFontSize: number;
   terminalFontFamily: string;
@@ -82,6 +89,12 @@ export type SplitPaneRendererBridge = {
   semanticFileNameColors: boolean;
   /** When false, SFTP/local file browser toolbar and views are disabled (File workspace plugin). */
   fileWorkspacePluginEnabled: boolean;
+  /** When set, pane shows embedded web UI instead of terminal or file browser. */
+  webPanePayloadForPane: (paneIndex: number) => { url: string; title: string; allowInsecureTls?: boolean } | null;
+  /** Surface errors from the web pane (e.g. failed in-app webview window). */
+  onWebPaneOpenInAppWindowError?: (message: string) => void;
+  /** Proxmox console deep links need login first; same payload as the main-window assist banner. */
+  onWebPaneLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -104,10 +117,12 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
       const canClosePane = b.paneOrder.length > 1;
       const isPaneBroadcastTarget = paneSessionId ? b.broadcastTargets.has(paneSessionId) : false;
       const isToolbarExpanded = b.expandedPaneToolbarIndices.has(paneIndex);
+      const eligible = b.broadcastEligibleVisiblePaneSessionIds;
       const allVisibleAlreadyTargeted =
         b.isBroadcastModeEnabled &&
-        b.visiblePaneSessionIds.length > 0 &&
-        b.visiblePaneSessionIds.every((sessionId) => b.broadcastTargets.has(sessionId));
+        eligible.length > 0 &&
+        eligible.every((sessionId) => b.broadcastTargets.has(sessionId));
+      const isPaneBroadcastEligible = Boolean(paneSessionId && b.webPanePayloadForPane(paneIndex) === null);
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
@@ -356,7 +371,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 }`}
                 title="Toggle pane target"
                 aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
-                disabled={!b.isBroadcastModeEnabled || !hasPaneSession}
+                disabled={!b.isBroadcastModeEnabled || !hasPaneSession || !isPaneBroadcastEligible}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -487,7 +502,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
                 </button>
-              ) : (
+              ) : paneCtxKind === "web" ? null : (
                 <button
                   type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
@@ -546,67 +561,86 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
             </div>
             </div>
           </div>
-          {paneSessionId ? (
-            paneFileView === "remote" && remoteSpec ? (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
-              >
-                <RemoteFilePane
-                  paneIndex={paneIndex}
-                  spec={remoteSpec}
-                  getExportDestPath={b.getFileExportDestPath}
-                  archiveFormat={b.fileExportArchiveFormat}
-                  onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
-                  onFilePaneTitleChange={b.onFilePaneTitleChange}
-                  semanticFileNameColors={b.semanticFileNameColors}
-                />
-              </Suspense>
-            ) : paneFileView === "local" ? (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
-              >
-                <LocalFilePane
-                  paneIndex={paneIndex}
-                  onPathChange={(pathKey) => b.onLocalFilePanePathChange(paneIndex, pathKey)}
-                  getExportDestPath={b.getFileExportDestPath}
-                  archiveFormat={b.fileExportArchiveFormat}
-                  onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
-                  onFilePaneTitleChange={b.onFilePaneTitleChange}
-                  semanticFileNameColors={b.semanticFileNameColors}
-                />
-              </Suspense>
-            ) : (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
-              >
-                <TerminalPane
-                  sessionId={paneSessionId}
-                  onUserInput={b.handleTerminalInput}
-                  onSessionWorkingDirectoryChange={b.onSessionWorkingDirectoryChange}
-                  fontSize={b.terminalFontSize}
-                  fontFamily={b.terminalFontFamily}
-                />
-              </Suspense>
-            )
-          ) : (
-            <div className="empty-pane split-empty-pane">
-              <p className="split-empty-pane-copy">One click and we both get what we want</p>
-              <button
-                type="button"
-                className="split-empty-pane-logo-btn"
-                title="Open local terminal in this pane"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void b.connectLocalShellInPane(paneIndex);
-                }}
-              >
-                <img src={b.logoTransparentSrc} alt="Open local terminal in this pane" className="split-empty-pane-image" />
-              </button>
-              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
-                Or drop that host right here - I&apos;m waiting
-              </p>
-            </div>
-          )}
+          {(() => {
+            const webPayload = paneSessionId ? b.webPanePayloadForPane(paneIndex) : null;
+            if (webPayload) {
+              return (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading web pane" />}
+                >
+                  <WebPane
+                    url={webPayload.url}
+                    paneTitle={webPayload.title}
+                    allowInsecureTls={webPayload.allowInsecureTls === true}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            if (paneSessionId) {
+              return paneFileView === "remote" && remoteSpec ? (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+                >
+                  <RemoteFilePane
+                    paneIndex={paneIndex}
+                    spec={remoteSpec}
+                    getExportDestPath={b.getFileExportDestPath}
+                    archiveFormat={b.fileExportArchiveFormat}
+                    onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
+                    onFilePaneTitleChange={b.onFilePaneTitleChange}
+                    semanticFileNameColors={b.semanticFileNameColors}
+                  />
+                </Suspense>
+              ) : paneFileView === "local" ? (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+                >
+                  <LocalFilePane
+                    paneIndex={paneIndex}
+                    onPathChange={(pathKey) => b.onLocalFilePanePathChange(paneIndex, pathKey)}
+                    getExportDestPath={b.getFileExportDestPath}
+                    archiveFormat={b.fileExportArchiveFormat}
+                    onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
+                    onFilePaneTitleChange={b.onFilePaneTitleChange}
+                    semanticFileNameColors={b.semanticFileNameColors}
+                  />
+                </Suspense>
+              ) : (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
+                >
+                  <TerminalPane
+                    sessionId={paneSessionId}
+                    onUserInput={b.handleTerminalInput}
+                    onSessionWorkingDirectoryChange={b.onSessionWorkingDirectoryChange}
+                    fontSize={b.terminalFontSize}
+                    fontFamily={b.terminalFontFamily}
+                  />
+                </Suspense>
+              );
+            }
+            return (
+              <div className="empty-pane split-empty-pane">
+                <p className="split-empty-pane-copy">One click and we both get what we want</p>
+                <button
+                  type="button"
+                  className="split-empty-pane-logo-btn"
+                  title="Open local terminal in this pane"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.connectLocalShellInPane(paneIndex);
+                  }}
+                >
+                  <img src={b.logoTransparentSrc} alt="Open local terminal in this pane" className="split-empty-pane-image" />
+                </button>
+                <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
+                  Or drop that host right here - I&apos;m waiting
+                </p>
+              </div>
+            );
+          })()}
         </div>
       );
     }

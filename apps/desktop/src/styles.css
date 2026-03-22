@@ -369,6 +369,30 @@ body,
   cursor: col-resize;
 }
 
+.proxmox-login-assist-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.proxmox-login-assist-banner-text {
+  flex: 1 1 220px;
+}
+
+.proxmox-login-assist-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .panel {
   background: var(--bg-panel);
   border: 2px solid var(--border-main);
@@ -3574,6 +3598,46 @@ body,
   padding: var(--pane-terminal-top-inset, calc(var(--control-height-sm) + var(--space-1))) var(--space-3) 0;
 }
 
+.split-pane .web-pane-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.web-pane-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.web-pane-toolbar-btn {
+  font-size: 0.8125rem;
+}
+
+.web-pane-toolbar-hint {
+  font-size: 0.75rem;
+}
+
+.web-pane-frame-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  line-height: 1.35;
+}
+
+.web-pane-iframe {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(130, 184, 152, 0.2);
+  border-radius: var(--radius-control);
+  background: #070a0d;
+}
+
 .split-empty-pane {
   margin-top: 0;
 }
@@ -4645,15 +4709,16 @@ body,
   gap: var(--space-2);
 }
 
-/* PROXMUX rows: dark brand-bar-style base + category veil; status = inset strip (high contrast). */
+/* PROXMUX rows: flat list cells; status = full symmetric border tint (no left-only strip). */
 .proxmux-sidebar-row-wrap {
   display: flex;
   flex-direction: column;
   gap: 0;
   min-width: 0;
-  border-radius: var(--radius-control);
-  background-color: rgba(9, 13, 16, 0.97);
-  background-repeat: no-repeat;
+  border-radius: 6px;
+  border: 1px solid rgba(150, 170, 161, 0.16);
+  background: rgba(18, 22, 26, 0.96);
+  background-image: none;
 }
 
 .proxmux-sidebar-row-wrap > * {
@@ -4661,117 +4726,22 @@ body,
   z-index: 1;
 }
 
-/* Layer order: first image paints on top — category veil over horizontal base (matches .brand-bar family). */
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="node"] {
-  background-image:
-    radial-gradient(ellipse 135% 110% at 0% 50%, color-mix(in srgb, var(--brand-blue) 26%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      rgba(9, 13, 16, 0.96) 0%,
-      rgba(9, 13, 16, 0.84) 46%,
-      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
-      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="qemu"] {
-  background-image:
-    radial-gradient(ellipse 130% 105% at 6% 48%, color-mix(in srgb, var(--brand-cyan) 24%, transparent), transparent 56%),
-    linear-gradient(
-      90deg,
-      rgba(9, 13, 16, 0.96) 0%,
-      rgba(9, 13, 16, 0.84) 46%,
-      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
-      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="qemu-template"] {
-  background-image:
-    radial-gradient(ellipse 125% 100% at 4% 50%, color-mix(in srgb, #9b7ed8 22%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      rgba(9, 13, 16, 0.96) 0%,
-      rgba(9, 13, 16, 0.84) 46%,
-      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
-      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="false"][data-proxmux-category="lxc"] {
-  background-image:
-    radial-gradient(ellipse 130% 105% at 4% 50%, color-mix(in srgb, var(--support-amber) 22%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      rgba(9, 13, 16, 0.96) 0%,
-      rgba(9, 13, 16, 0.84) 46%,
-      color-mix(in srgb, var(--brand-yellow) 6%, rgba(9, 13, 16, 0.84)) 74%,
-      color-mix(in srgb, var(--brand-yellow) 12%, rgba(9, 13, 16, 0.82)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="node"] {
-  background-image:
-    radial-gradient(ellipse 135% 110% at 0% 50%, color-mix(in srgb, var(--brand-blue) 28%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
-      rgba(9, 13, 16, 0.9) 32%,
-      rgba(9, 13, 16, 0.84) 52%,
-      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
-      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="qemu"] {
-  background-image:
-    radial-gradient(ellipse 130% 105% at 6% 48%, color-mix(in srgb, var(--brand-cyan) 26%, transparent), transparent 56%),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
-      rgba(9, 13, 16, 0.9) 32%,
-      rgba(9, 13, 16, 0.84) 52%,
-      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
-      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="qemu-template"] {
-  background-image:
-    radial-gradient(ellipse 125% 100% at 4% 50%, color-mix(in srgb, #b49df0 24%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
-      rgba(9, 13, 16, 0.9) 32%,
-      rgba(9, 13, 16, 0.84) 52%,
-      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
-      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
-    );
-}
-
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"][data-proxmux-category="lxc"] {
-  background-image:
-    radial-gradient(ellipse 130% 105% at 4% 50%, color-mix(in srgb, var(--support-amber) 24%, transparent), transparent 58%),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--brand-yellow) 16%, rgba(9, 13, 16, 0.97)) 0%,
-      rgba(9, 13, 16, 0.9) 32%,
-      rgba(9, 13, 16, 0.84) 52%,
-      color-mix(in srgb, var(--brand-yellow) 9%, rgba(9, 13, 16, 0.82)) 78%,
-      color-mix(in srgb, var(--brand-yellow) 14%, rgba(9, 13, 16, 0.8)) 100%
-    );
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"] {
+  background: rgba(22, 21, 18, 0.97);
+  border-color: rgba(255, 212, 59, 0.22);
 }
 
 .proxmux-sidebar-row-wrap[data-proxmux-power="up"] {
-  box-shadow: inset 4px 0 0 rgba(130, 184, 152, 0.98);
+  border-color: color-mix(in srgb, var(--support-green) 82%, rgba(150, 170, 161, 0.35));
+  background: color-mix(in srgb, var(--support-green) 14%, rgba(18, 22, 26, 0.97));
 }
 
 .proxmux-sidebar-row-wrap[data-proxmux-power="down"] {
-  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--danger) 92%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 48%, rgba(150, 170, 161, 0.16));
 }
 
 .proxmux-sidebar-row-wrap[data-proxmux-power="template"] {
-  box-shadow: inset 4px 0 0 rgba(154, 138, 210, 0.92);
+  border-color: rgba(132, 124, 158, 0.42);
 }
 
 .proxmux-sidebar-item-shell {
@@ -4779,8 +4749,8 @@ body,
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   min-width: 0;
-  border-radius: var(--radius-control);
-  border: 1px solid rgba(150, 170, 161, 0.12);
+  border-radius: 0;
+  border: 0;
   background: transparent;
   overflow: hidden;
 }
@@ -4923,37 +4893,20 @@ body,
   outline-offset: 2px;
 }
 
-.proxmux-sidebar-item-shell .proxmux-sidebar-row {
-  border: none;
-  border-radius: 0;
-  background: transparent;
-}
-
-.proxmux-sidebar-item-shell .proxmux-sidebar-row--guest:hover {
-  background: rgba(0, 0, 0, 0.12);
-}
-
 .proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-item-shell {
-  border-color: rgba(130, 184, 152, 0.28);
   border-bottom: none;
-  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  border-radius: 0;
 }
 
-/* Fused card: keep type/status gradient from parent; only add outline */
+/* Expanded guest: single symmetric frame on the wrap */
 .proxmux-sidebar-row-wrap--expanded {
-  border: 1px solid rgba(130, 184, 152, 0.35);
-  border-radius: 8px;
+  border-color: rgba(130, 184, 152, 0.32);
+  border-radius: 6px;
   overflow: hidden;
 }
 
 .proxmux-sidebar-row-wrap--expanded .proxmux-guest-slide.host-slide-menu.is-open {
-  border-radius: 0 0 7px 7px;
-}
-
-.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row {
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 0 0 5px 5px;
 }
 
 .proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:hover {
@@ -4975,9 +4928,9 @@ body,
   flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-control);
-  background: rgba(12, 16, 20, 0.35);
-  border: 1px solid rgba(150, 170, 161, 0.1);
+  border-radius: 0;
+  background: transparent;
+  border: 0;
   font-size: var(--font-base);
   color: var(--text-main);
 }
@@ -4985,23 +4938,20 @@ body,
 .proxmux-sidebar-row--guest {
   cursor: pointer;
   text-align: left;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease;
+  transition: background-color 0.15s ease;
 }
 
 .proxmux-sidebar-row--guest:hover {
-  border-color: rgba(130, 184, 152, 0.22);
-  background: rgba(14, 20, 24, 0.42);
+  background: rgba(0, 0, 0, 0.14);
 }
 
 .proxmux-sidebar-row--guest:focus-visible {
-  outline: 2px solid rgba(255, 212, 59, 0.75);
+  outline: 2px solid rgba(130, 184, 152, 0.55);
   outline-offset: 2px;
 }
 
 .proxmux-sidebar-row.is-expanded {
-  border-color: rgba(130, 184, 152, 0.35);
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .proxmux-sidebar-row-chevron {
@@ -5970,6 +5920,23 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-view-tab.tab-pill {
+  border-radius: 6px;
+  border-width: 1px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.sidebar-view-tab.tab-pill.is-active {
+  border-color: rgba(130, 184, 152, 0.48);
+  background: rgba(20, 28, 24, 0.92);
+  box-shadow: none;
+  color: var(--text-main);
 }
 
 /* Custom views editor: tab strip + flat editor (no nested settings-card) */

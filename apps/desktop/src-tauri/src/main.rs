@@ -60,11 +60,13 @@ use view_profiles::{
     reorder_view_profiles as reorder_view_profiles_backend, save_view_profile as save_view_profile_backend,
     ViewProfile,
 };
+use std::sync::{Arc, Mutex};
+
 use tauri::Emitter;
 use tauri::Manager;
 use tauri::State;
 use tauri::WebviewUrl;
-use tauri::webview::WebviewWindowBuilder;
+use tauri::webview::{PageLoadEvent, WebviewWindowBuilder};
 use store_models::{EntityStore, HostBinding, SshKeyObject, TagObject, UserObject, GroupObject};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -151,6 +153,440 @@ fn validate_external_http_url(url: &str) -> Result<(), String> {
 fn open_external_url(url: String) -> Result<(), String> {
     validate_external_http_url(&url)?;
     open::that(url.trim()).map_err(|e| e.to_string())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+fn webkit_set_tls_errors_ignored_for_window<R: tauri::Runtime>(
+    win: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    win.with_webview(|webview| {
+        use webkit2gtk::{TLSErrorsPolicy, WebContextExt, WebViewExt, WebsiteDataManagerExt};
+        if let Some(ctx) = webview.inner().web_context() {
+            if let Some(mgr) = ctx.website_data_manager() {
+                mgr.set_tls_errors_policy(TLSErrorsPolicy::Ignore);
+            }
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+)))]
+fn webkit_set_tls_errors_ignored_for_window<R: tauri::Runtime>(
+    _win: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+/// Proxmox ExtJS UI typically sets a non-empty URL fragment after web login (`#v1:…`).
+fn proxmox_url_has_nonempty_fragment(url: &tauri::Url) -> bool {
+    url.fragment()
+        .map(|f| !f.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn proxmox_url_query_has_console(url: &tauri::Url) -> bool {
+    url.query()
+        .map(|q| q.contains("console="))
+        .unwrap_or(false)
+}
+
+/// True when a finished load or navigation URL should trigger auto-console (not already the console document).
+fn proxmox_should_trigger_auto_console_nav(url: &tauri::Url) -> bool {
+    if proxmox_url_query_has_console(url) {
+        return false;
+    }
+    proxmox_url_has_nonempty_fragment(url)
+}
+
+// #region agent log
+fn debug_proxmox_auto_console_ndjson(
+    hypothesis_id: &str,
+    location: &str,
+    message: &str,
+    data: serde_json::Value,
+) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let entry = serde_json::json!({
+        "sessionId": "1d8adf",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": ts,
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/home/joe/Development/devops-geek/NoSuckShell/.cursor/debug-1d8adf.log")
+    {
+        let _ = writeln!(f, "{}", entry);
+    }
+}
+// #endregion
+
+fn proxmox_origin_base_uri(url: &tauri::Url) -> String {
+    let mut u = url.clone();
+    u.set_path("/");
+    u.set_query(None);
+    u.set_fragment(None);
+    let s = u.to_string();
+    if s.ends_with('/') {
+        s
+    } else {
+        format!("{s}/")
+    }
+}
+
+fn finish_proxmox_auto_console_navigation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    webview_label: &str,
+    console_s: String,
+    state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
+    trigger: &'static str,
+) {
+    let Some(win) = app.get_webview_window(webview_label) else {
+        if let Ok(mut st) = state.lock() {
+            st.done = false;
+        }
+        return;
+    };
+
+    let parsed_console = match tauri::Url::parse(console_s.trim()) {
+        Ok(p) => p,
+        Err(_) => {
+            if let Ok(mut st) = state.lock() {
+                st.done = false;
+            }
+            return;
+        }
+    };
+
+    if win.navigate(parsed_console).is_err() {
+        if let Ok(mut st) = state.lock() {
+            st.done = false;
+        }
+        return;
+    }
+
+    // #region agent log
+    debug_proxmox_auto_console_ndjson(
+        "H3",
+        "main.rs:finish_proxmox_auto_console_navigation",
+        "fired_navigate_to_console",
+        serde_json::json!({ "trigger": trigger }),
+    );
+    // #endregion
+
+    let emit_payload = ProxmoxAssistAutoConsolePayload {
+        webview_label: webview_label.to_string(),
+        console_url: console_s,
+    };
+    let _ = app.emit("proxmox-web-assist-auto-console", emit_payload);
+}
+
+fn try_fire_proxmox_auto_console<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    webview_label: &str,
+    candidate_url: &tauri::Url,
+    state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
+    trigger: &'static str,
+) {
+    let has_frag = proxmox_url_has_nonempty_fragment(candidate_url);
+    let has_console_q = proxmox_url_query_has_console(candidate_url);
+    let url_preview = candidate_url.as_str().chars().take(384).collect::<String>();
+
+    // #region agent log
+    debug_proxmox_auto_console_ndjson(
+        "H3",
+        "main.rs:try_fire_proxmox_auto_console",
+        "check",
+        serde_json::json!({
+            "trigger": trigger,
+            "urlPreview": url_preview,
+            "hasFragment": has_frag,
+            "hasConsoleQuery": has_console_q,
+        }),
+    );
+    // #endregion
+
+    let mut st = match state.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if st.done {
+        return;
+    }
+    if !proxmox_should_trigger_auto_console_nav(candidate_url) {
+        return;
+    }
+    let console_s = st.console_url.clone();
+    st.done = true;
+    drop(st);
+
+    finish_proxmox_auto_console_navigation(app, webview_label, console_s, state, trigger);
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+fn proxmox_cookie_list_has_auth_ticket(cookies: &mut [soup::Cookie]) -> bool {
+    for c in cookies.iter_mut() {
+        if let Some(n) = c.name() {
+            let s = n.as_str();
+            if s == "PVEAuthCookie" || s.ends_with("PVEAuthCookie") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+fn try_fire_proxmox_auto_console_when_cookies_have_ticket<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    webview_label: &str,
+    state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
+    cookies: &mut [soup::Cookie],
+    trigger: &'static str,
+) {
+    if !proxmox_cookie_list_has_auth_ticket(cookies) {
+        return;
+    }
+
+    // #region agent log
+    debug_proxmox_auto_console_ndjson(
+        "H4",
+        "main.rs:try_fire_proxmox_auto_console_when_cookies_have_ticket",
+        "pve_auth_cookie_present",
+        serde_json::json!({ "trigger": trigger }),
+    );
+    // #endregion
+
+    let mut st = match state.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if st.done {
+        return;
+    }
+    let console_s = st.console_url.clone();
+    st.done = true;
+    drop(st);
+
+    finish_proxmox_auto_console_navigation(app, webview_label, console_s, state, trigger);
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
+    win: &tauri::WebviewWindow<R>,
+    app: tauri::AppHandle<R>,
+    webview_label: String,
+    cookie_lookup_uri: String,
+    state: Arc<Mutex<PendingProxmoxAutoConsole>>,
+) -> Result<(), String> {
+    win.with_webview(move |platform| {
+        use webkit2gtk::gio;
+        use webkit2gtk::{CookieManagerExt, WebContextExt, WebViewExt};
+
+        let webview = platform.inner();
+        let Some(ctx) = webview.web_context() else {
+            return;
+        };
+        let Some(cm) = ctx.cookie_manager() else {
+            return;
+        };
+
+        let cm_probe = cm.clone();
+        let probe_uri = cookie_lookup_uri.clone();
+        let app_probe = app.clone();
+        let label_probe = webview_label.clone();
+        let state_probe = Arc::clone(&state);
+        cm_probe.cookies(&probe_uri, None::<&gio::Cancellable>, move |res| {
+            if let Ok(mut list) = res {
+                try_fire_proxmox_auto_console_when_cookies_have_ticket(
+                    &app_probe,
+                    &label_probe,
+                    &state_probe,
+                    &mut list,
+                    "pve_auth_cookie_probe",
+                );
+            }
+        });
+
+        let app0 = app.clone();
+        let label0 = webview_label.clone();
+        let uri0 = cookie_lookup_uri.clone();
+        let state0 = Arc::clone(&state);
+        cm.connect_changed(move |cm| {
+            let uri = uri0.clone();
+            let app_c = app0.clone();
+            let label_c = label0.clone();
+            let state_c = Arc::clone(&state0);
+            cm.cookies(&uri, None::<&gio::Cancellable>, move |res| {
+                if let Ok(mut list) = res {
+                    try_fire_proxmox_auto_console_when_cookies_have_ticket(
+                        &app_c,
+                        &label_c,
+                        &state_c,
+                        &mut list,
+                        "pve_auth_cookie_changed",
+                    );
+                }
+            });
+        });
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+)))]
+fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
+    _win: &tauri::WebviewWindow<R>,
+    _app: tauri::AppHandle<R>,
+    _webview_label: String,
+    _cookie_lookup_uri: String,
+    _state: Arc<Mutex<PendingProxmoxAutoConsole>>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxmoxAssistAutoConsolePayload {
+    webview_label: String,
+    console_url: String,
+}
+
+struct PendingProxmoxAutoConsole {
+    console_url: String,
+    done: bool,
+}
+
+/// Opens `http`/`https` in a new app-owned webview window (top-level document), avoiding iframe embedding limits.
+///
+/// Returns the webview **label** for [`navigate_in_app_webview_window`] (e.g. continue to a console URL after Proxmox web login).
+///
+/// Uses separate `title` / `url` parameters so the frontend can `invoke(..., { title, url })` (Tauri maps one JSON key per argument; a single struct parameter named `args` would require a nested `args` object).
+///
+/// When `allow_insecure_tls` is true (Proxmox cluster **Allow insecure TLS**), WebKitGTK is configured to ignore TLS certificate errors for that window (Linux/BSD only). You still log in in that window; API tokens are not shared with the web UI.
+///
+/// When `auto_console_url` is set, after Proxmox web login the webview navigates to the console URL and emits `proxmox-web-assist-auto-console` so the host UI can dismiss the login assist banner.
+///
+/// Detection: on Linux/BSD, WebKitGTK’s cookie store is watched for the **`PVEAuthCookie`** session ticket (including `__Host-`-prefixed names). HttpOnly cookies are visible there but not to page JavaScript. A finished load with a non-empty URL fragment is still used as a secondary signal when it occurs.
+///
+/// We do **not** use [`WebviewWindowBuilder::on_navigation`] on fragment changes: Proxmox sets `#v1:…` during ExtJS bootstrap before a ticket exists, which would navigate to the console too early (**401 No ticket**).
+#[tauri::command]
+fn open_in_app_webview_window(
+    app: tauri::AppHandle,
+    title: String,
+    url: String,
+    allow_insecure_tls: bool,
+    auto_console_url: Option<String>,
+) -> Result<String, String> {
+    validate_external_http_url(&url)?;
+    if let Some(ref a) = auto_console_url {
+        validate_external_http_url(a)?;
+    }
+    let t = url.trim();
+    let parsed = tauri::Url::parse(t).map_err(|e| format!("Invalid URL: {e}"))?;
+    let parsed_login_for_cookie = parsed.clone();
+    let label = format!("web-{}", uuid::Uuid::new_v4());
+    let window_title: String = title.trim().chars().take(120).collect();
+    let window_title = if window_title.is_empty() {
+        "Web console".to_string()
+    } else {
+        window_title
+    };
+
+    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
+        .title(window_title)
+        .inner_size(1200.0, 800.0);
+
+    let mut proxmox_auto_state: Option<Arc<Mutex<PendingProxmoxAutoConsole>>> = None;
+    if let Some(ref auto_s) = auto_console_url {
+        let state = Arc::new(Mutex::new(PendingProxmoxAutoConsole {
+            console_url: auto_s.clone(),
+            done: false,
+        }));
+        proxmox_auto_state = Some(Arc::clone(&state));
+        let state_cb = Arc::clone(&state);
+        let app_emit = app.clone();
+        let label_evt = label.clone();
+        builder = builder.on_page_load(move |_win, payload| {
+            if payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            try_fire_proxmox_auto_console(&app_emit, &label_evt, payload.url(), &state_cb, "page_load_finished");
+        });
+    }
+
+    let win = builder.build().map_err(|e| e.to_string())?;
+    if let Some(state) = proxmox_auto_state {
+        let _ = webkit_attach_proxmox_pve_auth_cookie_listener(
+            &win,
+            app.clone(),
+            label.clone(),
+            proxmox_origin_base_uri(&parsed_login_for_cookie),
+            state,
+        );
+    }
+    if allow_insecure_tls {
+        webkit_set_tls_errors_ignored_for_window(&win)?;
+        let _ = win.reload();
+    }
+    let _ = win.set_focus();
+    Ok(label)
+}
+
+/// Navigates an existing in-app webview window opened by [`open_in_app_webview_window`] (use its returned label).
+#[tauri::command]
+fn navigate_in_app_webview_window(app: tauri::AppHandle, label: String, url: String) -> Result<(), String> {
+    validate_external_http_url(&url)?;
+    let win = app
+        .get_webview_window(&label)
+        .ok_or_else(|| "Webview window was closed or not found.".to_string())?;
+    let t = url.trim();
+    let parsed = tauri::Url::parse(t).map_err(|e| format!("Invalid URL: {e}"))?;
+    win.navigate(parsed).map_err(|e| e.to_string())?;
+    let _ = win.set_focus();
+    Ok(())
 }
 
 fn spice_payload_to_virt_viewer_ini(data: &JsonValue) -> Result<String, String> {
@@ -545,6 +981,8 @@ fn main() {
             save_host_metadata,
             touch_host_last_used,
             open_external_url,
+            open_in_app_webview_window,
+            navigate_in_app_webview_window,
             open_virt_viewer_from_spice_payload,
             start_session,
             start_local_session,

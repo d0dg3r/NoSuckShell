@@ -49,6 +49,7 @@ impl NssPlugin for ProxmuxPlugin {
             "guestPower" => Ok(guest_power(arg)?),
             "toggleProxmuxFavorite" => Ok(toggle_proxmux_favorite(arg)?),
             "fetchSpiceProxy" => Ok(fetch_spice_proxy(arg)?),
+            "qemuSpiceCapable" => Ok(qemu_spice_capable(arg)?),
             _ => anyhow::bail!("unknown method: {method}"),
         }
     }
@@ -688,6 +689,65 @@ fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
     Ok(json!({ "ok": true, "data": data }))
 }
 
+/// Matches PROXMUX-Manager `isSpiceEnabled`: SPICE is meaningful when display uses QXL, virtio-gpu, or explicit spice.
+fn spice_capable_from_qemu_config_data(data: &Value) -> bool {
+    let vga = match data.get("vga") {
+        Some(Value::String(s)) => s.to_lowercase(),
+        Some(Value::Number(n)) => n.to_string().to_lowercase(),
+        _ => String::new(),
+    };
+    vga.contains("qxl") || vga.contains("spice") || vga.contains("virtio")
+}
+
+fn qemu_spice_capable(arg: &Value) -> Result<Value> {
+    let GuestClusterArg {
+        cluster_id,
+        node,
+        guest_type,
+        vmid,
+    } = serde_json::from_value(arg.clone()).context("parse qemuSpiceCapable")?;
+    let vmid = guest_arg_vmid_string(&vmid)?;
+    validate_pve_node_segment(&node)?;
+    validate_pve_vmid(&vmid)?;
+    let typ = normalize_guest_type(guest_type.trim())?;
+    if typ != "qemu" {
+        anyhow::bail!("qemuSpiceCapable only supports guestType \"qemu\"");
+    }
+
+    let state = load_state()?;
+    let c = state
+        .clusters
+        .get(&cluster_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
+    let secret = read_api_secret(c)?;
+    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
+    let client = http_client(c.allow_insecure_tls)?;
+    let primary = normalize_base_url(&c.proxmox_url);
+
+    let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/config");
+    let data = with_failover(&primary, &c.failover_urls, |base| {
+        let url = format!("{}{}", normalize_base_url(base), path_tail);
+        let response = client
+            .get(&url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/json")
+            .send()
+            .with_context(|| format!("GET {url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().unwrap_or_default();
+            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+        }
+        let body: Value = response.json().context("parse qemu config JSON")?;
+        body.get("data")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing data in qemu config response"))
+    })?;
+
+    let spice_capable = spice_capable_from_qemu_config_data(&data);
+    Ok(json!({ "ok": true, "spiceCapable": spice_capable }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GuestPowerArg {
@@ -895,5 +955,15 @@ mod tests {
         assert!(b.is_empty());
         let c = toggle_favorite_set(&b, "node:p");
         assert_eq!(c, vec!["node:p".to_string()]);
+    }
+
+    #[test]
+    fn spice_capable_from_qemu_config_detects_qxl_spice_virtio() {
+        assert!(spice_capable_from_qemu_config_data(&json!({ "vga": "qxl" })));
+        assert!(spice_capable_from_qemu_config_data(&json!({ "vga": "type=qxl" })));
+        assert!(spice_capable_from_qemu_config_data(&json!({ "vga": "virtio-vga" })));
+        assert!(spice_capable_from_qemu_config_data(&json!({ "vga": "SPICE" })));
+        assert!(!spice_capable_from_qemu_config_data(&json!({ "vga": "std" })));
+        assert!(!spice_capable_from_qemu_config_data(&json!({})));
     }
 }

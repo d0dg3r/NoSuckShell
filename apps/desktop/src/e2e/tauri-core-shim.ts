@@ -173,9 +173,12 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       }
       return undefined;
     }
+    case "open_in_app_webview_window":
+      return "e2e-webview-window";
     case "save_host_metadata":
     case "touch_host_last_used":
     case "open_external_url":
+    case "navigate_in_app_webview_window":
     case "open_virt_viewer_from_spice_payload":
     case "export_backup":
     case "import_backup":
@@ -380,6 +383,9 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
               port: "5900",
             },
           };
+        }
+        if (method === "qemuSpiceCapable") {
+          return { ok: true, spiceCapable: true };
         }
       }
       throw new Error(`e2e plugin_invoke: unknown method ${method}`);

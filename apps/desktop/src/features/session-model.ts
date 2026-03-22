@@ -16,7 +16,16 @@ export type LocalSessionTab = {
   kind: "local";
   label: string;
 };
-export type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab;
+/** In-app iframe pane for HTTPS URLs (e.g. Proxmox noVNC / web shell). No backend PTY session. */
+export type WebSessionTab = {
+  id: string;
+  kind: "web";
+  label: string;
+  url: string;
+  /** Mirrors PROXMUX cluster "Allow insecure TLS" for in-app webview window (Linux/BSD WebKit). */
+  allowInsecureTls?: boolean;
+};
+export type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab | WebSessionTab;
 
 export type QuickConnectDraft = {
   hostName: string;

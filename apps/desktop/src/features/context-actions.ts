@@ -25,7 +25,7 @@ export type ContextAction = {
   separatorAbove?: boolean;
 };
 
-export type PaneContextSessionKind = "empty" | "ssh" | "local";
+export type PaneContextSessionKind = "empty" | "ssh" | "local" | "web";
 
 type BuildArgs = {
   paneSessionId: string | null;
@@ -138,7 +138,7 @@ export const buildPaneContextActions = ({
     {
       id: "broadcast.togglePaneTarget",
       label: "Target this pane",
-      disabled: !broadcastModeEnabled || !hasPaneSession,
+      disabled: !broadcastModeEnabled || !hasPaneSession || paneSessionKind === "web",
     },
     {
       id: "pane.clear",

@@ -43,6 +43,7 @@ import {
   startSession,
   touchHostLastUsed,
   listPlugins,
+  navigateInAppWebviewWindow,
   openExternalUrl,
   openVirtViewerFromSpicePayload,
   pluginInvoke,
@@ -159,6 +160,11 @@ import {
   metadataPatchForHostKeyPolicy,
 } from "./features/host-metadata-policy";
 import { createId } from "./features/app-id";
+import { validateExternalHttpUrl } from "./features/external-http-url";
+import {
+  markProxmoxWebUiSessionReadyForOrigin,
+  openProxmoxInAppWebviewWindow,
+} from "./features/proxmox-webview-window";
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
@@ -172,6 +178,8 @@ import {
   LAYOUT_MODE_STORAGE_KEY,
   LIST_TONE_PRESET_STORAGE_KEY,
   MOBILE_STACKED_MEDIA,
+  PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY,
+  PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY,
   QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY,
   QUICK_CONNECT_MODE_STORAGE_KEY,
   SETTINGS_OPEN_MODE_STORAGE_KEY,
@@ -399,6 +407,10 @@ export function App() {
     legacyProxyCommand: "",
   });
   const [error, setError] = useState<string>("");
+  /** After opening Proxmox login in an external webview, user continues to the console URL here. */
+  const [proxmoxWebLoginAssist, setProxmoxWebLoginAssist] = useState<{ label: string; consoleUrl: string } | null>(
+    null,
+  );
   const [isAppSettingsOpen, setIsAppSettingsOpen] = useState<boolean>(false);
   const [settingsOpenMode, setSettingsOpenMode] = useState<SettingsOpenMode>(() => {
     if (typeof window === "undefined") {
@@ -612,6 +624,19 @@ export function App() {
     return parseStoredAutoArrangeMode(persisted);
   });
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readLayoutMode());
+  const [proxmuxOpenWebConsolesInPane, setProxmuxOpenWebConsolesInPane] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const raw = window.localStorage.getItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY);
+    return raw !== "false";
+  });
+  const [proxmuxOpenWebConsolesInAppWebviewWindow, setProxmuxOpenWebConsolesInAppWebviewWindow] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.localStorage.getItem(PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY) === "true";
+  });
   const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<string, WorkspaceSnapshot>>({
     [DEFAULT_WORKSPACE_ID]: createEmptyWorkspaceSnapshot(DEFAULT_WORKSPACE_ID, "Main"),
@@ -750,6 +775,12 @@ export function App() {
     () => splitSlots.filter((slot): slot is string => Boolean(slot)),
     [splitSlots],
   );
+  const broadcastEligibleVisiblePaneSessionIds = useMemo(() => {
+    return visiblePaneSessionIds.filter((id) => {
+      const s = sessionById.get(id);
+      return Boolean(s && s.kind !== "web");
+    });
+  }, [visiblePaneSessionIds, sessionById]);
   const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
   const selectedLayoutProfile = useMemo(
     () => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null,
@@ -997,6 +1028,9 @@ export function App() {
         return "Drop it on me";
       }
       if (session.kind === "local") {
+        return session.label;
+      }
+      if (session.kind === "web") {
         return session.label;
       }
       if (session.kind === "sshQuick") {
@@ -1755,6 +1789,33 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (import.meta.env.VITE_E2E === "true") {
+      return;
+    }
+    type ProxmoxAssistAutoPayload = { webviewLabel: string; consoleUrl: string };
+    let unlisten: (() => void) | undefined;
+    void listen<ProxmoxAssistAutoPayload>("proxmox-web-assist-auto-console", (ev) => {
+      const { webviewLabel, consoleUrl } = ev.payload;
+      setProxmoxWebLoginAssist((prev) => {
+        if (prev?.label !== webviewLabel) {
+          return prev;
+        }
+        markProxmoxWebUiSessionReadyForOrigin(consoleUrl);
+        return null;
+      });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        /* plain Vite preview without Tauri */
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
     const pendingProfileSessionIds = pendingProfileLoadSessionIdsRef.current;
     if (pendingProfileSessionIds && pendingProfileSessionIds.size > 0) {
       const hasAllPendingSessionIds = Array.from(pendingProfileSessionIds).every((id) => sessionIds.includes(id));
@@ -2090,6 +2151,15 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
   }, [layoutMode]);
+  useEffect(() => {
+    window.localStorage.setItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY, String(proxmuxOpenWebConsolesInPane));
+  }, [proxmuxOpenWebConsolesInPane]);
+  useEffect(() => {
+    window.localStorage.setItem(
+      PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY,
+      String(proxmuxOpenWebConsolesInAppWebviewWindow),
+    );
+  }, [proxmuxOpenWebConsolesInAppWebviewWindow]);
   useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
     if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
@@ -2984,13 +3054,66 @@ export function App() {
     [hosts, metadataStore.defaultUser, connectToHostInNewPane],
   );
 
-  const handleProxmuxOpenExternalUrl = useCallback(async (url: string) => {
+  const handleProxmuxOpenExternalUrl = useCallback(
+    async (url: string, label?: string, options?: { allowInsecureTls?: boolean }) => {
+      setError("");
+      const allowInsecureTls = options?.allowInsecureTls === true;
+      if (proxmuxOpenWebConsolesInPane) {
+        const err = validateExternalHttpUrl(url);
+        if (err) {
+          setError(err);
+          return;
+        }
+        const trimmed = url.trim();
+        const title = (label ?? "").trim() || "Proxmox console";
+        if (proxmuxOpenWebConsolesInAppWebviewWindow) {
+          try {
+            const result = await openProxmoxInAppWebviewWindow({
+              title,
+              consoleUrl: trimmed,
+              allowInsecureTls,
+            });
+            if (result.reused) {
+              setProxmoxWebLoginAssist(null);
+            } else if (result.loginFirst) {
+              setProxmoxWebLoginAssist({ label: result.label, consoleUrl: trimmed });
+            }
+          } catch (e) {
+            setError(String(e));
+          }
+          return;
+        }
+        const id = `web-${createId()}`;
+        setSessions((prev) => [
+          ...prev,
+          { id, kind: "web", label: title, url: trimmed, ...(allowInsecureTls ? { allowInsecureTls: true } : {}) },
+        ]);
+        placeSessionIntoNewOrFreePane(id, activePaneIndex);
+        return;
+      }
+      try {
+        await openExternalUrl(url);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [proxmuxOpenWebConsolesInPane, proxmuxOpenWebConsolesInAppWebviewWindow, activePaneIndex],
+  );
+
+  const handleProxmoxContinueToConsole = useCallback(async () => {
+    if (!proxmoxWebLoginAssist) return;
     setError("");
     try {
-      await openExternalUrl(url);
+      await navigateInAppWebviewWindow(proxmoxWebLoginAssist.label, proxmoxWebLoginAssist.consoleUrl);
+      markProxmoxWebUiSessionReadyForOrigin(proxmoxWebLoginAssist.consoleUrl);
+      setProxmoxWebLoginAssist(null);
     } catch (e) {
       setError(String(e));
     }
+  }, [proxmoxWebLoginAssist]);
+
+  const onWebPaneLoginFirstWebviewOpen = useCallback((payload: { label: string; consoleUrl: string }) => {
+    setProxmoxWebLoginAssist(payload);
   }, []);
 
   const handleProxmuxSpice = useCallback(async (ctx: { clusterId: string; node: string; vmid: string }) => {
@@ -3238,6 +3361,25 @@ export function App() {
   const spawnSessionFromExistingSession = async (sourceSession: SessionTab): Promise<string | null> => {
     if (sourceSession.kind === "sshSaved") {
       return spawnSessionFromHostAlias(sourceSession.hostAlias);
+    }
+    if (sourceSession.kind === "web") {
+      const err = validateExternalHttpUrl(sourceSession.url);
+      if (err) {
+        setError(err);
+        return null;
+      }
+      const id = `web-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "web",
+          label: sourceSession.label,
+          url: sourceSession.url.trim(),
+          ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+        },
+      ]);
+      return id;
     }
     if (sourceSession.kind === "local") {
       try {
@@ -3568,7 +3710,10 @@ export function App() {
   }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder]);
 
   const closeSessionById = async (sessionId: string) => {
-    await closeSession(sessionId);
+    const tab = sessions.find((s) => s.id === sessionId);
+    if (!tab || tab.kind !== "web") {
+      await closeSession(sessionId);
+    }
     setSessionFileViews((prev) => {
       if (!(sessionId in prev)) {
         return prev;
@@ -3616,7 +3761,15 @@ export function App() {
       }
       return;
     }
-    const results = await Promise.allSettled(sessionIds.map((sessionId) => closeSession(sessionId)));
+    const results = await Promise.allSettled(
+      sessionIds.map((sessionId) => {
+        const tab = sessions.find((s) => s.id === sessionId);
+        if (tab?.kind === "web") {
+          return Promise.resolve();
+        }
+        return closeSession(sessionId);
+      }),
+    );
     const failedCount = results.filter((result) => result.status === "rejected").length;
     setSessions([]);
     setActiveSession("");
@@ -3731,6 +3884,10 @@ export function App() {
     if (!sessionId) {
       return;
     }
+    const tab = sessions.find((s) => s.id === sessionId);
+    if (tab?.kind === "web") {
+      return;
+    }
     toggleBroadcastTarget(sessionId);
   };
 
@@ -3738,16 +3895,17 @@ export function App() {
     if (!isBroadcastModeEnabled) {
       return;
     }
-    if (visiblePaneSessionIds.length === 0) {
+    const eligible = broadcastEligibleVisiblePaneSessionIds;
+    if (eligible.length === 0) {
       return;
     }
     setBroadcastTargets((prev) => {
       const next = new Set(prev);
-      const allVisibleAlreadyTargeted = visiblePaneSessionIds.every((sessionId) => next.has(sessionId));
+      const allVisibleAlreadyTargeted = eligible.every((sessionId) => next.has(sessionId));
       if (allVisibleAlreadyTargeted) {
-        visiblePaneSessionIds.forEach((sessionId) => next.delete(sessionId));
+        eligible.forEach((sessionId) => next.delete(sessionId));
       } else {
-        visiblePaneSessionIds.forEach((sessionId) => next.add(sessionId));
+        eligible.forEach((sessionId) => next.add(sessionId));
       }
       return next;
     });
@@ -4193,14 +4351,22 @@ export function App() {
 
   const handleTerminalInput = useCallback(
     (originSessionId: string, data: string) => {
+      const origin = sessionById.get(originSessionId);
+      if (origin?.kind === "web") {
+        return;
+      }
+      const terminalSessionIds = sessionIds.filter((id) => sessionById.get(id)?.kind !== "web");
       const targets = isBroadcastModeEnabled
-        ? resolveInputTargets(originSessionId, broadcastTargets, sessionIds)
+        ? resolveInputTargets(originSessionId, broadcastTargets, terminalSessionIds)
         : [originSessionId];
       for (const target of targets) {
+        if (sessionById.get(target)?.kind === "web") {
+          continue;
+        }
         void sendInput(target, data);
       }
     },
-    [broadcastTargets, isBroadcastModeEnabled, sessionIds],
+    [broadcastTargets, isBroadcastModeEnabled, sessionById, sessionIds],
   );
 
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -4516,6 +4682,13 @@ export function App() {
             sessionKind: "local" as const,
           };
         }
+        if (paneSession.kind === "web") {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+          };
+        }
         return {
           width: pane.width,
           height: pane.height,
@@ -4678,6 +4851,9 @@ export function App() {
       if (!session) {
         return "empty";
       }
+      if (session.kind === "web") {
+        return "web";
+      }
       return session.kind === "local" ? "local" : "ssh";
     },
     [splitSlots, sessions],
@@ -4690,7 +4866,7 @@ export function App() {
         return null;
       }
       const session = sessions.find((s) => s.id === sid);
-      if (!session || session.kind === "local") {
+      if (!session || session.kind === "local" || session.kind === "web") {
         return null;
       }
       if (session.kind === "sshSaved") {
@@ -4708,6 +4884,25 @@ export function App() {
   const onLocalFilePanePathChange = useCallback((paneIndex: number, pathKey: string) => {
     localFilePanePathsRef.current[paneIndex] = pathKey;
   }, []);
+
+  const webPanePayloadForPane = useCallback(
+    (paneIndex: number): { url: string; title: string; allowInsecureTls?: boolean } | null => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind !== "web") {
+        return null;
+      }
+      return {
+        url: session.url,
+        title: session.label,
+        ...(session.allowInsecureTls ? { allowInsecureTls: true } : {}),
+      };
+    },
+    [splitSlots, sessions],
+  );
 
   const getFileExportDestPath = useCallback(async () => {
     return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
@@ -4745,6 +4940,7 @@ export function App() {
     isBroadcastModeEnabled,
     setBroadcastMode,
     visiblePaneSessionIds,
+    broadcastEligibleVisiblePaneSessionIds,
     broadcastTargets,
     terminalFontSize,
     terminalFontFamily,
@@ -4765,6 +4961,9 @@ export function App() {
     onFilePaneTitleChange,
     semanticFileNameColors: filePaneSemanticNameColors.enabled,
     fileWorkspacePluginEnabled,
+    webPanePayloadForPane,
+    onWebPaneOpenInAppWindowError: setError,
+    onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
   });
 
@@ -4783,6 +4982,9 @@ export function App() {
     const session = sessions.find((s) => s.id === contextMenuPaneSessionId);
     if (!session) {
       return "empty";
+    }
+    if (session.kind === "web") {
+      return "web";
     }
     return session.kind === "local" ? "local" : "ssh";
   })();
@@ -4820,6 +5022,22 @@ export function App() {
         event.preventDefault();
       }}
     >
+      {proxmoxWebLoginAssist ? (
+        <div className="proxmox-login-assist-banner" role="status">
+          <span className="proxmox-login-assist-banner-text">
+            Log in to Proxmox in the window that opened. The console opens automatically once the UI loads after
+            login, or use Continue below if it does not.
+          </span>
+          <div className="proxmox-login-assist-banner-actions">
+            <button type="button" className="btn btn-primary" onClick={() => void handleProxmoxContinueToConsole()}>
+              Continue to console
+            </button>
+            <button type="button" className="btn btn-settings-tool" onClick={() => setProxmoxWebLoginAssist(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div
         className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}
         onMouseEnter={() => {
@@ -5157,6 +5375,10 @@ export function App() {
           hostSettingsTabRemoveConfirmActive={pendingRemoveHostsTab}
           toggleFavoriteForHost={toggleFavoriteForHost}
           toggleJumpHostForHost={toggleJumpHostForHost}
+          proxmuxOpenWebConsolesInPane={proxmuxOpenWebConsolesInPane}
+          setProxmuxOpenWebConsolesInPane={setProxmuxOpenWebConsolesInPane}
+          proxmuxOpenWebConsolesInAppWebviewWindow={proxmuxOpenWebConsolesInAppWebviewWindow}
+          setProxmuxOpenWebConsolesInAppWebviewWindow={setProxmuxOpenWebConsolesInAppWebviewWindow}
         />
       )}
       {isLayoutCommandCenterOpen && (

@@ -260,6 +260,23 @@ export const openAuxWindow = (): Promise<void> => invoke("open_aux_window");
 
 export const openExternalUrl = (url: string): Promise<void> => invoke("open_external_url", { url });
 
+/** Opens the URL in a separate in-app webview window (not an iframe); use when sites block embedding. Returns the window label for {@link navigateInAppWebviewWindow}. */
+export const openInAppWebviewWindow = (
+  title: string,
+  url: string,
+  allowInsecureTls = false,
+  autoConsoleUrl?: string | null,
+): Promise<string> =>
+  invoke<string>("open_in_app_webview_window", {
+    title,
+    url,
+    allowInsecureTls,
+    ...(autoConsoleUrl != null && autoConsoleUrl !== "" ? { autoConsoleUrl } : {}),
+  });
+
+export const navigateInAppWebviewWindow = (label: string, url: string): Promise<void> =>
+  invoke("navigate_in_app_webview_window", { label, url });
+
 export const openVirtViewerFromSpicePayload = (spiceData: Record<string, unknown>): Promise<void> =>
   invoke("open_virt_viewer_from_spice_payload", { spiceData });
 

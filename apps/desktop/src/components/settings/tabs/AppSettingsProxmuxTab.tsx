@@ -34,7 +34,19 @@ function resourceString(row: ResourceRow, key: string): string {
   return String(v);
 }
 
-export function AppSettingsProxmuxTab() {
+export type AppSettingsProxmuxTabProps = {
+  openWebConsolesInAppPane: boolean;
+  setOpenWebConsolesInAppPane: (value: boolean) => void;
+  openWebConsolesInDedicatedAppWindow: boolean;
+  setOpenWebConsolesInDedicatedAppWindow: (value: boolean) => void;
+};
+
+export function AppSettingsProxmuxTab({
+  openWebConsolesInAppPane,
+  setOpenWebConsolesInAppPane,
+  openWebConsolesInDedicatedAppWindow,
+  setOpenWebConsolesInDedicatedAppWindow,
+}: AppSettingsProxmuxTabProps) {
   const [plugins, setPlugins] = useState<PluginListEntry[]>([]);
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -333,6 +345,43 @@ export function AppSettingsProxmuxTab() {
           ) : null}
         </header>
         {loadError ? <p className="error-text">{loadError}</p> : null}
+      </section>
+
+      <section className="settings-card">
+        <header className="settings-card-head">
+          <h4>Web consoles</h4>
+          <p className="muted-copy">
+            noVNC and Proxmox web shells can open in a split pane (iframe), in a dedicated in-app window (recommended when the
+            pane stays blank), or in your default system browser.
+          </p>
+        </header>
+        <label
+          className="settings-field settings-field-span-2"
+          style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}
+        >
+          <input
+            type="checkbox"
+            checked={openWebConsolesInAppPane}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setOpenWebConsolesInAppPane(next);
+              if (!next) setOpenWebConsolesInDedicatedAppWindow(false);
+            }}
+          />
+          <span>Open web consoles in an app pane</span>
+        </label>
+        <label
+          className="settings-field settings-field-span-2"
+          style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}
+        >
+          <input
+            type="checkbox"
+            checked={openWebConsolesInDedicatedAppWindow}
+            disabled={!openWebConsolesInAppPane}
+            onChange={(e) => setOpenWebConsolesInDedicatedAppWindow(e.target.checked)}
+          />
+          <span>Use a dedicated in-app window instead of an inline pane (avoids iframe blocking)</span>
+        </label>
       </section>
 
       <section className="settings-card">

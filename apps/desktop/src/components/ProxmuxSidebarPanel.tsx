@@ -7,6 +7,8 @@ type ProxmuxClusterRow = {
   id: string;
   name: string;
   proxmoxUrl: string;
+  /** Omitted on older plugin payloads; treated as false. */
+  allowInsecureTls?: boolean;
 };
 
 type ListStateResponse = {
@@ -104,6 +106,47 @@ function proxmuxResourceKey(row: ResourceRow): string | null {
   return null;
 }
 
+/** Expansion key for slide menu: guests use `guestKey`, nodes use `node:{name}`. */
+export function expansionKeyForRow(row: ResourceRow): string | null {
+  if (isGuestRow(row)) {
+    return guestKey(row);
+  }
+  if (String(row.type ?? "").toLowerCase() === "node") {
+    return proxmuxResourceKey(row);
+  }
+  return null;
+}
+
+/** True when the row opens the same slide UX as guests (nodes + qemu/lxc). */
+export function expandableProxmuxRow(row: ResourceRow): boolean {
+  return expansionKeyForRow(row) != null;
+}
+
+/** Parse `node:{nodename}` from unified expansion state (guest keys never start with `node:`). */
+function parseNodeExpansionKey(key: string): string | null {
+  if (!key.startsWith("node:")) return null;
+  const nodename = key.slice("node:".length);
+  return nodename.length > 0 ? nodename : null;
+}
+
+function resourceMemLine(row: ResourceRow): string | null {
+  const mem = formatBytes(row.mem);
+  const max = formatBytes(row.maxmem);
+  if (mem && max) return `${mem} / ${max}`;
+  if (max) return `n/a / ${max}`;
+  if (mem) return mem;
+  return null;
+}
+
+function resourceDiskLine(row: ResourceRow): string | null {
+  const d = formatBytes(row.disk);
+  const max = formatBytes(row.maxdisk);
+  if (d && max) return `${d} / ${max}`;
+  if (max) return `n/a / ${max}`;
+  if (d) return d;
+  return null;
+}
+
 function rowIsUp(row: ResourceRow): boolean {
   const s = String(row.status ?? "").toLowerCase();
   if (String(row.type ?? "").toLowerCase() === "node") {
@@ -148,8 +191,12 @@ export type ProxmuxSidebarPanelProps = {
   onResourceCountChange: (count: number) => void;
   /** Open an SSH session to the PVE node hostname in a new pane (in-app). */
   onSshToProxmoxNode?: (ctx: { clusterId: string; node: string }) => void | Promise<void>;
-  /** Open a Proxmox web console URL in the system browser. */
-  onOpenProxmoxExternalUrl?: (url: string) => void | Promise<void>;
+  /** Open a Proxmox web console URL in a pane or the system browser (see Settings → PROXMUX). */
+  onOpenProxmoxExternalUrl?: (
+    url: string,
+    label?: string,
+    options?: { allowInsecureTls?: boolean },
+  ) => void | Promise<void>;
   /** Fetch SPICE proxy via plugin and open a virt-viewer file (handled in App / shell). */
   onOpenProxmoxSpice?: (ctx: { clusterId: string; node: string; vmid: string }) => void | Promise<void>;
 };
@@ -169,8 +216,8 @@ export function ProxmuxSidebarPanel({
   const [clusters, setClusters] = useState<ProxmuxClusterRow[]>([]);
   const [clusterId, setClusterId] = useState<string | null>(null);
   const [resources, setResources] = useState<ResourceRow[]>([]);
-  /** Expanded VM/CT row (`guestKey`); empty when none. */
-  const [expandedGuestKey, setExpandedGuestKey] = useState("");
+  /** Expanded slide row: `guestKey` for qemu/lxc or `node:{name}` for PVE nodes. */
+  const [expandedRowKey, setExpandedRowKey] = useState("");
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [guestStatus, setGuestStatus] = useState<Record<string, unknown> | null>(null);
@@ -181,11 +228,29 @@ export function ProxmuxSidebarPanel({
   const [favoritesByCluster, setFavoritesByCluster] = useState<Record<string, string[]>>({});
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [spiceBusyKey, setSpiceBusyKey] = useState<string | null>(null);
+  /** After probing `/qemu/{vmid}/config` (vga): only running guests with QXL/spice/virtio show SPICE. */
+  const [spiceCapableByGuestKey, setSpiceCapableByGuestKey] = useState<Record<string, boolean>>({});
+  const spiceProbeDoneRef = useRef<Set<string>>(new Set());
+  const spiceProbeInflightRef = useRef<Set<string>>(new Set());
 
   const expandedGuestParsed = useMemo(
-    () => (expandedGuestKey ? parseGuestKey(expandedGuestKey) : null),
-    [expandedGuestKey],
+    () => (expandedRowKey ? parseGuestKey(expandedRowKey) : null),
+    [expandedRowKey],
   );
+
+  const expandedNodeName = useMemo(
+    () => (expandedRowKey ? parseNodeExpansionKey(expandedRowKey) : null),
+    [expandedRowKey],
+  );
+
+  const expandedNodeResource = useMemo(() => {
+    if (!expandedNodeName) return null;
+    return (
+      resources.find(
+        (r) => String(r.type ?? "").toLowerCase() === "node" && String(r.node ?? "") === expandedNodeName,
+      ) ?? null
+    );
+  }, [resources, expandedNodeName]);
 
   const refreshClusters = useCallback(async () => {
     setLoadError("");
@@ -239,14 +304,75 @@ export function ProxmuxSidebarPanel({
   }, [fetchResources]);
 
   useEffect(() => {
-    setExpandedGuestKey("");
+    setExpandedRowKey("");
   }, [clusterId]);
 
   useEffect(() => {
-    if (!expandedGuestKey) return;
-    const exists = resources.some((r) => guestKey(r) === expandedGuestKey);
-    if (!exists) setExpandedGuestKey("");
-  }, [resources, expandedGuestKey]);
+    spiceProbeDoneRef.current.clear();
+    spiceProbeInflightRef.current.clear();
+    setSpiceCapableByGuestKey({});
+  }, [clusterId]);
+
+  useEffect(() => {
+    if (!clusterId) return;
+    const targets = resources.filter(
+      (r) => proxmuxCategory(r) === "qemu" && rowIsUp(r),
+    );
+    const gkSet = new Set(targets.map((r) => guestKey(r)));
+    for (const k of [...spiceProbeDoneRef.current]) {
+      if (!gkSet.has(k)) spiceProbeDoneRef.current.delete(k);
+    }
+    for (const k of [...spiceProbeInflightRef.current]) {
+      if (!gkSet.has(k)) spiceProbeInflightRef.current.delete(k);
+    }
+    setSpiceCapableByGuestKey((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const k of gkSet) {
+        if (k in prev) next[k] = prev[k];
+      }
+      return next;
+    });
+
+    let cancelled = false;
+    for (const row of targets) {
+      const gk = guestKey(row);
+      if (spiceProbeDoneRef.current.has(gk) || spiceProbeInflightRef.current.has(gk)) continue;
+      const node = row.node != null ? String(row.node) : "";
+      const vmid = row.vmid != null ? String(row.vmid) : "";
+      if (!node || !vmid) continue;
+      spiceProbeInflightRef.current.add(gk);
+      void (async () => {
+        try {
+          const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "qemuSpiceCapable", {
+            clusterId,
+            node,
+            vmid,
+            guestType: "qemu",
+          })) as { ok?: boolean; spiceCapable?: boolean };
+          if (cancelled) return;
+          const cap = Boolean(out?.ok && out.spiceCapable);
+          spiceProbeDoneRef.current.add(gk);
+          setSpiceCapableByGuestKey((prev) => ({ ...prev, [gk]: cap }));
+        } catch {
+          if (!cancelled) {
+            spiceProbeDoneRef.current.add(gk);
+            setSpiceCapableByGuestKey((prev) => ({ ...prev, [gk]: false }));
+          }
+        } finally {
+          spiceProbeInflightRef.current.delete(gk);
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterId, resources]);
+
+  useEffect(() => {
+    if (!expandedRowKey) return;
+    const exists = resources.some((r) => expansionKeyForRow(r) === expandedRowKey);
+    if (!exists) setExpandedRowKey("");
+  }, [resources, expandedRowKey]);
 
   const loadGuestStatus = useCallback(async (opts?: { silent?: boolean }) => {
     if (!clusterId || !expandedGuestParsed) {
@@ -381,16 +507,7 @@ export function ProxmuxSidebarPanel({
   }, [filteredResources]);
 
   const powerDisabled = powerBusy || busy;
-  const guestMemLine =
-    guestStatus &&
-    (() => {
-      const mem = formatBytes(guestStatus.mem);
-      const max = formatBytes(guestStatus.maxmem);
-      if (mem && max) return `${mem} / ${max}`;
-      if (max) return `n/a / ${max}`;
-      if (mem) return mem;
-      return null;
-    })();
+  const guestMemLine = guestStatus ? resourceMemLine(guestStatus as ResourceRow) : null;
   const guestStatusLine =
     guestStatus &&
     (() => {
@@ -401,8 +518,8 @@ export function ProxmuxSidebarPanel({
       return main;
     })();
 
-  const toggleGuestRow = useCallback((gk: string) => {
-    setExpandedGuestKey((prev) => (prev === gk ? "" : gk));
+  const toggleExpandRow = useCallback((key: string) => {
+    setExpandedRowKey((prev) => (prev === key ? "" : key));
   }, []);
 
   const activeCluster = useMemo(
@@ -411,16 +528,18 @@ export function ProxmuxSidebarPanel({
   );
   const proxmoxBaseUrl = activeCluster?.proxmoxUrl ?? "";
 
+  const allowInsecureTlsForOpens = activeCluster?.allowInsecureTls === true;
+
   const runOpenUrl = useCallback(
-    async (url: string) => {
+    async (url: string, label?: string) => {
       if (!onOpenProxmoxExternalUrl) return;
       try {
-        await onOpenProxmoxExternalUrl(url);
+        await onOpenProxmoxExternalUrl(url, label, { allowInsecureTls: allowInsecureTlsForOpens });
       } catch {
         /* App surfaces errors */
       }
     },
-    [onOpenProxmoxExternalUrl],
+    [onOpenProxmoxExternalUrl, allowInsecureTlsForOpens],
   );
 
   const runSpice = useCallback(
@@ -478,11 +597,11 @@ export function ProxmuxSidebarPanel({
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-shell"
-              title="Open Proxmox node shell in browser"
-              aria-label="Open Proxmox node shell in browser"
+              title="Open Proxmox node shell (app pane or browser — Settings → PROXMUX)"
+              aria-label="Open Proxmox node shell"
               onClick={(e) => {
                 stopRowEvent(e);
-                void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "node", node }));
+                void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "node", node }), "Node shell");
               }}
             >
               Shell
@@ -493,26 +612,30 @@ export function ProxmuxSidebarPanel({
     }
 
     if (cat === "qemu") {
-      if (!running || (!onOpenProxmoxExternalUrl && !onOpenProxmoxSpice) || !node || !vmid) {
+      const gk = guestKey(row);
+      const spiceCapable = spiceCapableByGuestKey[gk] === true;
+      const showVnc = Boolean(onOpenProxmoxExternalUrl);
+      const showSpice = Boolean(onOpenProxmoxSpice && spiceCapable);
+      if (!running || !node || !vmid || (!showVnc && !showSpice)) {
         return spacer();
       }
       return (
         <div className="proxmux-sidebar-actions" onMouseDown={(e) => e.stopPropagation()}>
-          {onOpenProxmoxExternalUrl ? (
+          {showVnc ? (
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-novnc"
-              title="Open noVNC in browser"
-              aria-label="Open noVNC in browser"
+              title="Open noVNC (app pane or browser — Settings → PROXMUX)"
+              aria-label="Open noVNC console"
               onClick={(e) => {
                 stopRowEvent(e);
-                void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "qemu", node, vmid }));
+                void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "qemu", node, vmid }), "noVNC");
               }}
             >
               VNC
             </button>
           ) : null}
-          {onOpenProxmoxSpice ? (
+          {showSpice ? (
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-spice"
@@ -542,13 +665,15 @@ export function ProxmuxSidebarPanel({
             className="proxmux-action-btn proxmux-action-shell"
             disabled={!running}
             title={
-              running ? "Open container console in browser" : "Start the container to open the console"
+              running
+                ? "Open LXC console (app pane or browser — Settings → PROXMUX)"
+                : "Start the container to open the console"
             }
-            aria-label="Open LXC console in browser"
+            aria-label="Open LXC console"
             onClick={(e) => {
               stopRowEvent(e);
               if (!running) return;
-              void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "lxc", node, vmid }));
+              void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "lxc", node, vmid }), "LXC console");
             }}
           >
             Shell
@@ -633,18 +758,19 @@ export function ProxmuxSidebarPanel({
                     const node = row.node != null ? String(row.node) : "";
                     const status = row.status != null ? String(row.status) : "";
                     const rowKey = `${String(row.type)}-${vmid || name || idx}-${node}-${idx}`;
-                    const gk = guestKey(row);
-                    const guest = isGuestRow(row);
-                    const expanded = guest && expandedGuestKey === gk;
+                    const expandKey = expansionKeyForRow(row);
+                    const expandable = expandKey != null;
+                    const expanded = expandable && expandedRowKey === expandKey;
                     const rk = proxmuxResourceKey(row);
                     const category = proxmuxCategory(row);
                     const power = proxmuxPower(row);
                     const isFav = rk != null && favoriteSet.has(rk);
+                    const isGuest = isGuestRow(row);
 
                     return (
                       <li
                         key={rowKey}
-                        className={`proxmux-sidebar-row-wrap${guest && expanded ? " proxmux-sidebar-row-wrap--expanded" : ""}`}
+                        className={`proxmux-sidebar-row-wrap${expandable && expanded ? " proxmux-sidebar-row-wrap--expanded" : ""}`}
                         data-proxmux-category={category}
                         data-proxmux-power={power}
                         data-proxmux-favorite={isFav ? "true" : "false"}
@@ -667,23 +793,23 @@ export function ProxmuxSidebarPanel({
                             <span className="proxmux-sidebar-favorite-spacer" aria-hidden="true" />
                           )}
                           <div
-                            className={`proxmux-sidebar-row ${guest ? "proxmux-sidebar-row--guest" : "proxmux-sidebar-row--node"} ${expanded ? "is-expanded" : ""}`}
-                            role={guest ? "button" : undefined}
-                            tabIndex={guest ? 0 : undefined}
-                            aria-expanded={guest ? expanded : undefined}
+                            className={`proxmux-sidebar-row ${expandable ? "proxmux-sidebar-row--guest" : "proxmux-sidebar-row--node"} ${expanded ? "is-expanded" : ""}`}
+                            role={expandable ? "button" : undefined}
+                            tabIndex={expandable ? 0 : undefined}
+                            aria-expanded={expandable ? expanded : undefined}
                             onClick={
-                              guest
+                              expandable && expandKey
                                 ? () => {
-                                    toggleGuestRow(gk);
+                                    toggleExpandRow(expandKey);
                                   }
                                 : undefined
                             }
                             onKeyDown={
-                              guest
+                              expandable && expandKey
                                 ? (e) => {
                                     if (e.key === "Enter" || e.key === " ") {
                                       e.preventDefault();
-                                      toggleGuestRow(gk);
+                                      toggleExpandRow(expandKey);
                                     }
                                   }
                                 : undefined
@@ -691,7 +817,7 @@ export function ProxmuxSidebarPanel({
                           >
                             <span className="proxmux-sidebar-row-main">{name || vmid || node || "—"}</span>
                             <span className="proxmux-sidebar-row-meta">
-                              {guest ? (
+                              {expandable ? (
                                 <span className="proxmux-sidebar-row-chevron" aria-hidden="true">
                                   {expanded ? "▾" : "▸"}
                                 </span>
@@ -704,9 +830,9 @@ export function ProxmuxSidebarPanel({
                           </div>
                           {rowActionStrip(row)}
                         </div>
-                        {guest ? (
+                        {expandable ? (
                           <div className={`host-slide-menu proxmux-guest-slide ${expanded ? "is-open" : ""}`}>
-                            {expanded ? (
+                            {expanded && isGuest ? (
                               <div className="host-slide-content">
                                 <div className="proxmux-sidebar-guest-detail proxmux-sidebar-guest-detail--embedded">
                                   {!expandedGuestParsed ? (
@@ -851,6 +977,101 @@ export function ProxmuxSidebarPanel({
                                       ) : null}
                                     </>
                                   )}
+                                </div>
+                              </div>
+                            ) : expanded && expandedNodeResource ? (
+                              <div className="host-slide-content">
+                                <div className="proxmux-sidebar-guest-detail proxmux-sidebar-guest-detail--embedded">
+                                  <p className="proxmux-sidebar-guest-detail-head">
+                                    <span className="proxmux-sidebar-guest-detail-title">Node</span>
+                                    <span className="proxmux-sidebar-guest-detail-id">
+                                      {expandedNodeResource.node != null
+                                        ? String(expandedNodeResource.node)
+                                        : expandedNodeName ?? "—"}
+                                    </span>
+                                  </p>
+                                  <dl className="proxmux-sidebar-guest-stats">
+                                    {String(expandedNodeResource.status ?? "").trim() ? (
+                                      <>
+                                        <dt>Status</dt>
+                                        <dd>{String(expandedNodeResource.status).trim()}</dd>
+                                      </>
+                                    ) : null}
+                                    {formatUptimeSeconds(expandedNodeResource.uptime) ? (
+                                      <>
+                                        <dt>Uptime</dt>
+                                        <dd>{formatUptimeSeconds(expandedNodeResource.uptime)}</dd>
+                                      </>
+                                    ) : null}
+                                    {formatCpu(expandedNodeResource.cpu) ? (
+                                      <>
+                                        <dt>CPU load</dt>
+                                        <dd>{formatCpu(expandedNodeResource.cpu)}</dd>
+                                      </>
+                                    ) : null}
+                                    {typeof expandedNodeResource.maxcpu === "number" &&
+                                    Number.isFinite(expandedNodeResource.maxcpu) ? (
+                                      <>
+                                        <dt>CPU cores</dt>
+                                        <dd>{String(expandedNodeResource.maxcpu)}</dd>
+                                      </>
+                                    ) : null}
+                                    {resourceMemLine(expandedNodeResource) ? (
+                                      <>
+                                        <dt>Memory</dt>
+                                        <dd>{resourceMemLine(expandedNodeResource)}</dd>
+                                      </>
+                                    ) : null}
+                                    {resourceDiskLine(expandedNodeResource) ? (
+                                      <>
+                                        <dt>Disk</dt>
+                                        <dd>{resourceDiskLine(expandedNodeResource)}</dd>
+                                      </>
+                                    ) : null}
+                                  </dl>
+                                  {clusterId && proxmoxBaseUrl ? (
+                                    <div
+                                      className="proxmux-sidebar-guest-actions"
+                                      role="group"
+                                      aria-label="Node connections"
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                    >
+                                      {onSshToProxmoxNode && expandedNodeName ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn-settings-tool proxmux-action-ssh"
+                                          onClick={() => void onSshToProxmoxNode({ clusterId, node: expandedNodeName })}
+                                        >
+                                          SSH
+                                        </button>
+                                      ) : null}
+                                      {onOpenProxmoxExternalUrl && expandedNodeName ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn-settings-tool proxmux-action-shell"
+                                          onClick={() =>
+                                            void runOpenUrl(
+                                              buildProxmoxConsoleUrl(proxmoxBaseUrl, {
+                                                kind: "node",
+                                                node: expandedNodeName,
+                                              }),
+                                              "Node shell",
+                                            )
+                                          }
+                                        >
+                                          Shell
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : expanded && expandedNodeName ? (
+                              <div className="host-slide-content">
+                                <div className="proxmux-sidebar-guest-detail proxmux-sidebar-guest-detail--embedded">
+                                  <p className="error-text proxmux-sidebar-guest-detail-error">
+                                    This node is no longer in the inventory. Try refreshing.
+                                  </p>
                                 </div>
                               </div>
                             ) : null}

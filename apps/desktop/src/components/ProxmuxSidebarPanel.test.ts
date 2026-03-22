@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { proxmuxCategory, proxmuxPower } from "./ProxmuxSidebarPanel";
+import {
+  expandableProxmuxRow,
+  expansionKeyForRow,
+  proxmuxCategory,
+  proxmuxPower,
+} from "./ProxmuxSidebarPanel";
 
 describe("proxmuxCategory / proxmuxPower", () => {
   it("classifies nodes and power", () => {
@@ -23,5 +28,28 @@ describe("proxmuxCategory / proxmuxPower", () => {
 
   it("falls back unknown type to node", () => {
     expect(proxmuxCategory({ type: "storage" })).toBe("node");
+  });
+});
+
+describe("expansionKeyForRow / expandableProxmuxRow", () => {
+  it("uses guestKey for qemu and lxc", () => {
+    expect(expansionKeyForRow({ type: "qemu", node: "pve", vmid: 100 })).toBe("qemu:pve:100");
+    expect(expansionKeyForRow({ type: "lxc", node: "pve", vmid: 200 })).toBe("lxc:pve:200");
+    expect(expandableProxmuxRow({ type: "qemu", node: "pve", vmid: 1 })).toBe(true);
+  });
+
+  it("uses node: prefix for PVE nodes", () => {
+    expect(expansionKeyForRow({ type: "node", node: "px01", status: "online" })).toBe("node:px01");
+    expect(expandableProxmuxRow({ type: "node", node: "px01" })).toBe(true);
+  });
+
+  it("returns null for types without slide expansion", () => {
+    expect(expansionKeyForRow({ type: "storage" })).toBe(null);
+    expect(expandableProxmuxRow({ type: "storage" })).toBe(false);
+  });
+
+  it("returns null for node row missing node name", () => {
+    expect(expansionKeyForRow({ type: "node", status: "online" })).toBe(null);
+    expect(expandableProxmuxRow({ type: "node", status: "online" })).toBe(false);
   });
 });
