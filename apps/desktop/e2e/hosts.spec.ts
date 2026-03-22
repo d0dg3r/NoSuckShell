@@ -11,7 +11,7 @@ test.describe("hosts", () => {
 
     await page.getByLabel("Host alias").fill("e2e-test");
     await page.getByLabel("HostName").fill("127.0.0.1");
-    await page.getByLabel("User", { exact: true }).fill("testuser");
+    await page.getByLabel("SSH user").fill("testuser");
 
     await page.locator("section.add-host-modal").getByRole("button", { name: "Add host" }).click();
 
