@@ -54,9 +54,9 @@ export function useWorkspaceBootstrapFromStorage(deps: WorkspaceBootstrapDeps): 
       setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
       setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
       setActiveSession(nextActiveSnapshot.activeSessionId);
-      queueMicrotask(() => {
+      window.setTimeout(() => {
         isApplyingWorkspaceSnapshotRef.current = false;
-      });
+      }, 0);
     } catch {
       // ignore broken persisted workspace data
     }

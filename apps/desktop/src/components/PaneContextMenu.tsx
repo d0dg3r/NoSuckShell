@@ -90,6 +90,7 @@ export function PaneContextMenu({
       }).map((action) => (
         <button
           key={action.id}
+          role="menuitem"
           className={`context-menu-item ${action.separatorAbove ? "separator-above" : ""}`}
           disabled={action.disabled}
           onClick={(event) =>
@@ -105,6 +106,7 @@ export function PaneContextMenu({
       {workspaceSendTargets.map((workspace, index) => (
         <button
           key={`send-${workspace.id}`}
+          role="menuitem"
           className={`context-menu-item ${index === 0 ? "separator-above" : ""}`}
           onClick={() => {
             if (!paneSessionId) {
@@ -118,7 +120,7 @@ export function PaneContextMenu({
         </button>
       ))}
       {workspaceSendPlaceholder && (
-        <button type="button" className="context-menu-item separator-above" disabled>
+        <button type="button" role="menuitem" className="context-menu-item separator-above" disabled>
           Send to other workspace (add another workspace tab)
         </button>
       )}

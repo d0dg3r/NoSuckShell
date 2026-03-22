@@ -49,7 +49,7 @@ export function useSessionOutputTrustListener(params: {
         if (prev.some((entry) => entry.sessionId === sessionId)) {
           return prev;
         }
-        return [...prev, { sessionId, hostAlias: promptHostLabel }];
+        return [...prev, { sessionId, hostLabel: promptHostLabel }];
       });
     })
       .then((fn) => {

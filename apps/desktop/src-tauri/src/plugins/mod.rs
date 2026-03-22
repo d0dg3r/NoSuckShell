@@ -105,9 +105,10 @@ pub fn set_plugin_enabled_backend(plugin_id: &str, enabled: bool) -> Result<()> 
 /// Runs after store resolution; may adjust `HostConfig` for SSH/SFTP.
 pub fn enrich_resolved_host(resolved: &mut HostConfig, original: &HostConfig) -> Result<()> {
     let ctx = HostEnrichContext { original };
+    let state = load_plugins_file()?;
     for plugin in all_plugins() {
         let id = plugin.manifest().id.clone();
-        if !is_plugin_enabled(&id)? {
+        if !state.enabled.get(&id).copied().unwrap_or(true) {
             continue;
         }
         if let Some(ent) = plugin.required_entitlement() {

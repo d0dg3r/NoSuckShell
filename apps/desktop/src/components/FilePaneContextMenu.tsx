@@ -66,36 +66,37 @@ export function FilePaneContextMenu({
         onMouseDown={(e) => e.stopPropagation()}
         onContextMenuCapture={(e) => e.preventDefault()}
       >
-        <button type="button" className="context-menu-item" onClick={() => onAction("newFolder")}>
+        <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("newFolder")}>
           New folder…
         </button>
-        <button type="button" className="context-menu-item" onClick={() => onAction("refresh")}>
+        <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("refresh")}>
           Refresh
         </button>
         {canPaste ? (
-          <button type="button" className="context-menu-item" onClick={() => onAction("paste")}>
+          <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("paste")}>
             Paste
           </button>
         ) : null}
         {hasSelection ? (
           <>
             {showCopy ? (
-              <button type="button" className="context-menu-item separator-above" onClick={() => onAction("copy")}>
+              <button type="button" role="menuitem" className="context-menu-item separator-above" onClick={() => onAction("copy")}>
                 Copy
               </button>
             ) : null}
             <button
               type="button"
+              role="menuitem"
               className={`context-menu-item ${showCopy ? "" : "separator-above"}`}
               onClick={() => onAction("rename")}
             >
               Rename…
             </button>
-            <button type="button" className="context-menu-item" onClick={() => onAction("delete")}>
+            <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("delete")}>
               Delete…
             </button>
             {showOpen ? (
-              <button type="button" className="context-menu-item separator-above" onClick={() => onAction("openInOs")}>
+              <button type="button" role="menuitem" className="context-menu-item separator-above" onClick={() => onAction("openInOs")}>
                 Open with system
               </button>
             ) : null}
