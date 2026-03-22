@@ -13,6 +13,7 @@ import { AppSettingsKeyboardTab } from "./settings/tabs/AppSettingsKeyboardTab";
 import { AppSettingsLayoutTab } from "./settings/tabs/AppSettingsLayoutTab";
 import { AppSettingsPluginsTab } from "./settings/tabs/AppSettingsPluginsTab";
 import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
+import { AppSettingsHostsTab } from "./settings/tabs/AppSettingsHostsTab";
 import { AppSettingsStoreTabContent } from "./settings/tabs/AppSettingsStoreTabContent";
 import { AppSettingsViewsTab } from "./settings/tabs/AppSettingsViewsTab";
 
@@ -90,6 +91,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setMetadataStore,
     applyDefaultUser,
     setError,
+    error,
     quickConnectMode,
     setQuickConnectMode,
     quickConnectAutoTrust,
@@ -169,6 +171,23 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setSshDirOverrideDraft,
     onApplySshDirOverride,
     onResetSshDirOverride,
+    hostSettingsSelectedAlias,
+    onHostSettingsSelectAlias,
+    hostSettingsDraftHost,
+    setHostSettingsDraftHost,
+    hostSettingsDraftBinding,
+    setHostSettingsDraftBinding,
+    hostSettingsTagDraft,
+    setHostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    setHostSettingsKeyPolicy,
+    hostSettingsMetadataForSelected,
+    onSaveHostSettingsTab,
+    hostSettingsTabSaveDisabled,
+    onRemoveHostSettingsTabIntent,
+    hostSettingsTabRemoveConfirmActive,
+    toggleFavoriteForHost,
+    toggleJumpHostForHost,
   } = props;
 
   const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
@@ -326,6 +345,32 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setBackupImportPassword={setBackupImportPassword}
               handleImportBackup={handleImportBackup}
               backupMessage={backupMessage}
+            />
+          )}
+          {activeAppSettingsTab === "hosts" && (
+            <AppSettingsHostsTab
+              hosts={hosts}
+              selectedHostAlias={hostSettingsSelectedAlias}
+              onSelectHostAlias={onHostSettingsSelectAlias}
+              draftHost={hostSettingsDraftHost}
+              setDraftHost={setHostSettingsDraftHost}
+              draftBinding={hostSettingsDraftBinding}
+              setDraftBinding={setHostSettingsDraftBinding}
+              tagDraft={hostSettingsTagDraft}
+              setTagDraft={setHostSettingsTagDraft}
+              hostKeyPolicyDraft={hostSettingsKeyPolicy}
+              setHostKeyPolicyDraft={setHostSettingsKeyPolicy}
+              metadataForSelected={hostSettingsMetadataForSelected}
+              hostMetadataByHost={metadataStore.hosts}
+              storeKeys={storeKeys}
+              storeUsers={storeUsers}
+              toggleFavoriteForHost={toggleFavoriteForHost}
+              toggleJumpHostForHost={toggleJumpHostForHost}
+              onSaveHost={onSaveHostSettingsTab}
+              saveDisabled={hostSettingsTabSaveDisabled}
+              onRemoveHost={onRemoveHostSettingsTabIntent}
+              removeConfirmActive={hostSettingsTabRemoveConfirmActive}
+              error={error}
             />
           )}
           {activeAppSettingsTab === "ssh" && (

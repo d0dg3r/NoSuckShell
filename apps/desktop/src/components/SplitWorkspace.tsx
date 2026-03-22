@@ -64,6 +64,7 @@ export type SplitPaneRendererBridge = {
   terminalFontSize: number;
   terminalFontFamily: string;
   handleTerminalInput: (originSessionId: string, data: string) => void;
+  onSessionWorkingDirectoryChange: (sessionId: string, path: string) => void;
   connectLocalShellInPane: (paneIndex: number) => void | Promise<void>;
   logoTransparentSrc: string;
   splitNodeRefs: MutableRefObject<Record<string, HTMLDivElement | null>>;
@@ -110,6 +111,13 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
+      const activatePaneAndMaybeFocusTerminal = () => {
+        b.setActivePaneIndex(paneIndex);
+        if (paneSessionId) {
+          b.setActiveSession(paneSessionId);
+          b.requestTerminalFocus(paneSessionId);
+        }
+      };
       return (
         <div
           key={`pane-${paneIndex}`}
@@ -120,12 +128,15 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
             isHoverDimmed ? "is-host-hover-dimmed" : ""
           } ${b.highlightedHostAlias ? "is-host-hovering" : ""}`}
           draggable={false}
-          onClick={() => {
-            b.setActivePaneIndex(paneIndex);
-            if (paneSessionId) {
-              b.setActiveSession(paneSessionId);
-              b.requestTerminalFocus(paneSessionId);
+          onClick={activatePaneAndMaybeFocusTerminal}
+          onMouseEnter={() => {
+            if (b.draggingKind !== null) {
+              return;
             }
+            if (!paneSessionId || paneFileView !== "terminal") {
+              return;
+            }
+            activatePaneAndMaybeFocusTerminal();
           }}
           onDragOverCapture={(event) => {
             event.preventDefault();
@@ -236,7 +247,11 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 {paneLabel.display}
               </span>
+            </div>
+            <div className="split-pane-toolbar-trailing">
+            <div className="split-pane-toolbar-expand-slot">
               <button
+                type="button"
                 className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
                   isToolbarExpanded ? "is-expanded" : ""
                 }`}
@@ -259,8 +274,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 <span aria-hidden="true">{isToolbarExpanded ? "▾" : "▸"}</span>
               </button>
-            </div>
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
+              <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
               <button
                 className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane left"
@@ -309,9 +323,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
               </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
+              </div>
+              <span className="pane-toolbar-separator pane-toolbar-separator--expand-only" aria-hidden="true" />
+              <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
               <button
                 className={`btn action-icon-btn pane-toolbar-btn ${b.isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
                 title={
@@ -374,13 +388,40 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   <path d="M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" />
                 </svg>
               </button>
+              </div>
             </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-files">
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "terminal" ? (
+              {!hasPaneSession ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
-                  title="Browse remote files (SFTP)"
+                  title="Quick Connect — add a session, then browse files"
+                  aria-label="Quick Connect to add a session"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.quickConnect", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                  </svg>
+                </button>
+              ) : paneCtxKind === "ssh" && paneFileView === "terminal" ? (
+                <button
+                  type="button"
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title={
+                    b.fileWorkspacePluginEnabled
+                      ? "Browse remote files (SFTP)"
+                      : "Browse remote files (SFTP) — enable File workspace in Settings → Plugins"
+                  }
                   aria-label={`Browse remote files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
@@ -392,9 +433,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "remote" ? (
+              ) : paneCtxKind === "ssh" && paneFileView === "remote" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"
                   aria-label={`Return to terminal in pane ${paneIndex + 1}`}
@@ -409,11 +450,15 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "terminal" ? (
+              ) : paneCtxKind === "local" && paneFileView === "terminal" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
-                  title="Browse local files"
+                  title={
+                    b.fileWorkspacePluginEnabled
+                      ? "Browse local files"
+                      : "Browse local files — enable File workspace in Settings → Plugins"
+                  }
                   aria-label={`Browse local files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
@@ -425,9 +470,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M12 4.5l7.5 5.2v9.3a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V9.7L12 4.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "local" ? (
+              ) : paneCtxKind === "local" && paneFileView === "local" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"
                   aria-label={`Return to terminal in pane ${paneIndex + 1}`}
@@ -442,9 +487,30 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Browse files"
+                  aria-label="Browse files"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleRemoteFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
               <button
                 className="btn action-icon-btn pane-toolbar-btn"
@@ -477,6 +543,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   <path d="M7.6 7.6l8.8 8.8M16.4 7.6l-8.8 8.8" />
                 </svg>
               </button>
+            </div>
             </div>
           </div>
           {paneSessionId ? (
@@ -515,6 +582,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 <TerminalPane
                   sessionId={paneSessionId}
                   onUserInput={b.handleTerminalInput}
+                  onSessionWorkingDirectoryChange={b.onSessionWorkingDirectoryChange}
                   fontSize={b.terminalFontSize}
                   fontFamily={b.terminalFontFamily}
                 />

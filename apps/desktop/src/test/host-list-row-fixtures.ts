@@ -20,6 +20,7 @@ export const sampleMetadata: HostMetadata = {
   tags: [],
   lastUsedAt: null,
   trustHostDefault: false,
+  isJumpHost: false,
 };
 
 export function sampleRow(overrides: Partial<HostRowViewModel> = {}): HostRowViewModel {
@@ -46,6 +47,7 @@ export function noopBridge(overrides: Partial<HostListRowBridgeProps> = {}): Hos
     sidebarHostBindingDraft: createDefaultHostBinding(),
     setSidebarHostBindingDraft: vi.fn(),
     hosts: [sampleHost],
+    hostMetadataByHost: { mybox: sampleMetadata },
     tagDraft: "",
     setTagDraft: vi.fn(),
     hostKeyPolicyDraft: "ask",
@@ -61,6 +63,7 @@ export function noopBridge(overrides: Partial<HostListRowBridgeProps> = {}): Hos
     setDragOverPaneIndex: vi.fn(),
     setError: vi.fn(),
     toggleFavoriteForHost: vi.fn(),
+    toggleJumpHostForHost: vi.fn(),
     toggleHostSelection: vi.fn(),
     connectToHostInNewPane: vi.fn(),
     setDragPayload: vi.fn(),

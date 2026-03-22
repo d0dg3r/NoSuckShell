@@ -18,6 +18,8 @@ export type HostMetadata = {
   trustHostDefault: boolean;
   /** When set, drives SSH `-o StrictHostKeyChecking=…` for saved hosts. */
   strictHostKeyPolicy?: StrictHostKeyPolicy;
+  /** Bastion host: listed in ProxyJump shortcuts once at least one host is marked. */
+  isJumpHost?: boolean;
 };
 
 export type HostMetadataStore = {

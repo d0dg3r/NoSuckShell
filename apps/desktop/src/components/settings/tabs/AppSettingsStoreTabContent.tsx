@@ -130,10 +130,13 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     saveHostBindingDraft,
   } = rest;
 
-  const allHostJumpCandidates = useMemo(() => jumpHostCandidates(hosts, ""), [hosts]);
+  const allHostJumpCandidates = useMemo(
+    () => jumpHostCandidates(hosts, "", metadataStore.hosts),
+    [hosts, metadataStore.hosts],
+  );
   const bindingJumpCandidates = useMemo(
-    () => jumpHostCandidates(hosts, storeSelectedHostForBinding.trim()),
-    [hosts, storeSelectedHostForBinding],
+    () => jumpHostCandidates(hosts, storeSelectedHostForBinding.trim(), metadataStore.hosts),
+    [hosts, storeSelectedHostForBinding, metadataStore.hosts],
   );
 
   const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>

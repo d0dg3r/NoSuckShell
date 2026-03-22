@@ -1249,76 +1249,196 @@ body,
 }
 
 .host-slide-content {
-  padding: 8px;
+  padding: 6px;
 }
 
+/* Host slide + add-host: one outer frame only — no nested panel inside panel */
 .host-slide-menu .host-form-settings-root,
 .add-host-modal .host-form-settings-root {
-  border: 1px solid rgba(150, 170, 161, 0.14);
-  border-radius: 12px;
-  padding: var(--space-4);
-  background: rgba(10, 14, 17, 0.5);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   max-width: 100%;
   box-sizing: border-box;
+  box-shadow: none;
 }
 
 .host-slide-menu .host-form-settings-stack,
 .add-host-modal .host-form-settings-stack {
-  gap: var(--space-3);
+  gap: var(--space-1);
 }
 
 .host-slide-menu .host-form-settings-card.settings-card,
 .add-host-modal .host-form-settings-card.settings-card {
-  padding: var(--space-3) var(--space-4);
-  gap: var(--space-3);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: var(--space-1) 0;
+  gap: var(--space-1);
+  box-shadow: none;
+}
+
+.host-slide-menu .host-form-settings-card.settings-card + .host-form-settings-card.settings-card,
+.add-host-modal .host-form-settings-card.settings-card + .host-form-settings-card.settings-card {
+  border-top: 1px solid rgba(150, 170, 161, 0.12);
+  margin-top: 0;
+  padding-top: var(--space-2);
 }
 
 .host-slide-menu .host-form-card-fields,
 .add-host-modal .host-form-card-fields {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-1);
 }
 
 .host-slide-menu .host-form-settings-root .settings-card-head,
 .add-host-modal .host-form-settings-root .settings-card-head {
-  padding-bottom: var(--space-2);
+  padding-bottom: 2px;
+  border-bottom: none;
+  gap: 1px;
 }
 
 .host-slide-menu .host-form-settings-root .settings-card-head h3,
 .add-host-modal .host-form-settings-root .settings-card-head h3 {
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  line-height: 1.2;
 }
 
 .host-slide-menu .host-form-settings-root .settings-card-head .muted-copy,
 .add-host-modal .host-form-settings-root .settings-card-head .muted-copy {
-  font-size: 10px;
-  line-height: 1.4;
+  font-size: 9px;
+  line-height: 1.28;
+  max-width: 52ch;
 }
 
+/* Dropdowns: intrinsic width; text fields stay full width of the slide */
 .host-slide-menu .host-form-settings-root select.input,
 .host-slide-menu .host-form-settings-root select.density-profile-select,
 .add-host-modal .host-form-settings-root select.input,
 .add-host-modal .host-form-settings-root select.density-profile-select {
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  justify-self: start;
+}
+
+.host-slide-menu .host-form-settings-root input.input[type="number"],
+.add-host-modal .host-form-settings-root input.input[type="number"] {
+  width: max-content;
+  min-width: 5.25rem;
+  max-width: 100%;
+  justify-self: start;
+  box-sizing: border-box;
+}
+
+.host-slide-menu .host-form-settings-root .input:not([type="checkbox"]):not([type="radio"]):not(select),
+.add-host-modal .host-form-settings-root .input:not([type="checkbox"]):not([type="radio"]):not(select) {
   width: 100%;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
 }
 
-.host-slide-menu .host-form-settings-root .input:not([type="checkbox"]):not([type="radio"]),
-.add-host-modal .host-form-settings-root .input:not([type="checkbox"]):not([type="radio"]) {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
+.host-slide-menu .host-meta-edit {
+  margin-top: var(--space-2);
+  padding: var(--space-2) 0 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid rgba(150, 170, 161, 0.14);
 }
 
-.host-slide-menu .host-meta-edit {
-  margin-top: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid rgba(150, 170, 161, 0.12);
+.host-slide-menu .host-meta-edit select.input,
+.host-slide-menu .host-meta-edit select.density-profile-select {
+  width: max-content;
+  max-width: 100%;
+  justify-self: start;
+}
+
+.host-slide-menu .host-meta-edit > .field:not(.checkbox-field) {
+  justify-items: start;
+}
+
+.host-slide-menu .host-meta-edit .field input.input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+}
+
+.add-host-modal .app-settings-content {
+  padding: var(--space-4);
+}
+
+.add-host-modal .host-form-card-fields > .field:not(.checkbox-field) {
+  justify-items: start;
+}
+
+.add-host-modal .host-form-card-fields > .field:not(.checkbox-field) > input.input:not([type="number"]) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-self: stretch;
+}
+
+/* Match slide density in Add host modal (same HostForm) */
+.add-host-modal .host-form-settings-root .field {
+  gap: 3px;
+}
+
+.add-host-modal .host-form-settings-root .field-label {
+  font-size: 10px;
+  letter-spacing: 0.15px;
+  color: #d1dfd7;
+}
+
+.add-host-modal .host-form-settings-root .field-help {
+  font-size: 9px;
+  line-height: 1.32;
+  max-width: min(100%, 44ch);
+}
+
+.add-host-modal .host-form-settings-root .input:not([type="checkbox"]):not([type="radio"]):not(select) {
+  min-height: 32px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.add-host-modal .host-form-settings-root select.input,
+.add-host-modal .host-form-settings-root select.density-profile-select {
+  min-height: 32px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.app-settings-content .app-settings-hosts-meta {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid rgba(150, 170, 161, 0.14);
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root {
+  border: 1px solid rgba(150, 170, 161, 0.14);
   border-radius: 10px;
+  padding: var(--space-4);
   background: rgba(10, 14, 17, 0.35);
+  margin-top: var(--space-3);
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-card.settings-card {
+  border: none;
+  background: transparent;
+  padding: var(--space-2) 0;
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-card.settings-card + .host-form-settings-card.settings-card {
+  border-top: 1px solid rgba(150, 170, 161, 0.1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
 }
 
 .host-slide-menu .host-form-grid {
@@ -1331,7 +1451,7 @@ body,
 }
 
 .host-slide-actions {
-  margin-top: 8px;
+  margin-top: 6px;
   display: grid;
   grid-template-columns: repeat(3, 34px);
   justify-content: end;
@@ -1357,7 +1477,11 @@ body,
 .host-meta-edit {
   margin-top: 8px;
   display: grid;
-  gap: 6px;
+  gap: 5px;
+}
+
+.host-slide-menu .host-meta-edit {
+  gap: 4px;
 }
 
 .field.checkbox-field {
@@ -1368,23 +1492,25 @@ body,
 }
 
 .host-slide-menu .field {
-  gap: 4px;
+  gap: 3px;
 }
 
 .host-slide-menu .field-label {
-  font-size: 11px;
-  letter-spacing: 0.2px;
+  font-size: 10px;
+  letter-spacing: 0.15px;
   color: #d1dfd7;
 }
 
 .host-slide-menu .field-help {
-  font-size: 10px;
+  font-size: 9px;
+  max-width: min(100%, 44ch);
+  line-height: 1.32;
 }
 
 .host-slide-menu .input {
-  min-height: 34px;
-  padding: 7px 10px;
-  border-radius: 10px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border-radius: 8px;
   font-size: 12px;
 }
 
@@ -1395,9 +1521,10 @@ body,
   color: var(--text-main);
   appearance: none;
   line-height: 1.2;
-  padding-top: 7px;
-  padding-bottom: 7px;
-  padding-right: 30px;
+  min-height: 32px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 28px;
   background-image:
     linear-gradient(45deg, transparent 50%, #bfd2c8 50%),
     linear-gradient(135deg, #bfd2c8 50%, transparent 50%);
@@ -2786,7 +2913,7 @@ body,
   z-index: 4;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--space-2);
   min-height: var(--control-height-sm);
   max-width: none;
@@ -2820,7 +2947,34 @@ body,
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  justify-content: space-between;
+  justify-content: flex-start;
+}
+
+.split-pane-toolbar-trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: auto;
+  gap: 2px;
+  min-width: min-content;
+}
+
+.split-pane-toolbar-group-files {
+  flex-shrink: 0;
+}
+
+.split-pane-toolbar-expand-slot {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.split-pane-label.is-toolbar-expanded .split-pane-toolbar-expand-slot {
+  overflow: visible;
 }
 
 .split-pane-toolbar-group-layout,
@@ -2846,9 +3000,10 @@ body,
   flex: 0 0 auto;
 }
 
-.split-pane-label .split-pane-toolbar-group-layout,
-.split-pane-label .split-pane-toolbar-group-broadcast {
+.split-pane-label:not(.is-toolbar-expanded) .split-pane-toolbar-expand-slot .split-pane-toolbar-group-layout,
+.split-pane-label:not(.is-toolbar-expanded) .split-pane-toolbar-expand-slot .split-pane-toolbar-group-broadcast {
   max-width: 0;
+  min-width: 0;
   opacity: 0;
   overflow: hidden;
   margin: 0;
@@ -2861,23 +3016,33 @@ body,
     margin 0.16s ease;
 }
 
-.split-pane-label .pane-toolbar-separator {
+.split-pane-label:not(.is-toolbar-expanded) .split-pane-toolbar-expand-slot .pane-toolbar-separator--expand-only {
   width: 0;
+  min-width: 0;
   margin: 0;
   opacity: 0;
+  pointer-events: none;
   transition:
     width 0.16s ease,
     margin 0.16s ease,
     opacity 0.14s ease;
 }
 
-.split-pane-label.is-toolbar-expanded .split-pane-toolbar-group-layout,
-.split-pane-label.is-toolbar-expanded .split-pane-toolbar-group-broadcast {
+.split-pane-label.is-toolbar-expanded .split-pane-toolbar-expand-slot .split-pane-toolbar-group-layout,
+.split-pane-label.is-toolbar-expanded .split-pane-toolbar-expand-slot .split-pane-toolbar-group-broadcast {
   max-width: 220px;
   opacity: 1;
   margin-left: 2px;
   pointer-events: auto;
   transform: translateX(0);
+}
+
+.split-pane-label.is-toolbar-expanded .split-pane-toolbar-expand-slot .pane-toolbar-separator--expand-only {
+  width: 1px;
+  min-width: 1px;
+  margin: 0 2px;
+  opacity: 1;
+  pointer-events: none;
 }
 
 .split-pane-label .split-pane-toolbar-group-close {
@@ -2888,17 +3053,11 @@ body,
   transform: translateX(0);
 }
 
-.split-pane-label.is-toolbar-expanded .pane-toolbar-separator {
-  width: 1px;
-  margin: 0 3px;
-  opacity: 1;
-}
-
 .pane-toolbar-expand-toggle {
   width: 24px;
   min-width: 24px;
   height: 24px;
-  margin-left: var(--space-2);
+  margin-left: 0;
   font-size: 12px;
 }
 

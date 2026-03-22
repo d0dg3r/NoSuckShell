@@ -93,6 +93,7 @@ import {
   parseHostPortInput,
   parseQuickConnectCommandInput,
 } from "./features/quick-connect";
+import { shortenPathForPaneTitle } from "./features/terminal-osc7-path";
 import {
   assignSessionToPane,
   clearPaneAtIndex,
@@ -148,6 +149,7 @@ import {
 } from "./features/app-bootstrap";
 import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
 import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
+import { hostMetadataIsJumpHost, JUMP_HOST_METADATA_TAG, withJumpHostTagSync } from "./features/jump-host";
 import {
   effectiveStrictHostKeyPolicy,
   metadataPatchForHostKeyPolicy,
@@ -310,10 +312,15 @@ function syncSidebarHostWithStore(
   storeKeys: SshKeyObject[],
   storeUsers: UserObject[],
   allHosts: HostConfig[],
+  metadataHosts: HostMetadataStore["hosts"],
 ): { host: HostConfig; binding: HostBinding } {
   let r = normalizeHostIdentityWithBinding(host, draft, storeKeys);
   r = normalizeHostUserWithBinding(r.host, r.binding, storeUsers);
-  r = normalizeHostProxyJumpWithBinding(r.host, r.binding, jumpHostCandidates(allHosts, host.host));
+  r = normalizeHostProxyJumpWithBinding(
+    r.host,
+    r.binding,
+    jumpHostCandidates(allHosts, host.host, metadataHosts),
+  );
   return r;
 }
 
@@ -468,6 +475,15 @@ export function App() {
   const [layoutMirrorWorkspaceIdOnSave, setLayoutMirrorWorkspaceIdOnSave] = useState<string>("");
   const layoutCommandCenterWasOpenRef = useRef<boolean>(false);
   const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
+  const [hostSettingsSelectedAlias, setHostSettingsSelectedAlias] = useState<string>("");
+  const [hostSettingsDraftHost, setHostSettingsDraftHost] = useState<HostConfig>(() => emptyHost());
+  const [hostSettingsDraftBinding, setHostSettingsDraftBinding] = useState<HostBinding>(() =>
+    createDefaultHostBinding(),
+  );
+  const [hostSettingsTagDraft, setHostSettingsTagDraft] = useState<string>("");
+  const [hostSettingsKeyPolicy, setHostSettingsKeyPolicy] = useState<StrictHostKeyPolicy>("ask");
+  const [pendingRemoveHostsTab, setPendingRemoveHostsTab] = useState<boolean>(false);
+  const removeHostsTabTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
   const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState<number | null>(null);
@@ -633,6 +649,8 @@ export function App() {
   const localFilePanePathsRef = useRef<Record<number, string>>({});
   const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
   const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
+  const sessionTerminalCwdRef = useRef<Record<string, string>>({});
+  const [sessionTerminalCwdEpoch, setSessionTerminalCwdEpoch] = useState(0);
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
@@ -677,6 +695,41 @@ export function App() {
     () => newHostDraft.host.trim().length > 0 && newHostDraft.hostName.trim().length > 0,
     [newHostDraft],
   );
+  const hostSettingsMetadataForSelected = useMemo(
+    () => metadataStore.hosts[hostSettingsSelectedAlias] ?? createDefaultHostMetadata(),
+    [metadataStore.hosts, hostSettingsSelectedAlias],
+  );
+  const isHostsTabDirty = useMemo(() => {
+    if (!hostSettingsSelectedAlias.trim()) {
+      return false;
+    }
+    return isSidebarHostSettingsDirty(
+      hostSettingsSelectedAlias,
+      hosts,
+      metadataStore.hosts,
+      hostSettingsDraftHost,
+      hostSettingsTagDraft,
+      hostSettingsKeyPolicy,
+      entityStore,
+      hostSettingsDraftBinding,
+    );
+  }, [
+    hostSettingsSelectedAlias,
+    hosts,
+    metadataStore.hosts,
+    hostSettingsDraftHost,
+    hostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    entityStore,
+    hostSettingsDraftBinding,
+  ]);
+  const hostSettingsTabSaveDisabled = useMemo(() => {
+    return (
+      hostSettingsDraftHost.host.trim().length === 0 ||
+      hostSettingsDraftHost.hostName.trim().length === 0 ||
+      !isHostsTabDirty
+    );
+  }, [hostSettingsDraftHost.host, hostSettingsDraftHost.hostName, isHostsTabDirty]);
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
   const sessionById = useMemo(() => {
     return new Map(sessions.map((session) => [session.id, session]));
@@ -962,6 +1015,14 @@ export function App() {
     setFilePaneTitleEpoch((n) => n + 1);
   }, []);
 
+  const handleSessionWorkingDirectoryChange = useCallback((sid: string, path: string) => {
+    if (sessionTerminalCwdRef.current[sid] === path) {
+      return;
+    }
+    sessionTerminalCwdRef.current[sid] = path;
+    setSessionTerminalCwdEpoch((n) => n + 1);
+  }, []);
+
   const resolvePaneLabel = useCallback(
     (paneIndex: number): { display: string; title: string } => {
       const paneSessionId = splitSlots[paneIndex] ?? null;
@@ -980,8 +1041,16 @@ export function App() {
         }
       }
       const paneSession = sessionById.get(paneSessionId) ?? null;
-      const label = resolveSessionTitle(paneSession);
-      return { display: label, title: label };
+      const identity = resolveSessionTitle(paneSession);
+      const cwd = sessionTerminalCwdRef.current[paneSessionId];
+      if (cwd) {
+        const shortCwd = shortenPathForPaneTitle(cwd, 44);
+        return {
+          display: `${identity} · ${shortCwd}`,
+          title: `${identity} — ${cwd}`,
+        };
+      }
+      return { display: identity, title: identity };
     },
     [
       resolveSessionTitle,
@@ -991,6 +1060,7 @@ export function App() {
       showFullPathInFilePaneTitle,
       filePaneTitleEpoch,
       fileWorkspacePluginEnabled,
+      sessionTerminalCwdEpoch,
     ],
   );
   const load = async () => {
@@ -1580,6 +1650,65 @@ export function App() {
     await persistEntityStore(next);
   }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
 
+  const clearPendingRemoveHostsTab = useCallback(() => {
+    if (removeHostsTabTimerRef.current) {
+      clearTimeout(removeHostsTabTimerRef.current);
+      removeHostsTabTimerRef.current = null;
+    }
+    setPendingRemoveHostsTab(false);
+  }, []);
+
+  const loadHostIntoSettingsEditor = useCallback(
+    (alias: string) => {
+      const trimmed = alias.trim();
+      const h = hosts.find((x) => x.host === trimmed);
+      if (!h) {
+        return;
+      }
+      const draft = sidebarSavedHostBinding(trimmed, hosts, entityStore, metadataStore.hosts);
+      const synced = syncSidebarHostWithStore(h, draft, storeKeys, storeUsers, hosts, metadataStore.hosts);
+      clearPendingRemoveHostsTab();
+      setHostSettingsSelectedAlias(trimmed);
+      setHostSettingsDraftHost(synced.host);
+      setHostSettingsDraftBinding(synced.binding);
+      setHostSettingsTagDraft((metadataStore.hosts[trimmed]?.tags ?? []).join(", "));
+      setHostSettingsKeyPolicy(
+        effectiveStrictHostKeyPolicy(metadataStore.hosts[trimmed] ?? createDefaultHostMetadata()),
+      );
+    },
+    [hosts, entityStore, metadataStore.hosts, storeKeys, storeUsers, clearPendingRemoveHostsTab],
+  );
+
+  const onHostSettingsSelectAlias = useCallback(
+    (alias: string) => {
+      const trimmed = alias.trim();
+      if (!trimmed || trimmed === hostSettingsSelectedAlias) {
+        return;
+      }
+      loadHostIntoSettingsEditor(trimmed);
+    },
+    [hostSettingsSelectedAlias, loadHostIntoSettingsEditor],
+  );
+
+  useEffect(() => {
+    if (activeAppSettingsTab !== "hosts") {
+      return;
+    }
+    if (hosts.length === 0) {
+      setHostSettingsSelectedAlias("");
+      return;
+    }
+    const valid = Boolean(hostSettingsSelectedAlias && hosts.some((x) => x.host === hostSettingsSelectedAlias));
+    if (!valid) {
+      loadHostIntoSettingsEditor(hosts[0].host);
+    }
+  }, [activeAppSettingsTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
+
+  useEffect(() => {
+    if (activeAppSettingsTab !== "hosts") {
+      clearPendingRemoveHostsTab();
+    }
+  }, [activeAppSettingsTab, clearPendingRemoveHostsTab]);
 
   useSessionOutputTrustListener({
     sessionsRef,
@@ -1705,6 +1834,8 @@ export function App() {
             return nextSet;
           });
           setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+          delete sessionTerminalCwdRef.current[sessionId];
+          setSessionTerminalCwdEpoch((n) => n + 1);
           orphanSeenSessionIdsRef.current.delete(sessionId);
           orphanClosingSessionIdsRef.current.delete(sessionId);
         });
@@ -2172,6 +2303,7 @@ export function App() {
       storeKeys,
       storeUsers,
       hosts,
+      metadataStore.hosts,
     );
     setOpenHostMenuHostAlias(host.host);
     setActiveHost(host.host);
@@ -2213,6 +2345,7 @@ export function App() {
       storeKeys,
       storeUsers,
       hosts,
+      metadataStore.hosts,
     );
     setActiveHost(host.host);
     setCurrentHost(syncedHost);
@@ -2263,6 +2396,7 @@ export function App() {
         storeKeys,
         storeUsers,
         hosts,
+        metadataStore.hosts,
       );
       setCurrentHost(syncedHost);
       setSidebarHostBindingDraft(syncedBinding);
@@ -2334,23 +2468,33 @@ export function App() {
     await persistMetadataStore(nextStore);
   };
 
-  const saveTagsForHost = async (hostAlias: string) => {
+  const saveHostTagsAndKeyPolicy = async (
+    hostAlias: string,
+    tagsCommaSeparated: string,
+    policy: StrictHostKeyPolicy,
+  ) => {
     if (!hostAlias.trim()) {
       return;
     }
     const normalizedTags = Array.from(
       new Set(
-        tagDraft
+        tagsCommaSeparated
           .split(",")
           .map((tag) => tag.trim())
           .filter((tag) => tag.length > 0),
       ),
-    );
+    ).sort((a, b) => a.localeCompare(b));
+    const isJumpHost = normalizedTags.includes(JUMP_HOST_METADATA_TAG);
     await upsertHostMetadata(hostAlias, (current) => ({
       ...current,
       tags: normalizedTags,
-      ...metadataPatchForHostKeyPolicy(hostKeyPolicyDraft),
+      isJumpHost,
+      ...metadataPatchForHostKeyPolicy(policy),
     }));
+  };
+
+  const saveTagsForHost = async (hostAlias: string) => {
+    await saveHostTagsAndKeyPolicy(hostAlias, tagDraft, hostKeyPolicyDraft);
   };
 
   const saveTagsForActiveHost = async () => {
@@ -2366,6 +2510,29 @@ export function App() {
         ...current,
         favorite: !current.favorite,
       }));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const toggleJumpHostForHost = async (hostAlias: string) => {
+    try {
+      let nextTags: string[] = [];
+      await upsertHostMetadata(hostAlias, (current) => {
+        const nextJump = !hostMetadataIsJumpHost(current);
+        nextTags = withJumpHostTagSync(current.tags, nextJump);
+        return {
+          ...current,
+          isJumpHost: nextJump,
+          tags: nextTags,
+        };
+      });
+      if (openHostMenuHostAlias === hostAlias) {
+        setTagDraft(nextTags.join(", "));
+      }
+      if (hostSettingsSelectedAlias === hostAlias) {
+        setHostSettingsTagDraft(nextTags.join(", "));
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -2559,11 +2726,59 @@ export function App() {
         setActiveHost("");
       }
       clearPendingRemoveConfirm();
+      clearPendingRemoveHostsTab();
       await load();
     } catch (e) {
       setError(String(e));
     }
   };
+
+  const saveHostFromSettingsTab = useCallback(async () => {
+    const alias = hostSettingsDraftHost.host.trim();
+    if (!alias) {
+      return;
+    }
+    setError("");
+    try {
+      await saveHost(hostSettingsDraftHost);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [alias]: hostSettingsDraftBinding },
+        updatedAt: Date.now(),
+      });
+      await saveHostTagsAndKeyPolicy(alias, hostSettingsTagDraft, hostSettingsKeyPolicy);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [
+    hostSettingsDraftHost,
+    entityStore,
+    hostSettingsDraftBinding,
+    hostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    persistEntityStore,
+  ]);
+
+  const onRemoveHostSettingsTabIntent = useCallback(() => {
+    const alias = hostSettingsSelectedAlias.trim();
+    if (!alias || !hosts.some((h) => h.host === alias)) {
+      return;
+    }
+    if (pendingRemoveHostsTab) {
+      clearPendingRemoveHostsTab();
+      void onDelete(alias);
+      return;
+    }
+    setPendingRemoveHostsTab(true);
+    if (removeHostsTabTimerRef.current) {
+      clearTimeout(removeHostsTabTimerRef.current);
+    }
+    removeHostsTabTimerRef.current = setTimeout(() => {
+      setPendingRemoveHostsTab(false);
+      removeHostsTabTimerRef.current = null;
+    }, 2200);
+  }, [hostSettingsSelectedAlias, hosts, pendingRemoveHostsTab, clearPendingRemoveHostsTab, onDelete]);
 
   const handleRemoveHostIntent = (hostAlias: string, scope: "settings") => {
     const normalizedAlias = hostAlias.trim();
@@ -3304,6 +3519,8 @@ export function App() {
       return nextSet;
     });
     setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+    delete sessionTerminalCwdRef.current[sessionId];
+    setSessionTerminalCwdEpoch((n) => n + 1);
   };
   const closeSessionInPane = async (paneIndex: number) => {
     const paneSessionId = splitSlots[paneIndex] ?? null;
@@ -3340,6 +3557,8 @@ export function App() {
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
     setSessionFileViews({});
+    sessionTerminalCwdRef.current = {};
+    setSessionTerminalCwdEpoch((n) => n + 1);
     if (withLayoutReset) {
       resetPaneLayout();
     }
@@ -3790,6 +4009,8 @@ export function App() {
         break;
       case "pane.toggleRemoteFiles": {
         if (!fileWorkspacePluginEnabled) {
+          setActiveAppSettingsTab("plugins");
+          setIsAppSettingsOpen(true);
           break;
         }
         const sid = splitSlots[paneIndex] ?? null;
@@ -3820,6 +4041,8 @@ export function App() {
       }
       case "pane.toggleLocalFiles": {
         if (!fileWorkspacePluginEnabled) {
+          setActiveAppSettingsTab("plugins");
+          setIsAppSettingsOpen(true);
           break;
         }
         const sidLocal = splitSlots[paneIndex] ?? null;
@@ -4463,6 +4686,7 @@ export function App() {
     onFilePaneTitleChange,
     semanticFileNameColors: filePaneSemanticNameColors.enabled,
     fileWorkspacePluginEnabled,
+    onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
   });
 
   const appShellStyle = {
@@ -4618,6 +4842,8 @@ export function App() {
           setDragOverPaneIndex,
           setError,
           toggleFavoriteForHost,
+          toggleJumpHostForHost,
+          hostMetadataByHost: metadataStore.hosts,
           toggleHostSelection,
           connectToHostInNewPane,
           setDragPayload,
@@ -4740,6 +4966,7 @@ export function App() {
           setMetadataStore={setMetadataStore}
           applyDefaultUser={applyDefaultUser}
           setError={setError}
+          error={error}
           quickConnectMode={quickConnectMode}
           setQuickConnectMode={setQuickConnectMode}
           quickConnectAutoTrust={quickConnectAutoTrust}
@@ -4819,6 +5046,23 @@ export function App() {
           setSshDirOverrideDraft={setSshDirOverrideDraft}
           onApplySshDirOverride={handleApplySshDirOverride}
           onResetSshDirOverride={handleResetSshDirOverride}
+          hostSettingsSelectedAlias={hostSettingsSelectedAlias}
+          onHostSettingsSelectAlias={onHostSettingsSelectAlias}
+          hostSettingsDraftHost={hostSettingsDraftHost}
+          setHostSettingsDraftHost={setHostSettingsDraftHost}
+          hostSettingsDraftBinding={hostSettingsDraftBinding}
+          setHostSettingsDraftBinding={setHostSettingsDraftBinding}
+          hostSettingsTagDraft={hostSettingsTagDraft}
+          setHostSettingsTagDraft={setHostSettingsTagDraft}
+          hostSettingsKeyPolicy={hostSettingsKeyPolicy}
+          setHostSettingsKeyPolicy={setHostSettingsKeyPolicy}
+          hostSettingsMetadataForSelected={hostSettingsMetadataForSelected}
+          onSaveHostSettingsTab={saveHostFromSettingsTab}
+          hostSettingsTabSaveDisabled={hostSettingsTabSaveDisabled}
+          onRemoveHostSettingsTabIntent={onRemoveHostSettingsTabIntent}
+          hostSettingsTabRemoveConfirmActive={pendingRemoveHostsTab}
+          toggleFavoriteForHost={toggleFavoriteForHost}
+          toggleJumpHostForHost={toggleJumpHostForHost}
         />
       )}
       {isLayoutCommandCenterOpen && (
@@ -4873,6 +5117,7 @@ export function App() {
           storeKeys={storeKeys}
           storeUsers={storeUsers}
           sshHosts={hosts}
+          hostMetadataByHost={metadataStore.hosts}
           hostBindingDraft={addHostBindingDraft}
           onHostBindingDraftChange={setAddHostBindingDraft}
           onClose={closeAddHostModal}

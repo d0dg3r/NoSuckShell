@@ -37,6 +37,9 @@ pub struct HostMetadata {
     /// When absent, `trust_host_default` still selects `accept-new` vs `ask` for migration.
     #[serde(rename = "strictHostKeyPolicy", default, skip_serializing_if = "Option::is_none")]
     pub strict_host_key_policy: Option<StrictHostKeyPolicy>,
+    /// Bastion / jump host: offered in ProxyJump shortcut lists when any host has this set.
+    #[serde(rename = "isJumpHost", default)]
+    pub is_jump_host: bool,
 }
 
 /// Effective `StrictHostKeyChecking` for `ssh -o` (no interactive prompts when not `ask`).

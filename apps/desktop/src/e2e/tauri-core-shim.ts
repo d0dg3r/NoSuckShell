@@ -53,12 +53,14 @@ const demoMetadata: HostMetadataStore = {
       tags: ["demo", "staging"],
       lastUsedAt: now(),
       trustHostDefault: true,
+      isJumpHost: false,
     },
     "lab-runner": {
       favorite: false,
       tags: ["ci"],
       lastUsedAt: now() - 3600,
       trustHostDefault: true,
+      isJumpHost: false,
     },
   },
 };

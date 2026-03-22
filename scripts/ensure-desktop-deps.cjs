@@ -1,6 +1,7 @@
 /**
- * If apps/desktop has no node_modules (or no local tsc), run npm install there once.
- * Keeps root scripts like `npm run tauri:dev` usable after a fresh clone.
+ * If apps/desktop is missing node_modules entries for any package.json dependency,
+ * run npm install there once.
+ * Keeps root scripts like `npm run tauri:dev` usable after a fresh clone or lockfile updates.
  */
 const fs = require("fs");
 const path = require("path");
@@ -9,12 +10,32 @@ const { spawnSync } = require("child_process");
 const root = path.join(__dirname, "..");
 const desktop = path.join(root, "apps", "desktop");
 
-// Check package presence rather than bin executables to be cross-platform safe
-// (on Windows .bin entries are .cmd wrappers; checking the package dir is always reliable).
-const tscPresent = fs.existsSync(path.join(desktop, "node_modules", "typescript"));
-const tauriPresent = fs.existsSync(path.join(desktop, "node_modules", "@tauri-apps", "cli"));
+function packageDirExists(nodeModules, name) {
+  if (name.startsWith("@")) {
+    const parts = name.split("/");
+    if (parts.length < 2) return false;
+    return fs.existsSync(path.join(nodeModules, parts[0], parts[1]));
+  }
+  return fs.existsSync(path.join(nodeModules, name));
+}
 
-if (tscPresent && tauriPresent) {
+function firstMissingPackage(desktopRoot) {
+  const pkgPath = path.join(desktopRoot, "package.json");
+  if (!fs.existsSync(pkgPath)) return null;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+  const nm = path.join(desktopRoot, "node_modules");
+  const names = [
+    ...Object.keys(pkg.dependencies || {}),
+    ...Object.keys(pkg.devDependencies || {}),
+  ];
+  for (const name of names) {
+    if (!packageDirExists(nm, name)) return name;
+  }
+  return null;
+}
+
+const missing = firstMissingPackage(desktop);
+if (missing === null) {
   process.exit(0);
 }
 
@@ -23,8 +44,7 @@ if (!fs.existsSync(path.join(desktop, "package.json"))) {
   process.exit(1);
 }
 
-console.error("[nosuckshell] Installing desktop dependencies (apps/desktop) …");
-// On Windows the npm executable is `npm.cmd`; spawn requires the correct name.
+console.error(`[nosuckshell] Installing desktop dependencies (apps/desktop) — missing: ${missing} …`);
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const r = spawnSync(npm, ["install"], {
   cwd: desktop,
@@ -34,8 +54,10 @@ const r = spawnSync(npm, ["install"], {
 if (r.status !== 0) {
   process.exit(r.status ?? 1);
 }
-if (!fs.existsSync(path.join(desktop, "node_modules", "typescript")) ||
-    !fs.existsSync(path.join(desktop, "node_modules", "@tauri-apps", "cli"))) {
-  console.error("[nosuckshell] Install finished but typescript/@tauri-apps/cli is still missing. Check apps/desktop npm output.");
+const stillMissing = firstMissingPackage(desktop);
+if (stillMissing !== null) {
+  console.error(
+    `[nosuckshell] Install finished but "${stillMissing}" is still missing. Check apps/desktop npm output.`,
+  );
   process.exit(1);
 }

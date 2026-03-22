@@ -6,6 +6,7 @@ export type AppSettingsTab =
   | "data"
   | "ssh"
   | "views"
+  | "hosts"
   | "store"
   | "plugins"
   | "help"

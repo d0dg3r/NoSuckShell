@@ -1,4 +1,4 @@
-import type { HostBinding, HostConfig, SshKeyObject, UserObject } from "../types";
+import type { HostBinding, HostConfig, HostMetadata, SshKeyObject, UserObject } from "../types";
 import { HostForm } from "./HostForm";
 
 export type AddHostModalProps = {
@@ -7,6 +7,7 @@ export type AddHostModalProps = {
   storeKeys: SshKeyObject[];
   storeUsers: UserObject[];
   sshHosts: HostConfig[];
+  hostMetadataByHost: Record<string, HostMetadata | undefined>;
   hostBindingDraft: HostBinding;
   onHostBindingDraftChange: (binding: HostBinding) => void;
   onClose: () => void;
@@ -21,6 +22,7 @@ export function AddHostModal({
   storeKeys,
   storeUsers,
   sshHosts,
+  hostMetadataByHost,
   hostBindingDraft,
   onHostBindingDraftChange,
   onClose,
@@ -47,6 +49,7 @@ export function AddHostModal({
             storeUsers={storeUsers}
             sshHosts={sshHosts}
             hostAliasForJumpExclude={newHostDraft.host.trim()}
+            hostMetadataByHost={hostMetadataByHost}
           />
           <div className="action-row">
             <button className="btn" onClick={onClose}>

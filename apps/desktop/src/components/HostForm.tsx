@@ -25,7 +25,12 @@ import {
   proxyCommandFromPresetSelect,
   proxyCommandPresetSelectValue,
 } from "../features/ssh-proxy-presets";
-import type { HostBinding, HostConfig, PathSshKeyObject, SshKeyObject, UserObject } from "../types";
+import type { HostBinding, HostConfig, HostMetadata, PathSshKeyObject, SshKeyObject, UserObject } from "../types";
+import {
+  HOST_FORM_COPY_COMPACT,
+  HOST_FORM_COPY_VERBOSE,
+  type HostFormCopy,
+} from "../features/host-form-copy";
 
 type Props = {
   host: HostConfig;
@@ -36,6 +41,10 @@ type Props = {
   storeUsers: UserObject[];
   sshHosts: HostConfig[];
   hostAliasForJumpExclude: string;
+  /** Per-alias metadata for jump-host shortcut filtering. */
+  hostMetadataByHost: Record<string, HostMetadata | undefined>;
+  /** Sidebar uses compact copy; settings / add-host use verbose (default). */
+  copyDensity?: "verbose" | "compact";
 };
 
 export function HostForm({
@@ -47,7 +56,10 @@ export function HostForm({
   storeUsers,
   sshHosts,
   hostAliasForJumpExclude,
+  hostMetadataByHost,
+  copyDensity = "verbose",
 }: Props) {
+  const c: HostFormCopy = copyDensity === "compact" ? HOST_FORM_COPY_COMPACT : HOST_FORM_COPY_VERBOSE;
   const update =
     (key: keyof HostConfig) =>
     (event: ChangeEvent<HTMLInputElement>): void => {
@@ -59,8 +71,8 @@ export function HostForm({
     };
 
   const jumpCandidates = useMemo(
-    () => jumpHostCandidates(sshHosts, hostAliasForJumpExclude),
-    [sshHosts, hostAliasForJumpExclude],
+    () => jumpHostCandidates(sshHosts, hostAliasForJumpExclude, hostMetadataByHost),
+    [sshHosts, hostAliasForJumpExclude, hostMetadataByHost],
   );
 
   const sortedUsers = useMemo(
@@ -162,18 +174,18 @@ export function HostForm({
         <section className="settings-card host-form-settings-card">
           <div className="settings-card-head">
             <h3>Connection</h3>
-            <p className="muted-copy">SSH host alias, target address, and port.</p>
+            <p className="muted-copy">{c.connectionLead}</p>
           </div>
           <div className="host-form-card-fields">
             <label className="field">
               <span className="field-label">Host alias</span>
               <input className="input" value={host.host} onChange={update("host")} placeholder="prod-eu-1" />
-              <span className="field-help">Friendly name used in your SSH host list.</span>
+              <span className="field-help">{c.aliasHelp}</span>
             </label>
             <label className="field">
               <span className="field-label">HostName</span>
               <input className="input" value={host.hostName} onChange={update("hostName")} placeholder="10.0.1.25" />
-              <span className="field-help">IP or DNS hostname of the target machine.</span>
+              <span className="field-help">{c.hostNameHelp}</span>
             </label>
             <label className="field">
               <span className="field-label">Port</span>
@@ -185,7 +197,7 @@ export function HostForm({
         <section className="settings-card host-form-settings-card">
           <div className="settings-card-head">
             <h3>Access</h3>
-            <p className="muted-copy">Link a store user and identity, or enter a custom SSH user and key path.</p>
+            <p className="muted-copy">{c.accessLead}</p>
           </div>
           <div className="host-form-card-fields">
             <label className="field">
@@ -204,7 +216,7 @@ export function HostForm({
                   </option>
                 ))}
               </select>
-              <span className="field-help">When set, the store user&apos;s login name is used for SSH (and can supply defaults elsewhere).</span>
+              <span className="field-help">{c.storeUserHelp}</span>
             </label>
             {userSelectValue === USER_SELECT_LEGACY ? (
               <label className="field">
@@ -235,9 +247,7 @@ export function HostForm({
                   <option value={identitySelectValue}>Other path: {identitySelectValue}</option>
                 ) : null}
               </select>
-              <span className="field-help">
-                Keys from the identity store. Unlock encrypted keys under App Settings → Identities. Unmatched config paths show as &quot;Other path&quot;.
-              </span>
+              <span className="field-help">{c.identityHelp}</span>
             </label>
           </div>
         </section>
@@ -245,7 +255,7 @@ export function HostForm({
         <section className="settings-card host-form-settings-card">
           <div className="settings-card-head">
             <h3>Proxy</h3>
-            <p className="muted-copy">Jump through another saved host, or enter a custom ProxyJump value.</p>
+            <p className="muted-copy">{c.proxyLead}</p>
           </div>
           <div className="host-form-card-fields">
             <label className="field">
@@ -264,7 +274,7 @@ export function HostForm({
                 ))}
                 <option value={JUMP_SELECT_CUSTOM}>Custom value (edit below)</option>
               </select>
-              <span className="field-help">Pick a saved host alias, or type any ProxyJump string.</span>
+              <span className="field-help">{c.jumpShortcutHelp}</span>
             </label>
             <label className="field">
               <span className="field-label">ProxyJump</span>
@@ -290,7 +300,7 @@ export function HostForm({
                   </option>
                 ))}
               </select>
-              <span className="field-help">Common patterns; replace placeholders like bastion or proxy address.</span>
+              <span className="field-help">{c.proxyCommandPresetHelp}</span>
             </label>
             <label className="field">
               <span className="field-label">ProxyCommand</span>

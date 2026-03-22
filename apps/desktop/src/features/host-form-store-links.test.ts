@@ -17,7 +17,7 @@ import {
   USER_SELECT_LEGACY,
   userSelectIdValue,
 } from "./host-form-store-links";
-import type { HostBinding, HostConfig, UserObject } from "../types";
+import type { HostBinding, HostConfig, HostMetadata, UserObject } from "../types";
 
 const host = (overrides: Partial<HostConfig> = {}): HostConfig => ({
   host: "self",
@@ -59,7 +59,34 @@ const u1: UserObject = {
 describe("jumpHostCandidates", () => {
   it("excludes the editing alias", () => {
     const hosts = [host({ host: "a" }), host({ host: "b" }), host({ host: "self" })];
-    expect(jumpHostCandidates(hosts, "self")).toEqual(["a", "b"]);
+    expect(jumpHostCandidates(hosts, "self", {})).toEqual(["a", "b"]);
+  });
+
+  it("with no jump hosts marked, lists all aliases except self", () => {
+    const hosts = [host({ host: "a" }), host({ host: "b" })];
+    const meta: Record<string, HostMetadata> = {
+      a: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false },
+    };
+    expect(jumpHostCandidates(hosts, "b", meta)).toEqual(["a"]);
+  });
+
+  it("when any host is jump-marked, lists only jump hosts except self", () => {
+    const hosts = [host({ host: "bastion" }), host({ host: "app" }), host({ host: "db" })];
+    const meta: Record<string, HostMetadata> = {
+      bastion: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false, isJumpHost: true },
+      app: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false },
+      db: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false },
+    };
+    expect(jumpHostCandidates(hosts, "app", meta)).toEqual(["bastion"]);
+  });
+
+  it("excludes self from jump-only list when self is jump host", () => {
+    const hosts = [host({ host: "bastion" }), host({ host: "app" })];
+    const meta: Record<string, HostMetadata> = {
+      bastion: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false, isJumpHost: true },
+      app: { favorite: false, tags: [], lastUsedAt: null, trustHostDefault: false, isJumpHost: true },
+    };
+    expect(jumpHostCandidates(hosts, "bastion", meta)).toEqual(["app"]);
   });
 });
 

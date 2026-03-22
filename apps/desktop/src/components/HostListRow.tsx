@@ -2,8 +2,9 @@ import type { Dispatch, DragEvent as ReactDragEvent, MutableRefObject, SetStateA
 import type { HostRowViewModel } from "../features/view-profile-filters";
 import type { ContextMenuState } from "../features/session-model";
 import type { DragPayload } from "../features/pane-dnd";
-import type { HostBinding, HostConfig, SshKeyObject, StrictHostKeyPolicy, UserObject } from "../types";
+import type { HostBinding, HostConfig, HostMetadata, SshKeyObject, StrictHostKeyPolicy, UserObject } from "../types";
 import { HostForm } from "./HostForm";
+import { HostMetadataFields } from "./HostMetadataFields";
 
 export type HostListRowProps = {
   row: HostRowViewModel;
@@ -16,6 +17,7 @@ export type HostListRowProps = {
   sidebarHostBindingDraft: HostBinding;
   setSidebarHostBindingDraft: Dispatch<SetStateAction<HostBinding>>;
   hosts: HostConfig[];
+  hostMetadataByHost: Record<string, HostMetadata | undefined>;
   tagDraft: string;
   setTagDraft: Dispatch<SetStateAction<string>>;
   hostKeyPolicyDraft: StrictHostKeyPolicy;
@@ -31,6 +33,7 @@ export type HostListRowProps = {
   setDragOverPaneIndex: Dispatch<SetStateAction<number | null>>;
   setError: Dispatch<SetStateAction<string>>;
   toggleFavoriteForHost: (hostAlias: string) => void | Promise<void>;
+  toggleJumpHostForHost: (hostAlias: string) => void | Promise<void>;
   toggleHostSelection: (host: HostConfig) => void;
   connectToHostInNewPane: (host: HostConfig) => void | Promise<void>;
   setDragPayload: (event: ReactDragEvent, payload: DragPayload) => void;
@@ -56,6 +59,7 @@ export function HostListRow({
   sidebarHostBindingDraft,
   setSidebarHostBindingDraft,
   hosts,
+  hostMetadataByHost,
   tagDraft,
   setTagDraft,
   hostKeyPolicyDraft,
@@ -71,6 +75,7 @@ export function HostListRow({
   setDragOverPaneIndex,
   setError,
   toggleFavoriteForHost,
+  toggleJumpHostForHost,
   toggleHostSelection,
   connectToHostInNewPane,
   setDragPayload,
@@ -192,44 +197,20 @@ export function HostListRow({
               storeUsers={storeUsers}
               sshHosts={hosts}
               hostAliasForJumpExclude={currentHost.host}
+              hostMetadataByHost={hostMetadataByHost}
+              copyDensity="compact"
             />
-            <div className="host-meta-edit">
-              <label className="field">
-                <span className="field-label">Host key verification (SSH)</span>
-                <select
-                  className="input density-profile-select"
-                  aria-label="Host key verification"
-                  value={hostKeyPolicyDraft}
-                  onChange={(event) => setHostKeyPolicyDraft(event.target.value as StrictHostKeyPolicy)}
-                >
-                  <option value="ask">Interactive prompt (default)</option>
-                  <option value="accept-new">Auto-accept new keys (no prompt)</option>
-                  <option value="no">Accept any key (insecure — MITM risk)</option>
-                </select>
-                <span className="field-help">
-                  Applies to this host when connecting in the terminal (including ProxyJump hops). Use auto-accept when
-                  you cannot answer hidden yes/no prompts.
-                </span>
-              </label>
-              <label className="field">
-                <span className="field-label">Tags (comma separated)</span>
-                <input
-                  className="input"
-                  value={tagDraft}
-                  onChange={(event) => setTagDraft(event.target.value)}
-                  placeholder="prod, home, lab"
-                />
-              </label>
-              <label className="field checkbox-field">
-                <input
-                  className="checkbox-input"
-                  type="checkbox"
-                  checked={row.metadata.favorite}
-                  onChange={() => void toggleFavoriteForHost(row.host.host)}
-                />
-                <span className="field-label">Favorite</span>
-              </label>
-            </div>
+            <HostMetadataFields
+              hostAlias={row.host.host}
+              metadata={row.metadata}
+              tagDraft={tagDraft}
+              setTagDraft={setTagDraft}
+              hostKeyPolicyDraft={hostKeyPolicyDraft}
+              setHostKeyPolicyDraft={setHostKeyPolicyDraft}
+              toggleFavoriteForHost={toggleFavoriteForHost}
+              toggleJumpHostForHost={toggleJumpHostForHost}
+              copyDensity="compact"
+            />
             <div className="action-row host-slide-actions">
               <button
                 className="btn icon-btn"

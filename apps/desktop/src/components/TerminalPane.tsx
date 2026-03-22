@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { parseOsc7WorkingDirectoryPayload } from "../features/terminal-osc7-path";
 import { resizeSession } from "../tauri-api";
 import { subscribeSessionOutput } from "../session-output-bridge";
 import type { SessionOutputEvent } from "../types";
@@ -8,6 +9,8 @@ import type { SessionOutputEvent } from "../types";
 type Props = {
   sessionId: string;
   onUserInput: (sessionId: string, data: string) => void;
+  /** OSC 7 (file://…) from shell — updates pane title CWD when supported. */
+  onSessionWorkingDirectoryChange?: (sessionId: string, path: string) => void;
   fontSize: number;
   fontFamily: string;
 };
@@ -16,12 +19,13 @@ const sessionBuffers = new Map<string, string>();
 const MAX_BUFFER_CHARS = 250_000;
 const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
 const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
-export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: Props) {
+export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectoryChange, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const onUserInputRef = useRef(onUserInput);
+  const onSessionWorkingDirectoryChangeRef = useRef(onSessionWorkingDirectoryChange);
   const fitFrameRef = useRef<number | null>(null);
   const fitDebounceRef = useRef<number | null>(null);
   const lastResizeRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -33,6 +37,10 @@ export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: P
   useEffect(() => {
     onUserInputRef.current = onUserInput;
   }, [onUserInput]);
+
+  useEffect(() => {
+    onSessionWorkingDirectoryChangeRef.current = onSessionWorkingDirectoryChange;
+  }, [onSessionWorkingDirectoryChange]);
 
   useEffect(() => {
     let disposed = false;
@@ -56,6 +64,18 @@ export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: P
       terminal.open(terminalHostRef.current);
       fitAddon.fit();
     }
+
+    const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
+      const path = parseOsc7WorkingDirectoryPayload(data);
+      if (path === null) {
+        return false;
+      }
+      const notify = onSessionWorkingDirectoryChangeRef.current;
+      if (notify) {
+        notify(sessionId, path);
+      }
+      return true;
+    });
 
     const buffered = sessionBuffers.get(sessionId) ?? "";
     if (buffered.length > 0) {
@@ -209,6 +229,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: P
       if (fitFrameRef.current !== null) {
         window.cancelAnimationFrame(fitFrameRef.current);
       }
+      osc7Disposable.dispose();
       unsubscribeOutput();
       terminal.dispose();
     };

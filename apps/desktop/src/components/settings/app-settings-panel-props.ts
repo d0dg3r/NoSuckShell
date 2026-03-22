@@ -3,9 +3,11 @@ import type { MutableRefObject, Ref, PointerEvent as ReactPointerEvent } from "r
 import type {
   HostBinding,
   HostConfig,
+  HostMetadata,
   HostMetadataStore,
   GroupObject,
   SshKeyObject,
+  StrictHostKeyPolicy,
   TagObject,
   UserObject,
   ViewFilterRule,
@@ -84,6 +86,7 @@ export type AppSettingsPanelProps = {
   setMetadataStore: React.Dispatch<React.SetStateAction<HostMetadataStore>>;
   applyDefaultUser: (value: string) => Promise<void>;
   setError: (message: string) => void;
+  error: string;
   quickConnectMode: QuickConnectMode;
   setQuickConnectMode: (value: QuickConnectMode) => void;
   quickConnectAutoTrust: boolean;
@@ -169,4 +172,21 @@ export type AppSettingsPanelProps = {
   setSshDirOverrideDraft: (value: string) => void;
   onApplySshDirOverride: () => Promise<void>;
   onResetSshDirOverride: () => Promise<void>;
+  hostSettingsSelectedAlias: string;
+  onHostSettingsSelectAlias: (alias: string) => void;
+  hostSettingsDraftHost: HostConfig;
+  setHostSettingsDraftHost: React.Dispatch<React.SetStateAction<HostConfig>>;
+  hostSettingsDraftBinding: HostBinding;
+  setHostSettingsDraftBinding: React.Dispatch<React.SetStateAction<HostBinding>>;
+  hostSettingsTagDraft: string;
+  setHostSettingsTagDraft: React.Dispatch<React.SetStateAction<string>>;
+  hostSettingsKeyPolicy: StrictHostKeyPolicy;
+  setHostSettingsKeyPolicy: React.Dispatch<React.SetStateAction<StrictHostKeyPolicy>>;
+  hostSettingsMetadataForSelected: HostMetadata;
+  onSaveHostSettingsTab: () => Promise<void>;
+  hostSettingsTabSaveDisabled: boolean;
+  onRemoveHostSettingsTabIntent: () => void;
+  hostSettingsTabRemoveConfirmActive: boolean;
+  toggleFavoriteForHost: (hostAlias: string) => void | Promise<void>;
+  toggleJumpHostForHost: (hostAlias: string) => void | Promise<void>;
 };

@@ -7,6 +7,7 @@ export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "keyboard", label: "Keyboard" },
   { id: "files", label: "Files & export" },
   { id: "views", label: "Views" },
+  { id: "hosts", label: "Hosts" },
   { id: "store", label: "Identity Store" },
   { id: "ssh", label: "SSH" },
   { id: "data", label: "Data & Backup" },
