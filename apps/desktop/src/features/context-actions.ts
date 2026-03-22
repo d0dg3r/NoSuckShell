@@ -31,6 +31,8 @@ type BuildArgs = {
   paneSessionId: string | null;
   paneSessionKind: PaneContextSessionKind;
   paneFileView: "terminal" | "remote" | "local";
+  /** When false, remote/local file browser toggles are hidden (File workspace plugin off). */
+  fileWorkspaceEnabled?: boolean;
   canClosePane?: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
@@ -60,6 +62,7 @@ export const buildPaneContextActions = ({
   paneSessionId,
   paneSessionKind,
   paneFileView,
+  fileWorkspaceEnabled = true,
   canClosePane = true,
   broadcastModeEnabled,
   splitMode = "duplicate",
@@ -91,7 +94,7 @@ export const buildPaneContextActions = ({
       };
 
   const remoteFilesAction: ContextAction | null =
-    paneSessionKind === "ssh"
+    fileWorkspaceEnabled && paneSessionKind === "ssh"
       ? {
           id: "pane.toggleRemoteFiles",
           label: paneFileView === "remote" ? "Back to terminal" : "Browse remote files (SFTP)",
@@ -100,7 +103,7 @@ export const buildPaneContextActions = ({
       : null;
 
   const localFilesAction: ContextAction | null =
-    paneSessionKind === "local"
+    fileWorkspaceEnabled && paneSessionKind === "local"
       ? {
           id: "pane.toggleLocalFiles",
           label: paneFileView === "local" ? "Back to terminal" : "Browse local files",

@@ -216,7 +216,7 @@ export function TerminalPane({ sessionId, onUserInput, fontSize, fontFamily }: P
 
   return (
     <div ref={rootRef} className="terminal-root">
-      <div ref={terminalHostRef} className="terminal-host" />
+      <div ref={terminalHostRef} className="terminal-host" data-nosuckshell-terminal-host="true" />
     </div>
   );
 }

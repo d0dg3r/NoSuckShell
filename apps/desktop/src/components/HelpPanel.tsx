@@ -397,7 +397,10 @@ const helpChapters: HelpChapter[] = [
   },
 ];
 
-function renderSectionTable(section: HelpSection) {
+function renderSectionTable(
+  section: HelpSection,
+  resolveHelpShortcutLabel: ((action: string) => string | undefined) | undefined,
+) {
   return (
     <section key={section.title} className="help-section">
       <h4>{section.title}</h4>
@@ -411,13 +414,17 @@ function renderSectionTable(section: HelpSection) {
             </tr>
           </thead>
           <tbody>
-            {section.rows.map((row) => (
-              <tr key={`${section.title}:${row.action}`}>
-                <td>{row.action}</td>
-                <td>{row.mouse}</td>
-                <td>{row.keys}</td>
-              </tr>
-            ))}
+            {section.rows.map((row) => {
+              const resolved = resolveHelpShortcutLabel?.(row.action);
+              const keysCell = resolved && resolved.length > 0 ? resolved : row.keys;
+              return (
+                <tr key={`${section.title}:${row.action}`}>
+                  <td>{row.action}</td>
+                  <td>{row.mouse}</td>
+                  <td>{keysCell}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -430,7 +437,13 @@ function renderSectionTable(section: HelpSection) {
  * Keep in sync with App.tsx, context-actions.ts, features/file-pane-name-kind.ts,
  * host metadata / session SSH flags, and Identity Store UI.
  */
-export function HelpPanel() {
+export type HelpPanelProps = {
+  resolveHelpShortcutLabel?: (action: string) => string | undefined;
+  shortcutCheatsheetLines?: Array<{ label: string; keys: string }>;
+};
+
+export function HelpPanel(props: HelpPanelProps = {}) {
+  const { resolveHelpShortcutLabel, shortcutCheatsheetLines } = props;
   return (
     <section className="help-panel">
       <header className="help-panel-header">
@@ -439,6 +452,35 @@ export function HelpPanel() {
           Full in-app reference: interactions, SSH and trust behavior, Identity Store, settings, and data locations.
         </p>
       </header>
+
+      {shortcutCheatsheetLines && shortcutCheatsheetLines.length > 0 ? (
+        <section className="help-section" aria-label="Keyboard shortcuts overview">
+          <h4>Keyboard shortcuts</h4>
+          <p className="muted-copy help-chapter-intro">
+            Rebind shortcuts in Settings → Keyboard. Use the leader key, then <strong>K</strong> (default) to jump back
+            here. Chords use physical keys (layout-independent). In a focused terminal, only modified shortcuts and
+            Escape (when a modal is open) are handled by the app.
+          </p>
+          <div className="help-table-wrap">
+            <table className="help-table">
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Shortcut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shortcutCheatsheetLines.map((row) => (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
+                    <td>{row.keys}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <nav className="help-toc" aria-label="Help chapters">
         {helpChapters.map((ch) => (
@@ -456,7 +498,7 @@ export function HelpPanel() {
               {paragraph}
             </p>
           ))}
-          {chapter.sections.map((sec) => renderSectionTable(sec))}
+          {chapter.sections.map((sec) => renderSectionTable(sec, resolveHelpShortcutLabel))}
         </section>
       ))}
 

@@ -17,6 +17,7 @@ export type PaneContextMenuProps = {
   paneSessionId: string | null;
   paneSessionKind: PaneContextSessionKind;
   paneFileView: "terminal" | "remote" | "local";
+  fileWorkspaceEnabled: boolean;
   canClosePane: boolean;
   broadcastModeEnabled: boolean;
   broadcastCount: number;
@@ -40,6 +41,7 @@ export function PaneContextMenu({
   paneSessionId,
   paneSessionKind,
   paneFileView,
+  fileWorkspaceEnabled,
   canClosePane,
   broadcastModeEnabled,
   broadcastCount,
@@ -56,6 +58,7 @@ export function PaneContextMenu({
     paneSessionId,
     paneSessionKind,
     paneFileView,
+    fileWorkspaceEnabled,
     canClosePane,
     broadcastModeEnabled,
     broadcastCount,
@@ -78,6 +81,7 @@ export function PaneContextMenu({
         paneSessionId,
         paneSessionKind,
         paneFileView,
+        fileWorkspaceEnabled,
         canClosePane,
         broadcastModeEnabled,
         broadcastCount,

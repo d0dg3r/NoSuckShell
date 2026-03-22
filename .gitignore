@@ -3,6 +3,7 @@ apps/desktop/dist
 apps/desktop/test-results
 apps/desktop/playwright-report
 apps/desktop/src-tauri/target
+services/license-server/target
 apps/desktop/src-tauri/gen
 apps/desktop/src-tauri/Cargo.lock
 .cursor/

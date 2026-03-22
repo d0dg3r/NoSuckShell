@@ -73,11 +73,26 @@ Command registration: [`main.rs`](../apps/desktop/src-tauri/src/main.rs) (`tauri
 | `backup` / `key_crypto` | Encrypted backup envelope |
 | `layout_profiles` / `view_profiles` | Persisted JSON for layouts and host-list view profiles |
 | `sftp` | Remote/local file ops over libssh2 (no ProxyJump/ProxyCommand in this path today) |
+| `plugins` | Built-in plugin registry ([`plugins/mod.rs`](../apps/desktop/src-tauri/src/plugins/mod.rs)): `NssPlugin` trait, capabilities, `enrich_resolved_host` after store merge |
+| `license` | Offline Ed25519 license verify/activate ([`license.rs`](../apps/desktop/src-tauri/src/license.rs)); entitlement checks for gated plugins |
+
+## Plugins and licensing (Phase 1)
+
+**Built-in plugins** (Rust modules registered at startup) can implement `NssPlugin`: manifest (id, version, display name, capabilities), optional `required_entitlement`, `enrich_host_config`, and `invoke` for RPC-style calls from the UI.
+
+- **Host hook:** After `resolve_host_config_with_store`, [`resolve_host_config_for_session`](../apps/desktop/src-tauri/src/secure_store.rs) calls `plugins::enrich_resolved_host` so Vault/Bitwarden-style providers can adjust `HostConfig` before SSH/SFTP (see demo plugin under [`plugins/demo.rs`](../apps/desktop/src-tauri/src/plugins/demo.rs)).
+- **Settings UI:** Settings → **Plugins & license** ([`AppSettingsPluginsTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsPluginsTab.tsx)): list plugins, enable/disable, paste license token, ping demo plugin.
+- **File workspace:** Built-in plugin `dev.nosuckshell.plugin.file-workspace` ([`plugins/file_workspace.rs`](../apps/desktop/src-tauri/src/plugins/file_workspace.rs)) gates remote/local file browser UI and `sessionFileViews` in [`App.tsx`](../apps/desktop/src/App.tsx) / [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx) / [`context-actions.ts`](../apps/desktop/src/features/context-actions.ts).
+- **License issuance:** Separate HTTP service [`services/license-server`](../services/license-server/) (Ko-fi webhook + admin issue endpoint). Product/legal notes: [licensing.md](licensing.md). [Ko-fi](https://ko-fi.com/) is only the payment/webhook source; signing stays on your server.
+
+Future **Phase 2** (not implemented): load third-party code via WASM or signed bundles—same hooks, stricter sandboxing.
+
+Planned plugin-shaped features (GitHub settings sync, Bitwarden, HashiCorp Vault, NSS-Commander) are listed with proposed IDs in [roadmap.md](roadmap.md).
 
 ## SSH session path (terminal)
 
 1. UI calls `start_session` with a `HostConfig` (alias, HostName, user, port, identity file, `proxyJump`, `proxyCommand`).
-2. `resolve_host_config_for_session` applies the entity store binding and linked user (user string, HostName, keys, proxy fields, etc.).
+2. `resolve_host_config_for_session` applies the entity store binding and linked user (user string, HostName, keys, proxy fields, etc.), then runs **plugin** `enrich_resolved_host`.
 3. `build_ssh_command` adds OpenSSH flags, including **`StrictHostKeyChecking`** from `host_metadata` for the host alias (or from the quick-connect request for ephemeral sessions).
 4. Child `ssh` runs under a PTY; output is chunked into `SessionOutputEvent` (includes a flag when the known-hosts prompt substring appears).
 
@@ -120,6 +135,7 @@ sequenceDiagram
 - **Store:** CRUD-ish commands for encrypted store entities and key unlock
 - **Backup / profiles:** export/import backup, layout and view profile persistence
 - **SFTP:** list/download/upload/rename/… for remote and local panes
+- **Plugins / license:** `list_plugins`, `set_plugin_enabled`, `plugin_invoke`, `activate_license`, `license_status`, `clear_license`
 
 Authoritative list: `generate_handler![...]` in `main.rs` and matching names in `tauri-api.ts`.
 
@@ -136,6 +152,8 @@ Authoritative list: `generate_handler![...]` in `main.rs` and matching names in 
 | `nosuckshell.metadata.json` | Per-alias UI metadata and host-key policy |
 | Entity store file (under app data) | Identity Store (encrypted) |
 | Layout / view profile JSON | Workspace and sidebar view state |
+| `nosuckshell.plugins.json` | Per-plugin enabled flags (under active SSH dir) |
+| `nosuckshell.license.json` | Verified license payload + signature (under active SSH dir) |
 
 Exact paths depend on platform and optional SSH dir override (see Settings → SSH and `ssh_home`).
 
@@ -144,6 +162,8 @@ Exact paths depend on platform and optional SSH dir override (see Settings → S
 | Doc | Content |
 | --- | --- |
 | [backup-security.md](backup-security.md) | Backup format and threat model |
+| [licensing.md](licensing.md) | License tokens, Ko-fi, entitlements, key rotation |
+| [roadmap.md](roadmap.md) | Planned plugins (GitHub sync, Bitwarden, Vault, NSS-Commander) |
 | [releases.md](releases.md) | Tags and GitHub releases |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [README.md](README.md) (repo root) | Clone, build, run |

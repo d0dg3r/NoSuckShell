@@ -274,3 +274,33 @@ export type ViewProfile = {
   createdAt: number;
   updatedAt: number;
 };
+
+export type PluginCapability = "credentialProvider" | "settingsUi" | "hostMetadataEnricher";
+
+export type PluginManifest = {
+  id: string;
+  version: string;
+  displayName: string;
+  capabilities: PluginCapability[];
+};
+
+export type PluginListEntry = {
+  manifest: PluginManifest;
+  enabled: boolean;
+  entitlementOk: boolean;
+};
+
+export type LicensePayload = {
+  v: number;
+  licenseId: string;
+  entitlements: string[];
+  iat: number;
+  exp?: number | null;
+};
+
+export type LicenseStatus = {
+  active: boolean;
+  licenseId: string | null;
+  entitlements: string[];
+  exp: number | null;
+};

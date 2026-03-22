@@ -42,6 +42,7 @@ import {
   startQuickSshSession,
   startSession,
   touchHostLastUsed,
+  listPlugins,
 } from "./tauri-api";
 import { AddHostModal } from "./components/AddHostModal";
 import { HostContextMenu } from "./components/HostContextMenu";
@@ -49,6 +50,7 @@ import { HostSidebar } from "./components/HostSidebar";
 import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
 import { createSplitPaneRenderer } from "./components/SplitWorkspace";
+import { useAppKeyboardShortcutEngine, type KeyboardShortcutEngineActions } from "./hooks/useAppKeyboardShortcutEngine";
 import { useAppRefSync } from "./hooks/useAppRefSync";
 import { listen } from "@tauri-apps/api/event";
 import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
@@ -78,6 +80,7 @@ const LayoutCommandCenter = lazy(async () => {
 });
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
+import { FILE_WORKSPACE_PLUGIN_ID } from "./features/builtin-plugin-ids";
 import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
 import {
   FILE_DND_PAYLOAD_MIME,
@@ -188,6 +191,15 @@ import {
   readLayoutMode,
   readSplitRatioPreset,
 } from "./features/app-preferences";
+import { formatChordDisplay } from "./features/keyboard-shortcuts-display";
+import { KEYBOARD_SHORTCUT_DEFINITIONS } from "./features/keyboard-shortcuts-registry";
+import type { KeyboardShortcutCommandId, KeyChord, StoredShortcutMap } from "./features/keyboard-shortcuts-types";
+import {
+  KEYBOARD_SHORTCUTS_STORAGE_KEY,
+  effectiveLeaderChord,
+  mergeChordMap,
+  parseStoredShortcutMap,
+} from "./features/keyboard-shortcuts-storage";
 import { resolveFileExportDestPath } from "./features/file-export-dest";
 import {
   applyFilePaneSemanticNameColorVarsToDocument,
@@ -387,6 +399,12 @@ export function App() {
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
   const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
+  const [keyboardShortcutChords, setKeyboardShortcutChords] = useState<Record<KeyboardShortcutCommandId, KeyChord>>(() =>
+    mergeChordMap(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
+  );
+  const [keyboardLeaderChord, setKeyboardLeaderChord] = useState<KeyChord>(() =>
+    effectiveLeaderChord(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
+  );
   const [sshConfigRaw, setSshConfigRaw] = useState<string>("");
   const [sshDirInfo, setSshDirInfo] = useState<SshDirInfo | null>(null);
   const [sshDirOverrideDraft, setSshDirOverrideDraft] = useState<string>("");
@@ -418,6 +436,8 @@ export function App() {
   const [splitSlots, setSplitSlots] = useState<Array<string | null>>(() => createInitialPaneState());
   /** Per SSH/local session: file browser vs terminal (keyed by session id so layout changes do not remap views). */
   const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
+  /** Gated by built-in plugin `dev.nosuckshell.plugin.file-workspace` (Settings → Plugins & license). */
+  const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -618,6 +638,7 @@ export function App() {
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
   const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const lastAutoArrangeBeforeFreeRef = useRef<AutoArrangeActiveMode>("c");
+  const prevAppSettingsOpenRef = useRef(false);
   const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
   const shouldSplitAsEmpty = (
@@ -716,6 +737,34 @@ export function App() {
     }
     layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
+
+  const refreshFileWorkspacePlugin = useCallback(async () => {
+    try {
+      const rows = await listPlugins();
+      const row = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
+      setFileWorkspacePluginEnabled(row ? row.enabled && row.entitlementOk : true);
+    } catch {
+      setFileWorkspacePluginEnabled(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshFileWorkspacePlugin();
+  }, [refreshFileWorkspacePlugin]);
+
+  useEffect(() => {
+    if (prevAppSettingsOpenRef.current && !isAppSettingsOpen) {
+      void refreshFileWorkspacePlugin();
+    }
+    prevAppSettingsOpenRef.current = isAppSettingsOpen;
+  }, [isAppSettingsOpen, refreshFileWorkspacePlugin]);
+
+  useEffect(() => {
+    if (!fileWorkspacePluginEnabled) {
+      setSessionFileViews({});
+    }
+  }, [fileWorkspacePluginEnabled]);
+
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
   const availableTags = useMemo(() => {
@@ -920,7 +969,7 @@ export function App() {
         const t = "Drop it on me";
         return { display: t, title: t };
       }
-      const fileView = sessionFileViews[paneSessionId] ?? "terminal";
+      const fileView = fileWorkspacePluginEnabled ? (sessionFileViews[paneSessionId] ?? "terminal") : "terminal";
       if (fileView === "local" || fileView === "remote") {
         const payload = filePaneTitlesRef.current[paneIndex];
         if (payload) {
@@ -934,7 +983,15 @@ export function App() {
       const label = resolveSessionTitle(paneSession);
       return { display: label, title: label };
     },
-    [resolveSessionTitle, sessionById, splitSlots, sessionFileViews, showFullPathInFilePaneTitle, filePaneTitleEpoch],
+    [
+      resolveSessionTitle,
+      sessionById,
+      splitSlots,
+      sessionFileViews,
+      showFullPathInFilePaneTitle,
+      filePaneTitleEpoch,
+      fileWorkspacePluginEnabled,
+    ],
   );
   const load = async () => {
     const [loadedHosts, loadedMetadata, loadedProfiles, loadedViewProfiles, loadedStore] = await Promise.all([
@@ -2560,6 +2617,15 @@ export function App() {
     setPendingQuickConnectPaneIndex(null);
   };
 
+  useEffect(() => {
+    const payload: StoredShortcutMap = {
+      version: 1,
+      chords: keyboardShortcutChords,
+      leaderChord: keyboardLeaderChord,
+    };
+    window.localStorage.setItem(KEYBOARD_SHORTCUTS_STORAGE_KEY, JSON.stringify(payload));
+  }, [keyboardShortcutChords, keyboardLeaderChord]);
+
   const handleSettingsHeaderPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       if (!isAppSettingsOpen || settingsOpenMode !== "modal") {
@@ -3723,6 +3789,9 @@ export function App() {
         openQuickConnectModal(paneIndex);
         break;
       case "pane.toggleRemoteFiles": {
+        if (!fileWorkspacePluginEnabled) {
+          break;
+        }
         const sid = splitSlots[paneIndex] ?? null;
         if (!sid) {
           break;
@@ -3750,6 +3819,9 @@ export function App() {
         break;
       }
       case "pane.toggleLocalFiles": {
+        if (!fileWorkspacePluginEnabled) {
+          break;
+        }
         const sidLocal = splitSlots[paneIndex] ?? null;
         if (!sidLocal) {
           break;
@@ -3861,6 +3933,128 @@ export function App() {
       hideSidebarTimeoutRef.current = null;
     }, SIDEBAR_AUTO_HIDE_DELAY_MS);
   };
+
+  const focusNextPaneFromShortcut = useCallback(() => {
+    if (paneOrder.length === 0) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    const base = idx >= 0 ? idx : 0;
+    const next = paneOrder[(base + 1) % paneOrder.length];
+    setActivePaneIndex(next);
+    const sid = splitSlots[next];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [paneOrder, activePaneIndex, splitSlots, requestTerminalFocus]);
+
+  const focusPreviousPaneFromShortcut = useCallback(() => {
+    if (paneOrder.length === 0) {
+      return;
+    }
+    const idx = paneOrder.indexOf(activePaneIndex);
+    const base = idx >= 0 ? idx : 0;
+    const prev = paneOrder[(base - 1 + paneOrder.length) % paneOrder.length];
+    setActivePaneIndex(prev);
+    const sid = splitSlots[prev];
+    if (sid) {
+      requestTerminalFocus(sid);
+    }
+  }, [paneOrder, activePaneIndex, splitSlots, requestTerminalFocus]);
+
+  const shortcutSnapshotRef = useRef({ overlayOpen: false });
+  const keyboardShortcutSuspendEscapeRef = useRef(false);
+  const shortcutActionsRef = useRef<KeyboardShortcutEngineActions>({
+    openSettings: () => {},
+    toggleSidebar: () => {},
+    openQuickConnect: () => {},
+    openLayoutCommandCenter: () => {},
+    focusNextPane: () => {},
+    focusPreviousPane: () => {},
+    dismissPrimaryOverlay: () => {},
+    openSettingsKeyboardTab: () => {},
+  });
+
+  shortcutSnapshotRef.current = {
+    overlayOpen:
+      Boolean(hostContextMenu) ||
+      contextMenu.visible ||
+      Boolean(activeTrustPrompt) ||
+      isQuickConnectModalOpen ||
+      isAddHostModalOpen ||
+      isLayoutCommandCenterOpen ||
+      isAppSettingsOpen,
+  };
+
+  shortcutActionsRef.current = {
+    openSettings: () => setIsAppSettingsOpen(true),
+    toggleSidebar: () => toggleHostSidebar(),
+    openQuickConnect: () => openQuickConnectModal(null),
+    openLayoutCommandCenter: () => setIsLayoutCommandCenterOpen(true),
+    focusNextPane: () => focusNextPaneFromShortcut(),
+    focusPreviousPane: () => focusPreviousPaneFromShortcut(),
+    dismissPrimaryOverlay: () => {
+      if (hostContextMenu) {
+        setHostContextMenu(null);
+        return;
+      }
+      if (contextMenu.visible) {
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+        return;
+      }
+      if (activeTrustPrompt) {
+        dismissTrustPrompt(activeTrustPrompt.sessionId);
+        return;
+      }
+      if (isQuickConnectModalOpen) {
+        closeQuickConnectModal();
+        return;
+      }
+      if (isAddHostModalOpen) {
+        closeAddHostModal();
+        return;
+      }
+      if (isLayoutCommandCenterOpen) {
+        setIsLayoutCommandCenterOpen(false);
+        return;
+      }
+      if (isAppSettingsOpen) {
+        setIsAppSettingsOpen(false);
+      }
+    },
+    openSettingsKeyboardTab: () => {
+      setIsAppSettingsOpen(true);
+      setActiveAppSettingsTab("keyboard");
+    },
+  };
+
+  useAppKeyboardShortcutEngine(
+    keyboardShortcutChords,
+    keyboardLeaderChord,
+    () => shortcutSnapshotRef.current,
+    shortcutActionsRef,
+    keyboardShortcutSuspendEscapeRef,
+  );
+
+  const resolveHelpShortcutLabel = useCallback(
+    (action: string) => {
+      const def = KEYBOARD_SHORTCUT_DEFINITIONS.find((d) => d.helpAction === action);
+      if (!def) {
+        return undefined;
+      }
+      return formatChordDisplay(keyboardShortcutChords[def.id]);
+    },
+    [keyboardShortcutChords],
+  );
+
+  const shortcutCheatsheetLines = useMemo(() => {
+    const leaderLine = { label: "Leader key (then follow-up key)", keys: formatChordDisplay(keyboardLeaderChord) };
+    const rest = KEYBOARD_SHORTCUT_DEFINITIONS.map((d) => ({
+      label: d.label,
+      keys: formatChordDisplay(keyboardShortcutChords[d.id]),
+    }));
+    return [leaderLine, ...rest];
+  }, [keyboardShortcutChords, keyboardLeaderChord]);
 
   const splitFocusedPane = (
     direction: "left" | "right" | "top" | "bottom",
@@ -4160,13 +4354,16 @@ export function App() {
 
   const paneFileViewForPane = useCallback(
     (paneIndex: number) => {
+      if (!fileWorkspacePluginEnabled) {
+        return "terminal";
+      }
       const sid = splitSlots[paneIndex] ?? null;
       if (!sid) {
         return "terminal";
       }
       return sessionFileViews[sid] ?? "terminal";
     },
-    [splitSlots, sessionFileViews],
+    [fileWorkspacePluginEnabled, splitSlots, sessionFileViews],
   );
 
   const paneContextSessionKindForPane = useCallback(
@@ -4265,6 +4462,7 @@ export function App() {
     fileExportArchiveFormat,
     onFilePaneTitleChange,
     semanticFileNameColors: filePaneSemanticNameColors.enabled,
+    fileWorkspacePluginEnabled,
   });
 
   const appShellStyle = {
@@ -4285,9 +4483,10 @@ export function App() {
     }
     return session.kind === "local" ? "local" : "ssh";
   })();
-  const contextPaneFileViewForMenu = contextMenuPaneSessionId
-    ? sessionFileViews[contextMenuPaneSessionId] ?? "terminal"
-    : "terminal";
+  const contextPaneFileViewForMenu =
+    !fileWorkspacePluginEnabled || !contextMenuPaneSessionId
+      ? "terminal"
+      : (sessionFileViews[contextMenuPaneSessionId] ?? "terminal");
   const workspaceSendTargets =
     contextMenuPaneSessionId && workspaceTabs.length > 1
       ? workspaceTabs.filter((workspace) => workspace.id !== activeWorkspaceId)
@@ -4488,6 +4687,13 @@ export function App() {
       />
       {isAppSettingsOpen && (
         <AppSettingsPanel
+          keyboardShortcutChords={keyboardShortcutChords}
+          setKeyboardShortcutChords={setKeyboardShortcutChords}
+          keyboardLeaderChord={keyboardLeaderChord}
+          setKeyboardLeaderChord={setKeyboardLeaderChord}
+          resolveHelpShortcutLabel={resolveHelpShortcutLabel}
+          shortcutCheatsheetLines={shortcutCheatsheetLines}
+          keyboardShortcutSuspendEscapeRef={keyboardShortcutSuspendEscapeRef}
           settingsOpenMode={settingsOpenMode}
           setSettingsOpenMode={setSettingsOpenMode}
           onCloseSettings={() => setIsAppSettingsOpen(false)}
@@ -4714,6 +4920,7 @@ export function App() {
           paneSessionId={splitSlots[contextMenu.paneIndex] ?? null}
           paneSessionKind={contextPaneSessionKindForMenu}
           paneFileView={contextPaneFileViewForMenu}
+          fileWorkspaceEnabled={fileWorkspacePluginEnabled}
           canClosePane={paneOrder.length > 1}
           broadcastModeEnabled={isBroadcastModeEnabled}
           broadcastCount={broadcastTargets.size}

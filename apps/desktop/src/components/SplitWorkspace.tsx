@@ -79,6 +79,8 @@ export type SplitPaneRendererBridge = {
   fileExportArchiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
   semanticFileNameColors: boolean;
+  /** When false, SFTP/local file browser toolbar and views are disabled (File workspace plugin). */
+  fileWorkspacePluginEnabled: boolean;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -375,7 +377,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
             </div>
             <span className="pane-toolbar-separator" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-files">
-              {paneCtxKind === "ssh" && hasPaneSession && paneFileView === "terminal" ? (
+              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "terminal" ? (
                 <button
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Browse remote files (SFTP)"
@@ -391,7 +393,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   </svg>
                 </button>
               ) : null}
-              {paneCtxKind === "ssh" && hasPaneSession && paneFileView === "remote" ? (
+              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "remote" ? (
                 <button
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"
@@ -408,7 +410,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   </svg>
                 </button>
               ) : null}
-              {paneCtxKind === "local" && hasPaneSession && paneFileView === "terminal" ? (
+              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "terminal" ? (
                 <button
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Browse local files"
@@ -424,7 +426,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   </svg>
                 </button>
               ) : null}
-              {paneCtxKind === "local" && hasPaneSession && paneFileView === "local" ? (
+              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "local" ? (
                 <button
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"

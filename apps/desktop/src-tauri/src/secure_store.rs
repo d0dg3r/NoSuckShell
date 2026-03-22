@@ -301,7 +301,9 @@ fn resolve_host_config_with_store(host: &HostConfig, store: &EntityStore) -> Res
 
 pub fn resolve_host_config_for_session(host: &HostConfig) -> Result<HostConfig> {
     let store = load_or_migrate_store()?;
-    resolve_host_config_with_store(host, &store)
+    let mut resolved = resolve_host_config_with_store(host, &store)?;
+    crate::plugins::enrich_resolved_host(&mut resolved, host)?;
+    Ok(resolved)
 }
 
 fn write_runtime_private_key(key_id: &str, private_key: &str) -> Result<PathBuf> {

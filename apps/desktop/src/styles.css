@@ -1637,6 +1637,12 @@ body,
   border-color: rgba(130, 184, 152, 0.74);
 }
 
+.btn.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-width: 1px;
+}
+
 .btn.brand-quick-add-trigger {
   display: flex;
   width: 100%;
@@ -4116,6 +4122,112 @@ body,
   font-size: var(--font-sm);
   line-height: 1.45;
   max-width: 62ch;
+}
+
+.settings-card-title {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 650;
+  color: rgba(220, 235, 226, 0.95);
+}
+
+.keyboard-shortcuts-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(150, 170, 161, 0.14);
+  border-radius: 8px;
+}
+
+.keyboard-shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-sm);
+}
+
+.keyboard-shortcuts-table th,
+.keyboard-shortcuts-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(150, 170, 161, 0.1);
+  vertical-align: middle;
+}
+
+.keyboard-shortcuts-table th {
+  font-weight: 600;
+  color: rgba(184, 204, 194, 0.88);
+  background: rgba(12, 16, 20, 0.35);
+}
+
+.keyboard-shortcuts-table tr:last-child td {
+  border-bottom: none;
+}
+
+.keyboard-shortcut-chord {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: rgba(200, 230, 210, 0.95);
+}
+
+.settings-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.plugin-store-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.plugin-store-card {
+  border: 1px solid rgba(150, 170, 161, 0.14);
+  border-radius: 8px;
+  padding: var(--space-4);
+  background: rgba(12, 16, 20, 0.25);
+}
+
+.plugin-store-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.plugin-store-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(150, 170, 161, 0.35);
+  color: rgba(200, 220, 210, 0.85);
+}
+
+.plugin-store-badge.is-unlocked {
+  border-color: rgba(130, 184, 152, 0.55);
+  color: rgba(180, 235, 200, 0.95);
+  background: rgba(130, 184, 152, 0.08);
+}
+
+.plugin-store-badge.is-free {
+  border-color: rgba(120, 170, 220, 0.5);
+  color: rgba(190, 220, 250, 0.95);
+  background: rgba(100, 150, 220, 0.1);
+}
+
+.plugin-store-badge.is-locked {
+  opacity: 0.85;
+}
+
+.plugin-store-trial-hint {
+  font-size: var(--font-sm);
+  max-width: 72ch;
 }
 
 .app-settings-content .settings-card .input:not(.ssh-config-textarea),

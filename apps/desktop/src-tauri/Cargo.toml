@@ -25,6 +25,8 @@ tauri-plugin-dialog = "2"
 thiserror = "2.0.18"
 uuid = { version = "1.22.0", features = ["v4", "serde"] }
 fs2 = "0.4"
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["serde", "alloc"] }
+hex = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3"

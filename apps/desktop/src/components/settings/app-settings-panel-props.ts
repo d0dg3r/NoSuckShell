@@ -1,5 +1,5 @@
 import type React from "react";
-import type { Ref, PointerEvent as ReactPointerEvent } from "react";
+import type { MutableRefObject, Ref, PointerEvent as ReactPointerEvent } from "react";
 import type {
   HostBinding,
   HostConfig,
@@ -28,8 +28,16 @@ import type {
   UiFontPreset,
 } from "./app-settings-types";
 import type { FilePaneSemanticNameColorsStored } from "../../features/file-pane-semantic-name-colors-prefs";
+import type { KeyboardShortcutCommandId, KeyChord } from "../../features/keyboard-shortcuts-types";
 
 export type AppSettingsPanelProps = {
+  keyboardShortcutChords: Record<KeyboardShortcutCommandId, KeyChord>;
+  setKeyboardShortcutChords: React.Dispatch<React.SetStateAction<Record<KeyboardShortcutCommandId, KeyChord>>>;
+  keyboardLeaderChord: KeyChord;
+  setKeyboardLeaderChord: React.Dispatch<React.SetStateAction<KeyChord>>;
+  resolveHelpShortcutLabel: (action: string) => string | undefined;
+  shortcutCheatsheetLines: Array<{ label: string; keys: string }>;
+  keyboardShortcutSuspendEscapeRef: MutableRefObject<boolean>;
   settingsOpenMode: SettingsOpenMode;
   setSettingsOpenMode: (mode: SettingsOpenMode) => void;
   onCloseSettings: () => void;

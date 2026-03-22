@@ -9,7 +9,9 @@ import { AppSettingsAppearanceTab } from "./settings/tabs/AppSettingsAppearanceT
 import { AppSettingsDataTab } from "./settings/tabs/AppSettingsDataTab";
 import { AppSettingsFilesTab } from "./settings/tabs/AppSettingsFilesTab";
 import { AppSettingsHelpTab } from "./settings/tabs/AppSettingsHelpTab";
+import { AppSettingsKeyboardTab } from "./settings/tabs/AppSettingsKeyboardTab";
 import { AppSettingsLayoutTab } from "./settings/tabs/AppSettingsLayoutTab";
+import { AppSettingsPluginsTab } from "./settings/tabs/AppSettingsPluginsTab";
 import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
 import { AppSettingsStoreTabContent } from "./settings/tabs/AppSettingsStoreTabContent";
 import { AppSettingsViewsTab } from "./settings/tabs/AppSettingsViewsTab";
@@ -35,6 +37,13 @@ export type { AppSettingsPanelProps } from "./settings/app-settings-panel-props"
 
 export function AppSettingsPanel(props: AppSettingsPanelProps) {
   const {
+    keyboardShortcutChords,
+    setKeyboardShortcutChords,
+    keyboardLeaderChord,
+    setKeyboardLeaderChord,
+    resolveHelpShortcutLabel,
+    shortcutCheatsheetLines,
+    keyboardShortcutSuspendEscapeRef,
     settingsOpenMode,
     setSettingsOpenMode,
     onCloseSettings,
@@ -250,6 +259,15 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
             />
           )}
+          {activeAppSettingsTab === "keyboard" && (
+            <AppSettingsKeyboardTab
+              chordMap={keyboardShortcutChords}
+              setChordMap={setKeyboardShortcutChords}
+              leaderChord={keyboardLeaderChord}
+              setLeaderChord={setKeyboardLeaderChord}
+              suspendEscapeRef={keyboardShortcutSuspendEscapeRef}
+            />
+          )}
           {activeAppSettingsTab === "layout" && (
             <AppSettingsLayoutTab
               isSidebarPinned={isSidebarPinned}
@@ -377,7 +395,13 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               saveHostBindingDraft={saveHostBindingDraft}
             />
           )}
-          {activeAppSettingsTab === "help" && <AppSettingsHelpTab />}
+          {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "help" && (
+            <AppSettingsHelpTab
+              resolveHelpShortcutLabel={resolveHelpShortcutLabel}
+              shortcutCheatsheetLines={shortcutCheatsheetLines}
+            />
+          )}
           {activeAppSettingsTab === "about" && <AppSettingsAboutTab />}
         </div>
       </section>

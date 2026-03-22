@@ -11,6 +11,8 @@ Index of maintained documentation for NoSuckShell.
 | Doc | Description |
 | --- | --- |
 | [architecture.md](architecture.md) | Stack, modules, SSH vs SFTP paths, IPC, events, on-disk artifacts. |
+| [licensing.md](licensing.md) | Offline licenses, Ed25519 tokens, Ko-fi webhooks, entitlements, key rotation. |
+| [roadmap.md](roadmap.md) | Planned plugin-shaped work (GitHub sync, Bitwarden, Vault, NSS-Commander). |
 | [releases.md](releases.md) | Release tagging and GitHub releases. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing release notes per version. |
 | [backup-security.md](backup-security.md) | Encrypted backup format and security notes. |

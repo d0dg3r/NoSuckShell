@@ -54,7 +54,8 @@ export function QuickConnectModal({
         </header>
         <div className="app-settings-content">
           <p className="muted-copy quick-connect-shortcuts">
-            Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users.
+            Enter connects, Esc closes, ArrowUp/ArrowDown cycles known users. Customize shortcuts in Settings →
+            Keyboard.
           </p>
           {quickConnectMode === "wizard" && (
             <div className="quick-connect-mode-wrap">

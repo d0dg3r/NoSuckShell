@@ -2,6 +2,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod backup;
+mod license;
+mod plugins;
 mod host_metadata;
 mod sftp_export;
 mod key_crypto;
@@ -424,7 +426,42 @@ fn reorder_view_profiles(ids: Vec<String>) -> Result<(), String> {
     reorder_view_profiles_backend(&ids).map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn list_plugins() -> Result<Vec<plugins::PluginListEntry>, String> {
+    plugins::list_plugins_backend().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_plugin_enabled(plugin_id: String, enabled: bool) -> Result<(), String> {
+    plugins::set_plugin_enabled_backend(&plugin_id, enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn plugin_invoke(
+    plugin_id: String,
+    method: String,
+    arg: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    plugins::plugin_invoke_backend(&plugin_id, method, arg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn activate_license(token: String) -> Result<license::LicensePayload, String> {
+    license::activate_license_token(token).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn license_status() -> Result<license::LicenseStatusDto, String> {
+    license::license_status_backend().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_license() -> Result<(), String> {
+    license::clear_license_backend().map_err(|e| e.to_string())
+}
+
 fn main() {
+    plugins::register_builtin_plugins();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionState::default())
@@ -479,7 +516,13 @@ fn main() {
             list_view_profiles,
             save_view_profile,
             delete_view_profile,
-            reorder_view_profiles
+            reorder_view_profiles,
+            list_plugins,
+            set_plugin_enabled,
+            plugin_invoke,
+            activate_license,
+            license_status,
+            clear_license
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoSuckShell");

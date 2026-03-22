@@ -1,11 +1,13 @@
 export type AppSettingsTab =
   | "appearance"
   | "layout"
+  | "keyboard"
   | "files"
   | "data"
   | "ssh"
   | "views"
   | "store"
+  | "plugins"
   | "help"
   | "about";
 

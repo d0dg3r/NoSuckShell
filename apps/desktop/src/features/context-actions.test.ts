@@ -129,6 +129,27 @@ describe("buildPaneContextActions", () => {
     expect(actions.find((item) => item.id === "pane.toggleRemoteFiles")).toBeUndefined();
   });
 
+  it("hides file browser toggles when file workspace plugin is off", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "sess-1",
+      paneSessionKind: "ssh",
+      paneFileView: "terminal",
+      fileWorkspaceEnabled: false,
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+    expect(actions.find((item) => item.id === "pane.toggleRemoteFiles")).toBeUndefined();
+    const localOnly = buildPaneContextActions({
+      paneSessionId: "sess-1",
+      paneSessionKind: "local",
+      paneFileView: "terminal",
+      fileWorkspaceEnabled: false,
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+    });
+    expect(localOnly.find((item) => item.id === "pane.toggleLocalFiles")).toBeUndefined();
+  });
+
   it("keeps context menu grouping and split order stable", () => {
     const actions = buildPaneContextActions({
       paneSessionId: "pane-1",

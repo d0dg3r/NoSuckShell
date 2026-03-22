@@ -6,7 +6,10 @@ import type {
   HostConfig,
   HostMetadataStore,
   LayoutProfile,
+  LicensePayload,
+  LicenseStatus,
   LocalDirEntry,
+  PluginListEntry,
   QuickSshSessionRequest,
   RemoteSshSpec,
   SessionStarted,
@@ -279,3 +282,21 @@ export const sftpRenameEntry = (
   oldName: string,
   newName: string,
 ): Promise<void> => invoke("sftp_rename_entry", { spec, parentPath, oldName, newName });
+
+export const listPlugins = (): Promise<PluginListEntry[]> => invoke("list_plugins");
+
+export const setPluginEnabled = (pluginId: string, enabled: boolean): Promise<void> =>
+  invoke("set_plugin_enabled", { pluginId, enabled });
+
+export const pluginInvoke = (
+  pluginId: string,
+  method: string,
+  arg: Record<string, unknown>,
+): Promise<unknown> => invoke("plugin_invoke", { pluginId, method, arg });
+
+export const activateLicense = (token: string): Promise<LicensePayload> =>
+  invoke("activate_license", { token });
+
+export const licenseStatus = (): Promise<LicenseStatus> => invoke("license_status");
+
+export const clearLicense = (): Promise<void> => invoke("clear_license");

@@ -298,6 +298,50 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     case "sftp_delete_entry":
     case "sftp_rename_entry":
       return undefined;
+    case "list_plugins":
+      return [
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.file-workspace",
+            version: "0.0.0-e2e",
+            displayName: "File workspace",
+            capabilities: ["settingsUi"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.demo",
+            version: "0.0.0-e2e",
+            displayName: "Demo plugin",
+            capabilities: ["credentialProvider", "settingsUi"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
+      ];
+    case "set_plugin_enabled":
+      return undefined;
+    case "plugin_invoke": {
+      const method = args?.method as string;
+      if (method === "ping") {
+        return { ok: true, message: "pong", echo: args?.arg ?? {} };
+      }
+      throw new Error(`e2e plugin_invoke: unknown method ${method}`);
+    }
+    case "activate_license":
+      return {
+        v: 1,
+        licenseId: "e2e",
+        entitlements: [],
+        iat: now(),
+        exp: null,
+      };
+    case "license_status":
+      return { active: false, licenseId: null, entitlements: [], exp: null };
+    case "clear_license":
+      return undefined;
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);
   }
