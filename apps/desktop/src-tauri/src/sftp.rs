@@ -81,8 +81,9 @@ fn remote_mode_and_owners(stat: &ssh2::FileStat, is_dir: bool) -> (String, Strin
     };
     let mode = mode_display_rwx(type_ch, perm_low);
     let octal = mode_octal_low(perm_low);
-    let user = stat.uid.map(|u| u.to_string()).unwrap_or_default();
-    let group = stat.gid.map(|g| g.to_string()).unwrap_or_default();
+    // Avoid exposing raw UID/GID values, which may later be logged.
+    let user = String::from("-");
+    let group = String::from("-");
     (mode, user, group, octal)
 }
 
