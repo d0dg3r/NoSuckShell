@@ -4,7 +4,7 @@ Index of maintained documentation for NoSuckShell.
 
 ## In the app
 
-- **Help** (Settings → Help, or the Help tab in app settings): chaptered in-app reference—interactions, SSH/host keys, Identity Store, settings tabs, data locations, and known limitations. Source: [`apps/desktop/src/components/HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) (keep in sync when behavior changes).
+- **Help** (Settings → Help, or the Help tab in app settings): chaptered in-app reference—interactions, SSH/host keys, Identity Store, settings tabs, **keyboard shortcuts**, data locations, and known limitations. Source: [`apps/desktop/src/components/HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) (keep in sync when behavior changes).
 
 ## In this folder
 
@@ -12,6 +12,7 @@ Index of maintained documentation for NoSuckShell.
 | --- | --- |
 | [architecture.md](architecture.md) | Stack, modules, SSH vs SFTP paths, IPC, events, on-disk artifacts. |
 | [licensing.md](licensing.md) | Offline licenses, Ed25519 tokens, Ko-fi webhooks, entitlements, key rotation. |
+| [license-server-runbook.md](license-server-runbook.md) | Deploy `services/license-server`, Ko-fi webhook, trials (`exp`), plugin store entitlements. |
 | [roadmap.md](roadmap.md) | Planned plugin-shaped work (GitHub sync, Bitwarden, Vault, NSS-Commander). |
 | [releases.md](releases.md) | Release tagging and GitHub releases. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing release notes per version. |
