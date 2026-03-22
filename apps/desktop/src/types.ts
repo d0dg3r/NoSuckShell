@@ -8,11 +8,16 @@ export type HostConfig = {
   proxyCommand: string;
 };
 
+/** OpenSSH StrictHostKeyChecking modes persisted per host (kebab-case JSON, matches Rust). */
+export type StrictHostKeyPolicy = "ask" | "accept-new" | "no";
+
 export type HostMetadata = {
   favorite: boolean;
   tags: string[];
   lastUsedAt: number | null;
   trustHostDefault: boolean;
+  /** When set, drives SSH `-o StrictHostKeyChecking=…` for saved hosts. */
+  strictHostKeyPolicy?: StrictHostKeyPolicy;
 };
 
 export type HostMetadataStore = {
@@ -139,6 +144,8 @@ export type QuickSshSessionRequest = {
   identityFile: string;
   proxyJump: string;
   proxyCommand: string;
+  /** Overrides metadata for Quick Connect sessions. */
+  strictHostKeyPolicy?: StrictHostKeyPolicy;
 };
 
 export type SftpDirEntry = {
@@ -146,7 +153,7 @@ export type SftpDirEntry = {
   isDir: boolean;
   size: number;
   mtime: number | null;
-  /** e.g. `drwxr-xr-x` */
+  /** Permission mode string only, e.g. `drwxr-xr-x` (owner/group are separate fields). */
   modeDisplay: string;
   /** Permission bits only, e.g. `755`. */
   modeOctal: string;
@@ -161,6 +168,7 @@ export type LocalDirEntry = {
   isDir: boolean;
   size: number;
   mtime: number | null;
+  /** Permission mode string only; owner/group are in `userDisplay` / `groupDisplay`. */
   modeDisplay: string;
   modeOctal: string;
   userDisplay: string;

@@ -46,7 +46,7 @@ async function pickMultipleFiles(): Promise<string[] | null> {
   const picked = await open({
     multiple: true,
     directory: false,
-    title: "Dateien zum Hochladen wählen",
+    title: "Choose files to upload",
   });
   const paths = normalizeDialogPaths(picked);
   if (paths.length === 0) {
@@ -59,7 +59,7 @@ async function pickSingleFolder(): Promise<string | null> {
   const picked = await open({
     multiple: false,
     directory: true,
-    title: "Ordner zum Hochladen wählen",
+    title: "Choose folder to upload",
   });
   if (picked === null || picked === undefined) {
     return null;

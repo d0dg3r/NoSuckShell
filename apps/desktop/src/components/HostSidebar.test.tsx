@@ -26,6 +26,7 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     onSearchQueryChange: vi.fn(),
     showAdvancedFilters: false,
     onToggleAdvancedFilters: vi.fn(),
+    onCloseAdvancedFilters: vi.fn(),
     filteredHostCount: 0,
     statusFilter: "all",
     onStatusFilterChange: vi.fn(),
@@ -34,8 +35,6 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     availableTags: [],
     selectedTagFilter: "all",
     onSelectedTagFilterChange: vi.fn(),
-    favoritesOnly: false,
-    onToggleFavorites: vi.fn(),
     recentOnly: false,
     onToggleRecent: vi.fn(),
     onClearFilters: vi.fn(),
@@ -92,5 +91,18 @@ describe("HostSidebar", () => {
     expect(btn).toBeTruthy();
     fireEvent.click(btn!);
     expect(onToggleSidebarPinned).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onToggleQuickAddMenu when the Add dropdown trigger is clicked", () => {
+    const onToggleQuickAddMenu = vi.fn();
+    const { container } = render(
+      <HostSidebar {...minimalHostSidebarProps({ onToggleQuickAddMenu })} />,
+    );
+    const aside = container.querySelector("aside.left-rail");
+    expect(aside).toBeTruthy();
+    const btn = aside!.querySelector<HTMLButtonElement>('[aria-label="Open add menu"]');
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn!);
+    expect(onToggleQuickAddMenu).toHaveBeenCalledTimes(1);
   });
 });

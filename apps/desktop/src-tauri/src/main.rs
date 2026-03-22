@@ -135,7 +135,9 @@ fn start_session(
     host: HostConfig,
 ) -> Result<SessionStarted, String> {
     let resolved_host = resolve_host_config_for_session(&host).map_err(|err| err.to_string())?;
-    let session_id = sessions.start(app, resolved_host).map_err(|err| err.to_string())?;
+    let session_id = sessions
+        .start(app, resolved_host, None)
+        .map_err(|err| err.to_string())?;
     Ok(SessionStarted { session_id })
 }
 
@@ -154,8 +156,10 @@ fn start_quick_ssh_session(
     sessions: State<'_, SessionState>,
     request: QuickSshSessionRequest,
 ) -> Result<SessionStarted, String> {
-    let host = quick_ssh::normalize_quick_ssh_request(request)?;
-    let session_id = sessions.start(app, host).map_err(|err| err.to_string())?;
+    let (host, policy) = quick_ssh::normalize_quick_ssh_request(request)?;
+    let session_id = sessions
+        .start(app, host, policy)
+        .map_err(|err| err.to_string())?;
     Ok(SessionStarted { session_id })
 }
 
@@ -494,12 +498,14 @@ mod tests {
             identity_file: String::new(),
             proxy_jump: String::new(),
             proxy_command: String::new(),
+            strict_host_key_policy: None,
         };
 
-        let normalized = normalize_quick_ssh_request(request).expect("request should normalize");
+        let (normalized, policy) = normalize_quick_ssh_request(request).expect("request should normalize");
         assert_eq!(normalized.host, "quick-srv.internal");
         assert_eq!(normalized.host_name, "srv.internal");
         assert_eq!(normalized.port, 22);
+        assert!(policy.is_none());
     }
 
     #[test]
@@ -511,6 +517,7 @@ mod tests {
             identity_file: String::new(),
             proxy_jump: String::new(),
             proxy_command: String::new(),
+            strict_host_key_policy: None,
         };
 
         let result = normalize_quick_ssh_request(request);

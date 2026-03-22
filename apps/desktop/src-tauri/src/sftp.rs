@@ -295,7 +295,9 @@ pub enum RemoteSshSpec {
 pub(crate) fn resolve_remote_spec(spec: RemoteSshSpec) -> Result<HostConfig, String> {
     match spec {
         RemoteSshSpec::Saved { host } => resolve_host_config_for_session(&host).map_err(|e| e.to_string()),
-        RemoteSshSpec::Quick { request } => normalize_quick_ssh_request(request),
+        RemoteSshSpec::Quick { request } => {
+            normalize_quick_ssh_request(request).map(|(host, _policy)| host)
+        }
     }
 }
 

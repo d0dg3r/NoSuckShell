@@ -65,6 +65,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setFileExportPathKey,
     fileExportArchiveFormat,
     setFileExportArchiveFormat,
+    filePaneSemanticNameColors,
+    setFilePaneSemanticNameColors,
     layoutMode,
     setLayoutMode,
     splitRatioPreset,
@@ -274,6 +276,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setFileExportPathKey={setFileExportPathKey}
               fileExportArchiveFormat={fileExportArchiveFormat}
               setFileExportArchiveFormat={setFileExportArchiveFormat}
+              filePaneSemanticNameColors={filePaneSemanticNameColors}
+              setFilePaneSemanticNameColors={setFilePaneSemanticNameColors}
             />
           )}
           {activeAppSettingsTab === "views" && (

@@ -1,4 +1,17 @@
-import type { EntityStore, HostConfig, HostMetadata, HostMetadataStore } from "../types";
+import type { EntityStore, HostBinding, HostConfig, HostMetadata, HostMetadataStore } from "../types";
+
+export const createDefaultHostBinding = (): HostBinding => ({
+  userId: undefined,
+  groupIds: [],
+  tagIds: [],
+  keyRefs: [],
+  proxyJump: "",
+  legacyUser: "",
+  legacyTags: [],
+  legacyIdentityFile: "",
+  legacyProxyJump: "",
+  legacyProxyCommand: "",
+});
 
 export const emptyHost = (): HostConfig => ({
   host: "",

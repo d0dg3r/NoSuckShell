@@ -15,9 +15,6 @@ type Props = {
   uploadFolderDisabled?: boolean;
   onExportSelection?: () => void;
   exportSelectionDisabled?: boolean;
-  /** Dateiliste: alle Spalten an Inhalt anpassen (wie Doppelklick auf Spaltenteiler). */
-  onFitColumns?: () => void;
-  fitColumnsDisabled?: boolean;
 };
 
 const iconSize = 16;
@@ -110,16 +107,6 @@ function IconUploadFolder() {
   );
 }
 
-function IconFitColumns() {
-  return (
-    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M6 4v16M12 4v16M18 4v16" strokeLinecap="round" />
-      <path d="M3 12h3M18 12h3" strokeLinecap="round" />
-      <path d="M4 10l-2 2 2 2M20 10l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 export function FilePaneToolbar({
   onUp,
   upDisabled,
@@ -136,8 +123,6 @@ export function FilePaneToolbar({
   uploadFolderDisabled = true,
   onExportSelection,
   exportSelectionDisabled = true,
-  onFitColumns,
-  fitColumnsDisabled = false,
 }: Props) {
   return (
     <>
@@ -146,8 +131,8 @@ export function FilePaneToolbar({
         className="btn file-pane-toolbar-btn"
         onClick={onUp}
         disabled={upDisabled}
-        title="Übergeordnetes Verzeichnis"
-        aria-label="Übergeordnetes Verzeichnis"
+        title="Parent folder"
+        aria-label="Parent folder"
       >
         <IconUp />
       </button>
@@ -155,30 +140,18 @@ export function FilePaneToolbar({
         type="button"
         className="btn file-pane-toolbar-btn"
         onClick={onRefresh}
-        title="Aktualisieren"
-        aria-label="Aktualisieren"
+        title="Refresh"
+        aria-label="Refresh"
       >
         <IconRefresh />
       </button>
-      {onFitColumns ? (
-        <button
-          type="button"
-          className="btn file-pane-toolbar-btn"
-          onClick={onFitColumns}
-          disabled={fitColumnsDisabled}
-          title="Spalten optimal (Breite an Inhalt)"
-          aria-label="Spalten optimal an Inhalt anpassen"
-        >
-          <IconFitColumns />
-        </button>
-      ) : null}
       {showRoot ? (
         <button
           type="button"
           className="btn file-pane-toolbar-btn"
           onClick={onRoot}
-          title="Dateisystemroot (/)"
-          aria-label="Dateisystemroot"
+          title="Filesystem root (/)"
+          aria-label="Filesystem root"
         >
           <IconRoot />
         </button>
@@ -187,8 +160,8 @@ export function FilePaneToolbar({
         type="button"
         className="btn file-pane-toolbar-btn"
         onClick={onNewFolder}
-        title="Neuer Ordner"
-        aria-label="Neuer Ordner"
+        title="New folder"
+        aria-label="New folder"
       >
         <IconNewFolder />
       </button>
@@ -197,8 +170,8 @@ export function FilePaneToolbar({
         className="btn file-pane-toolbar-btn"
         onClick={onDelete}
         disabled={deleteDisabled}
-        title="Auswahl löschen"
-        aria-label="Auswahl löschen"
+        title="Delete selection"
+        aria-label="Delete selection"
       >
         <IconTrash />
       </button>
@@ -208,8 +181,8 @@ export function FilePaneToolbar({
           className="btn file-pane-toolbar-btn"
           onClick={onUploadFiles}
           disabled={uploadFilesDisabled}
-          title="Dateien vom Rechner hochladen"
-          aria-label="Dateien vom Rechner hochladen"
+          title="Upload files from computer"
+          aria-label="Upload files from computer"
         >
           <IconUploadFiles />
         </button>
@@ -220,8 +193,8 @@ export function FilePaneToolbar({
           className="btn file-pane-toolbar-btn"
           onClick={onUploadFolder}
           disabled={uploadFolderDisabled}
-          title="Ordner vom Rechner hochladen"
-          aria-label="Ordner vom Rechner hochladen"
+          title="Upload folder from computer"
+          aria-label="Upload folder from computer"
         >
           <IconUploadFolder />
         </button>
@@ -232,8 +205,8 @@ export function FilePaneToolbar({
           className="btn file-pane-toolbar-btn"
           onClick={onExportSelection}
           disabled={exportSelectionDisabled}
-          title="Auswahl exportieren"
-          aria-label="Auswahl exportieren"
+          title="Export selection"
+          aria-label="Export selection"
         >
           <IconSaveExport />
         </button>
@@ -242,8 +215,8 @@ export function FilePaneToolbar({
         type="button"
         className="btn file-pane-toolbar-btn"
         onClick={onTerminal}
-        title="Zum Terminal"
-        aria-label="Zum Terminal"
+        title="Back to terminal"
+        aria-label="Back to terminal"
       >
         <IconTerminal />
       </button>

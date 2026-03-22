@@ -1,4 +1,13 @@
+import type { Dispatch, SetStateAction } from "react";
 import type { FileExportArchiveFormat, FileExportDestMode } from "../app-settings-types";
+import type { FilePaneSemanticNameColorsStored } from "../../../features/file-pane-semantic-name-colors-prefs";
+import {
+  FILE_PANE_NAME_KINDS_WITH_COLOR,
+  FILE_PANE_NAME_KIND_LABEL,
+  FILE_PANE_SEMANTIC_NAME_COLOR_DEFAULTS,
+  type FilePaneNameKind,
+} from "../../../features/file-pane-name-kind";
+import { resolveFilePaneSemanticNameColorHex } from "../../../features/file-pane-semantic-name-colors-prefs";
 
 export type AppSettingsFilesTabProps = {
   fileExportDestMode: FileExportDestMode;
@@ -7,6 +16,8 @@ export type AppSettingsFilesTabProps = {
   setFileExportPathKey: (value: string) => void;
   fileExportArchiveFormat: FileExportArchiveFormat;
   setFileExportArchiveFormat: (value: FileExportArchiveFormat) => void;
+  filePaneSemanticNameColors: FilePaneSemanticNameColorsStored;
+  setFilePaneSemanticNameColors: Dispatch<SetStateAction<FilePaneSemanticNameColorsStored>>;
 };
 
 export function AppSettingsFilesTab({
@@ -16,7 +27,23 @@ export function AppSettingsFilesTab({
   setFileExportPathKey,
   fileExportArchiveFormat,
   setFileExportArchiveFormat,
+  filePaneSemanticNameColors,
+  setFilePaneSemanticNameColors,
 }: AppSettingsFilesTabProps) {
+  const setKindColor = (kind: FilePaneNameKind, hex: string) => {
+    const normalized = hex.toLowerCase();
+    const def = FILE_PANE_SEMANTIC_NAME_COLOR_DEFAULTS[kind];
+    setFilePaneSemanticNameColors((prev) => {
+      const nextColors = { ...prev.colors };
+      if (normalized === def.toLowerCase()) {
+        delete nextColors[kind];
+      } else {
+        nextColors[kind] = normalized;
+      }
+      return { ...prev, colors: nextColors };
+    });
+  };
+
   return (
     <div className="settings-stack">
       <section className="settings-card">
@@ -68,6 +95,60 @@ export function AppSettingsFilesTab({
               <option value="zip">zip (remote needs zip)</option>
             </select>
           </label>
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <header className="settings-card-head">
+          <h3>File browser name colors</h3>
+          <p className="muted-copy">
+            Muted tints on folder and file names help you scan the list (similar to terminal directory colors). This is
+            for orientation only, not a trust or security indicator.
+          </p>
+        </header>
+        <div className="host-form-grid">
+          <label className="field field-span-2 checkbox-field">
+            <input
+              id="settings-file-pane-semantic-name-colors"
+              type="checkbox"
+              className="checkbox-input"
+              checked={filePaneSemanticNameColors.enabled}
+              onChange={(e) =>
+                setFilePaneSemanticNameColors((prev) => ({ ...prev, enabled: e.target.checked }))
+              }
+            />
+            <span className="field-label">Use semantic name colors</span>
+          </label>
+          {filePaneSemanticNameColors.enabled ? (
+            <>
+              <div className="field field-span-2 file-pane-semantic-colors-grid">
+                {FILE_PANE_NAME_KINDS_WITH_COLOR.map((kind) => {
+                  const value = resolveFilePaneSemanticNameColorHex(kind, filePaneSemanticNameColors.colors);
+                  return (
+                    <div key={kind} className="file-pane-semantic-color-row">
+                      <span className="file-pane-semantic-color-label">{FILE_PANE_NAME_KIND_LABEL[kind]}</span>
+                      <input
+                        type="color"
+                        className="file-pane-semantic-color-input"
+                        aria-label={`Color for ${FILE_PANE_NAME_KIND_LABEL[kind]}`}
+                        value={value}
+                        onChange={(e) => setKindColor(kind, e.target.value)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="field field-span-2">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setFilePaneSemanticNameColors({ enabled: true, colors: {} })}
+                >
+                  Reset colors to defaults
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       </section>
     </div>

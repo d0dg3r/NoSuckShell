@@ -1,6 +1,7 @@
 import type { MutableRefObject } from "react";
 import { vi } from "vitest";
 import type { HostRowViewModel } from "../features/view-profile-filters";
+import { createDefaultHostBinding } from "../features/app-bootstrap";
 import type { HostConfig, HostMetadata } from "../types";
 import type { HostListRowBridgeProps } from "../components/HostListRow";
 
@@ -40,10 +41,15 @@ export function noopBridge(overrides: Partial<HostListRowBridgeProps> = {}): Hos
     openHostMenuHostAlias: "",
     currentHost: sampleHost,
     setCurrentHost: vi.fn(),
+    storeKeys: [],
+    storeUsers: [],
+    sidebarHostBindingDraft: createDefaultHostBinding(),
+    setSidebarHostBindingDraft: vi.fn(),
     hosts: [sampleHost],
     tagDraft: "",
     setTagDraft: vi.fn(),
-    activeHostMetadata: sampleMetadata,
+    hostKeyPolicyDraft: "ask",
+    setHostKeyPolicyDraft: vi.fn(),
     error: "",
     canSave: true,
     pendingRemoveConfirm: null,

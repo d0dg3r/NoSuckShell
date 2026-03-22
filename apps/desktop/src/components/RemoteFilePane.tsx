@@ -19,6 +19,7 @@ import {
 } from "../features/file-pane-upload-from-dialog";
 import { runFilePaneTransfer, type FileDropTarget } from "../features/file-pane-transfer";
 import { copyFileToTransferClipboard, getFileTransferClipboard } from "../features/file-transfer-clipboard";
+import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
@@ -43,6 +44,7 @@ type Props = {
   getExportDestPath: () => Promise<string | null>;
   archiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
+  semanticFileNameColors: boolean;
 };
 
 function SaveRowIcon() {
@@ -62,6 +64,7 @@ export function RemoteFilePane({
   getExportDestPath,
   archiveFormat,
   onFilePaneTitleChange,
+  semanticFileNameColors,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [path, setPath] = useState(".");
@@ -113,7 +116,6 @@ export function RemoteFilePane({
   const autoFitSamples = useMemo(
     () => ({
       name: entries.map((e) => (e.isDir ? `${e.name}/` : e.name)),
-      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
       perm: entries.map((e) => {
         const r = e.modeDisplay?.trim();
         const o = e.modeOctal?.trim();
@@ -122,14 +124,22 @@ export function RemoteFilePane({
         }
         return r || o || "—";
       }),
-      user: entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
-      group: entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
+      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
     }),
     [entries],
   );
 
-  const { tableWrapRef, widths, tailCols, onGripPointerDown, onGripDoubleClick, fitAllColumns } =
-    useFilePaneTableResize("remote", 300, autoFitSamples);
+  const userColumnSamples = useMemo(
+    () => entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
+    [entries],
+  );
+  const groupColumnSamples = useMemo(
+    () => entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
+    [entries],
+  );
+
+  const { tableWrapRef, widths, userColWidth, groupColWidth, tailCols, onGripPointerDown, onGripDoubleClick, applyOptimalColumnWidths } =
+    useFilePaneTableResize("remote", 300, autoFitSamples, userColumnSamples, groupColumnSamples);
 
   const openDir = (name: string) => {
     setPath((p) => joinRemotePath(p, name));
@@ -371,7 +381,7 @@ export function RemoteFilePane({
   return (
     <div
       ref={rootRef}
-      className="file-pane file-pane--remote"
+      className={`file-pane file-pane--remote${semanticFileNameColors ? " file-pane--semantic-name-colors" : ""}`}
       aria-label="Remote SFTP file browser"
       tabIndex={-1}
       onMouseDown={() => rootRef.current?.focus()}
@@ -392,8 +402,6 @@ export function RemoteFilePane({
           onUp={goUp}
           upDisabled={upDisabled}
           onRefresh={() => void load()}
-          onFitColumns={fitAllColumns}
-          fitColumnsDisabled={loading}
           onTerminal={onBack}
           onRoot={goRoot}
           onNewFolder={startNewFolder}
@@ -429,17 +437,23 @@ export function RemoteFilePane({
             <FilePaneTableHead
               variant="remote"
               nameWidth={widths.name}
-              sizeWidth={widths.size}
               permWidth={widths.perm}
-              userWidth={widths.user}
-              groupWidth={widths.group}
+              userWidth={userColWidth}
+              groupWidth={groupColWidth}
+              sizeWidth={widths.size}
               modifiedColWidth={tailCols.modified}
               actionsColWidth={tailCols.actions}
               onGripPointerDown={onGripPointerDown}
               onGripDoubleClick={onGripDoubleClick}
+              onOptimalColumnWidths={applyOptimalColumnWidths}
+              optimalWidthsDisabled={loading}
             />
             <tbody>
-              {entries.map((row, index) => (
+              {entries.map((row, index) => {
+                const permCell = filePanePermCell(widths.perm, row);
+                const nameKind = semanticFileNameColors ? filePaneNameKind(row) : "default";
+                const nameKindClass = semanticFileNameColors ? filePaneNameKindClassName(nameKind) : "";
+                return (
                 <tr
                   key={row.name}
                   className={selectedNames.has(row.name) ? "is-selected" : undefined}
@@ -449,7 +463,7 @@ export function RemoteFilePane({
                     {row.isDir ? (
                       <button
                         type="button"
-                        className="file-pane-link"
+                        className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
                         onClick={(e) => {
                           e.stopPropagation();
                           openDir(row.name);
@@ -459,7 +473,7 @@ export function RemoteFilePane({
                       </button>
                     ) : (
                       <span
-                        className="file-pane-filename"
+                        className={nameKindClass ? `file-pane-filename ${nameKindClass}` : "file-pane-filename"}
                         draggable
                         onDragStart={(event) => {
                           const payload: FileDragPayload = {
@@ -477,8 +491,8 @@ export function RemoteFilePane({
                       </span>
                     )}
                   </td>
-                  <td className="file-pane-td-perm" title={row.modeDisplay || undefined}>
-                    {row.modeDisplay?.trim() ? row.modeDisplay : "—"}
+                  <td className="file-pane-td-perm" title={permCell.title}>
+                    {permCell.text}
                   </td>
                   <td className="file-pane-td-owner" title={row.userDisplay || undefined}>
                     {row.userDisplay?.trim() ? row.userDisplay : "—"}
@@ -506,7 +520,8 @@ export function RemoteFilePane({
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

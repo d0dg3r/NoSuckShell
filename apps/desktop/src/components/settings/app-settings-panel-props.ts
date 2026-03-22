@@ -27,6 +27,7 @@ import type {
   TerminalFontPreset,
   UiFontPreset,
 } from "./app-settings-types";
+import type { FilePaneSemanticNameColorsStored } from "../../features/file-pane-semantic-name-colors-prefs";
 
 export type AppSettingsPanelProps = {
   settingsOpenMode: SettingsOpenMode;
@@ -59,6 +60,8 @@ export type AppSettingsPanelProps = {
   setFileExportPathKey: (value: string) => void;
   fileExportArchiveFormat: FileExportArchiveFormat;
   setFileExportArchiveFormat: (value: FileExportArchiveFormat) => void;
+  filePaneSemanticNameColors: FilePaneSemanticNameColorsStored;
+  setFilePaneSemanticNameColors: React.Dispatch<React.SetStateAction<FilePaneSemanticNameColorsStored>>;
   layoutMode: LayoutMode;
   setLayoutMode: (value: LayoutMode) => void;
   splitRatioPreset: SplitRatioPreset;

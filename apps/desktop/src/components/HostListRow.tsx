@@ -2,7 +2,7 @@ import type { Dispatch, DragEvent as ReactDragEvent, MutableRefObject, SetStateA
 import type { HostRowViewModel } from "../features/view-profile-filters";
 import type { ContextMenuState } from "../features/session-model";
 import type { DragPayload } from "../features/pane-dnd";
-import type { HostConfig, HostMetadata } from "../types";
+import type { HostBinding, HostConfig, SshKeyObject, StrictHostKeyPolicy, UserObject } from "../types";
 import { HostForm } from "./HostForm";
 
 export type HostListRowProps = {
@@ -11,10 +11,15 @@ export type HostListRowProps = {
   openHostMenuHostAlias: string;
   currentHost: HostConfig;
   setCurrentHost: Dispatch<SetStateAction<HostConfig>>;
+  storeKeys: SshKeyObject[];
+  storeUsers: UserObject[];
+  sidebarHostBindingDraft: HostBinding;
+  setSidebarHostBindingDraft: Dispatch<SetStateAction<HostBinding>>;
   hosts: HostConfig[];
   tagDraft: string;
   setTagDraft: Dispatch<SetStateAction<string>>;
-  activeHostMetadata: HostMetadata;
+  hostKeyPolicyDraft: StrictHostKeyPolicy;
+  setHostKeyPolicyDraft: Dispatch<SetStateAction<StrictHostKeyPolicy>>;
   error: string;
   canSave: boolean;
   pendingRemoveConfirm: { hostAlias: string; scope: "settings" } | null;
@@ -46,10 +51,15 @@ export function HostListRow({
   openHostMenuHostAlias,
   currentHost,
   setCurrentHost,
+  storeKeys,
+  storeUsers,
+  sidebarHostBindingDraft,
+  setSidebarHostBindingDraft,
   hosts,
   tagDraft,
   setTagDraft,
-  activeHostMetadata,
+  hostKeyPolicyDraft,
+  setHostKeyPolicyDraft,
   error,
   canSave,
   pendingRemoveConfirm,
@@ -87,7 +97,9 @@ export function HostListRow({
       <div
         className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
           activeHost === row.host.host ? "is-active" : ""
-        } ${openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""}`}
+        } ${row.metadata.favorite ? "is-favorite" : ""} ${
+          openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""
+        }`}
       >
         <button
           className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
@@ -171,8 +183,34 @@ export function HostListRow({
       <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
         {openHostMenuHostAlias === row.host.host && (
           <div className="host-slide-content">
-            <HostForm host={currentHost} onChange={setCurrentHost} />
+            <HostForm
+              host={currentHost}
+              onChange={setCurrentHost}
+              storeKeys={storeKeys}
+              hostBinding={sidebarHostBindingDraft}
+              onHostBindingChange={setSidebarHostBindingDraft}
+              storeUsers={storeUsers}
+              sshHosts={hosts}
+              hostAliasForJumpExclude={currentHost.host}
+            />
             <div className="host-meta-edit">
+              <label className="field">
+                <span className="field-label">Host key verification (SSH)</span>
+                <select
+                  className="input density-profile-select"
+                  aria-label="Host key verification"
+                  value={hostKeyPolicyDraft}
+                  onChange={(event) => setHostKeyPolicyDraft(event.target.value as StrictHostKeyPolicy)}
+                >
+                  <option value="ask">Interactive prompt (default)</option>
+                  <option value="accept-new">Auto-accept new keys (no prompt)</option>
+                  <option value="no">Accept any key (insecure — MITM risk)</option>
+                </select>
+                <span className="field-help">
+                  Applies to this host when connecting in the terminal (including ProxyJump hops). Use auto-accept when
+                  you cannot answer hidden yes/no prompts.
+                </span>
+              </label>
               <label className="field">
                 <span className="field-label">Tags (comma separated)</span>
                 <input
@@ -186,8 +224,8 @@ export function HostListRow({
                 <input
                   className="checkbox-input"
                   type="checkbox"
-                  checked={activeHostMetadata.favorite}
-                  onChange={() => void toggleFavoriteForHost(activeHost)}
+                  checked={row.metadata.favorite}
+                  onChange={() => void toggleFavoriteForHost(row.host.host)}
                 />
                 <span className="field-label">Favorite</span>
               </label>

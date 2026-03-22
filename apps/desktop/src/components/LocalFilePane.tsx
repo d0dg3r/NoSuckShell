@@ -22,6 +22,7 @@ import {
 } from "../features/file-pane-upload-from-dialog";
 import { runFilePaneTransfer, type FileDropTarget } from "../features/file-pane-transfer";
 import { copyFileToTransferClipboard, getFileTransferClipboard } from "../features/file-transfer-clipboard";
+import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
@@ -48,6 +49,7 @@ type Props = {
   getExportDestPath: () => Promise<string | null>;
   archiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
+  semanticFileNameColors: boolean;
 };
 
 function SaveRowIcon() {
@@ -68,6 +70,7 @@ export function LocalFilePane({
   getExportDestPath,
   archiveFormat,
   onFilePaneTitleChange,
+  semanticFileNameColors,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [path, setPath] = useState("");
@@ -129,7 +132,6 @@ export function LocalFilePane({
   const autoFitSamples = useMemo(
     () => ({
       name: entries.map((e) => (e.isDir ? `${e.name}/` : e.name)),
-      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
       perm: entries.map((e) => {
         const r = e.modeDisplay?.trim();
         const o = e.modeOctal?.trim();
@@ -138,14 +140,22 @@ export function LocalFilePane({
         }
         return r || o || "—";
       }),
-      user: entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
-      group: entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
+      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
     }),
     [entries],
   );
 
-  const { tableWrapRef, widths, tailCols, onGripPointerDown, onGripDoubleClick, fitAllColumns } =
-    useFilePaneTableResize("local", 300, autoFitSamples);
+  const userColumnSamples = useMemo(
+    () => entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
+    [entries],
+  );
+  const groupColumnSamples = useMemo(
+    () => entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
+    [entries],
+  );
+
+  const { tableWrapRef, widths, userColWidth, groupColWidth, tailCols, onGripPointerDown, onGripDoubleClick, applyOptimalColumnWidths } =
+    useFilePaneTableResize("local", 300, autoFitSamples, userColumnSamples, groupColumnSamples);
 
   const openDir = (name: string) => {
     setPath((p) => joinLocalPath(p, name));
@@ -406,7 +416,7 @@ export function LocalFilePane({
   return (
     <div
       ref={rootRef}
-      className="file-pane file-pane--local"
+      className={`file-pane file-pane--local${semanticFileNameColors ? " file-pane--semantic-name-colors" : ""}`}
       aria-label="Local file browser"
       tabIndex={-1}
       onMouseDown={() => rootRef.current?.focus()}
@@ -427,8 +437,6 @@ export function LocalFilePane({
           onUp={goUp}
           upDisabled={upDisabled}
           onRefresh={() => void load()}
-          onFitColumns={fitAllColumns}
-          fitColumnsDisabled={loading}
           onTerminal={onBack}
           onRoot={goRoot}
           onNewFolder={startNewFolder}
@@ -464,18 +472,22 @@ export function LocalFilePane({
             <FilePaneTableHead
               variant="local"
               nameWidth={widths.name}
-              sizeWidth={widths.size}
               permWidth={widths.perm}
-              userWidth={widths.user}
-              groupWidth={widths.group}
+              userWidth={userColWidth}
+              groupWidth={groupColWidth}
+              sizeWidth={widths.size}
               modifiedColWidth={tailCols.modified}
               actionsColWidth={tailCols.actions}
               onGripPointerDown={onGripPointerDown}
               onGripDoubleClick={onGripDoubleClick}
+              onOptimalColumnWidths={applyOptimalColumnWidths}
+              optimalWidthsDisabled={loading}
             />
             <tbody>
               {entries.map((row, index) => {
                 const permCell = filePanePermCell(widths.perm, row);
+                const nameKind = semanticFileNameColors ? filePaneNameKind(row) : "default";
+                const nameKindClass = semanticFileNameColors ? filePaneNameKindClassName(nameKind) : "";
                 return (
                 <tr
                   key={row.name}
@@ -486,7 +498,7 @@ export function LocalFilePane({
                     {row.isDir ? (
                       <button
                         type="button"
-                        className="file-pane-link"
+                        className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
                         onClick={(e) => {
                           e.stopPropagation();
                           openDir(row.name);
@@ -496,7 +508,7 @@ export function LocalFilePane({
                       </button>
                     ) : (
                       <span
-                        className="file-pane-filename"
+                        className={nameKindClass ? `file-pane-filename ${nameKindClass}` : "file-pane-filename"}
                         draggable
                         onDragStart={(event) => {
                           const payload: FileDragPayload = { kind: "local", pathKey: path, name: row.name };
@@ -509,7 +521,6 @@ export function LocalFilePane({
                       </span>
                     )}
                   </td>
-                  <td>{row.isDir ? "—" : formatFileSize(row.size)}</td>
                   <td className="file-pane-td-perm" title={permCell.title}>
                     {permCell.text}
                   </td>
@@ -519,6 +530,7 @@ export function LocalFilePane({
                   <td className="file-pane-td-owner" title={row.groupDisplay || undefined}>
                     {row.groupDisplay?.trim() ? row.groupDisplay : "—"}
                   </td>
+                  <td>{row.isDir ? "—" : formatFileSize(row.size)}</td>
                   <td>
                     {row.mtime != null && row.mtime > 0 ? new Date(row.mtime * 1000).toLocaleString() : "—"}
                   </td>

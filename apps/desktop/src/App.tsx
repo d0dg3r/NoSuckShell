@@ -126,6 +126,7 @@ import type {
   PaneLayoutItem,
   QuickSshSessionRequest,
   RemoteSshSpec,
+  StrictHostKeyPolicy,
   ViewFilterRule,
   ViewProfile,
   ViewSortField,
@@ -136,11 +137,18 @@ import logoTransparent from "../../../img/logo_tranparent.png";
 import {
   allowNativeBrowserContextMenu,
   createDefaultEntityStore,
+  createDefaultHostBinding,
   createDefaultHostMetadata,
   createDefaultMetadataStore,
   emptyHost,
   normalizeEntityStore,
 } from "./features/app-bootstrap";
+import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
+import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
+import {
+  effectiveStrictHostKeyPolicy,
+  metadataPatchForHostKeyPolicy,
+} from "./features/host-metadata-policy";
 import { createId } from "./features/app-id";
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
@@ -181,6 +189,12 @@ import {
   readSplitRatioPreset,
 } from "./features/app-preferences";
 import { resolveFileExportDestPath } from "./features/file-export-dest";
+import {
+  applyFilePaneSemanticNameColorVarsToDocument,
+  readFilePaneSemanticNameColorsFromStorage,
+  writeFilePaneSemanticNameColorsToStorage,
+  type FilePaneSemanticNameColorsStored,
+} from "./features/file-pane-semantic-name-colors-prefs";
 import { DND_PAYLOAD_MIME, type DragPayload, type PaneDropZone, resolvePaneDropZoneFromOverlay } from "./features/pane-dnd";
 import {
   type AutoArrangeActiveMode,
@@ -221,6 +235,115 @@ import {
   DEFAULT_WORKSPACE_ID,
   type WorkspaceSnapshot,
 } from "./features/workspace-snapshot";
+
+function parseHostTagDraftToSortedTags(draft: string): string[] {
+  return Array.from(
+    new Set(
+      draft
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function hostConfigsEqual(a: HostConfig, b: HostConfig): boolean {
+  return (
+    a.host === b.host &&
+    a.hostName === b.hostName &&
+    a.user === b.user &&
+    a.port === b.port &&
+    a.identityFile === b.identityFile &&
+    a.proxyJump === b.proxyJump &&
+    a.proxyCommand === b.proxyCommand
+  );
+}
+
+function sidebarSavedHostBinding(
+  menuAlias: string,
+  hosts: HostConfig[],
+  entityStore: EntityStore,
+  metadataHosts: HostMetadataStore["hosts"],
+): HostBinding {
+  const existing = entityStore.hostBindings[menuAlias];
+  if (existing) {
+    return existing;
+  }
+  const host = hosts.find((h) => h.host === menuAlias);
+  return {
+    ...createDefaultHostBinding(),
+    proxyJump: host?.proxyJump ?? "",
+    legacyUser: host?.user ?? "",
+    legacyTags: metadataHosts[menuAlias]?.tags ?? [],
+    legacyIdentityFile: host?.identityFile ?? "",
+    legacyProxyJump: host?.proxyJump ?? "",
+    legacyProxyCommand: host?.proxyCommand ?? "",
+  };
+}
+
+function sidebarBindingPickerDirty(a: HostBinding, b: HostBinding): boolean {
+  return (
+    a.userId !== b.userId ||
+    a.legacyUser !== b.legacyUser ||
+    a.proxyJump !== b.proxyJump ||
+    a.legacyProxyJump !== b.legacyProxyJump ||
+    a.legacyIdentityFile !== b.legacyIdentityFile ||
+    JSON.stringify(a.keyRefs) !== JSON.stringify(b.keyRefs)
+  );
+}
+
+function syncSidebarHostWithStore(
+  host: HostConfig,
+  draft: HostBinding,
+  storeKeys: SshKeyObject[],
+  storeUsers: UserObject[],
+  allHosts: HostConfig[],
+): { host: HostConfig; binding: HostBinding } {
+  let r = normalizeHostIdentityWithBinding(host, draft, storeKeys);
+  r = normalizeHostUserWithBinding(r.host, r.binding, storeUsers);
+  r = normalizeHostProxyJumpWithBinding(r.host, r.binding, jumpHostCandidates(allHosts, host.host));
+  return r;
+}
+
+/** Dirty check for the host whose inline sidebar settings row is open (`openHostMenuHostAlias`). */
+function isSidebarHostSettingsDirty(
+  menuAlias: string,
+  hosts: HostConfig[],
+  metadataHosts: HostMetadataStore["hosts"],
+  currentHost: HostConfig,
+  tagDraft: string,
+  hostKeyPolicyDraft: StrictHostKeyPolicy,
+  entityStore: EntityStore,
+  sidebarHostBindingDraft: HostBinding,
+): boolean {
+  if (!menuAlias.trim()) {
+    return false;
+  }
+  const saved = hosts.find((h) => h.host === menuAlias);
+  if (!saved) {
+    return false;
+  }
+  if (currentHost.host !== menuAlias) {
+    return true;
+  }
+  if (!hostConfigsEqual(currentHost, saved)) {
+    return true;
+  }
+  const savedBinding = sidebarSavedHostBinding(menuAlias, hosts, entityStore, metadataHosts);
+  if (sidebarBindingPickerDirty(sidebarHostBindingDraft, savedBinding)) {
+    return true;
+  }
+  const savedTags = [...(metadataHosts[menuAlias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
+  const draftTags = parseHostTagDraftToSortedTags(tagDraft);
+  if (savedTags.length !== draftTags.length) {
+    return true;
+  }
+  if (savedTags.some((t, i) => t !== draftTags[i])) {
+    return true;
+  }
+  const savedMeta = metadataHosts[menuAlias] ?? createDefaultHostMetadata();
+  return hostKeyPolicyDraft !== effectiveStrictHostKeyPolicy(savedMeta);
+}
 
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
@@ -269,7 +392,6 @@ export function App() {
   const [sshDirOverrideDraft, setSshDirOverrideDraft] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<HostStatusFilter>("all");
-  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
   const [recentOnly, setRecentOnly] = useState<boolean>(false);
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>("all");
   const [portFilter, setPortFilter] = useState<string>("");
@@ -283,6 +405,9 @@ export function App() {
   const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
   const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
   const [tagDraft, setTagDraft] = useState<string>("");
+  const [hostKeyPolicyDraft, setHostKeyPolicyDraft] = useState<StrictHostKeyPolicy>("ask");
+  const [sidebarHostBindingDraft, setSidebarHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
+  const [addHostBindingDraft, setAddHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupExportPassword, setBackupExportPassword] = useState<string>("");
@@ -371,6 +496,9 @@ export function App() {
     }
     return window.localStorage.getItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY) === "true";
   });
+  const [filePaneSemanticNameColors, setFilePaneSemanticNameColors] = useState<FilePaneSemanticNameColorsStored>(() =>
+    readFilePaneSemanticNameColorsFromStorage(),
+  );
   const [fileExportDestMode, setFileExportDestMode] = useState<FileExportDestMode>(() => {
     if (typeof window === "undefined") {
       return "fixed";
@@ -590,12 +718,6 @@ export function App() {
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
-  const activeHostMetadata = useMemo(() => {
-    if (!activeHost) {
-      return createDefaultHostMetadata();
-    }
-    return metadataStore.hosts[activeHost] ?? createDefaultHostMetadata();
-  }, [activeHost, metadataStore.hosts]);
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
     for (const metadata of Object.values(metadataStore.hosts)) {
@@ -653,9 +775,6 @@ export function App() {
         if (statusFilter === "disconnected" && row.connected) {
           return false;
         }
-        if (favoritesOnly && !row.metadata.favorite) {
-          return false;
-        }
         if (selectedTagFilter !== "all" && !row.metadata.tags.includes(selectedTagFilter)) {
           return false;
         }
@@ -707,7 +826,7 @@ export function App() {
         }
         return a.host.host.localeCompare(b.host.host);
       });
-  }, [favoritesOnly, hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
+  }, [hostRows, portFilter, recentOnly, searchQuery, selectedCustomViewProfile, selectedSidebarViewId, selectedTagFilter, statusFilter]);
   const connectedHostRows = useMemo(
     () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => row.connected)),
     [filteredHostRows],
@@ -1722,6 +1841,12 @@ export function App() {
     window.localStorage.setItem(FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY, String(showFullPathInFilePaneTitle));
   }, [showFullPathInFilePaneTitle]);
   useEffect(() => {
+    writeFilePaneSemanticNameColorsToStorage(filePaneSemanticNameColors);
+  }, [filePaneSemanticNameColors]);
+  useEffect(() => {
+    applyFilePaneSemanticNameColorVarsToDocument(filePaneSemanticNameColors.colors);
+  }, [filePaneSemanticNameColors.colors]);
+  useEffect(() => {
     window.localStorage.setItem(FILE_EXPORT_DEST_MODE_STORAGE_KEY, fileExportDestMode);
   }, [fileExportDestMode]);
   useEffect(() => {
@@ -1957,33 +2082,137 @@ export function App() {
   }, []);
 
   const toggleHostMenu = (host: HostConfig) => {
-    setOpenHostMenuHostAlias((prev) => {
-      if (prev === host.host) {
-        return "";
+    if (openHostMenuHostAlias === host.host) {
+      setOpenHostMenuHostAlias("");
+      return;
+    }
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (
+        !window.confirm(
+          "You have unsaved changes for this host. Discard them and open another host's settings?",
+        )
+      ) {
+        return;
       }
-      setActiveHost(host.host);
-      setCurrentHost(host);
-      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-      return host.host;
-    });
+    }
+    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+      host,
+      draft,
+      storeKeys,
+      storeUsers,
+      hosts,
+    );
+    setOpenHostMenuHostAlias(host.host);
+    setActiveHost(host.host);
+    setCurrentHost(syncedHost);
+    setSidebarHostBindingDraft(syncedBinding);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
   };
 
   const openHostMenuForHost = (host: HostConfig) => {
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (
+        !window.confirm(
+          "You have unsaved changes for this host. Discard them and open another host's settings?",
+        )
+      ) {
+        return;
+      }
+    }
+    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+      host,
+      draft,
+      storeKeys,
+      storeUsers,
+      hosts,
+    );
     setActiveHost(host.host);
-    setCurrentHost(host);
+    setCurrentHost(syncedHost);
+    setSidebarHostBindingDraft(syncedBinding);
     setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
     setOpenHostMenuHostAlias(host.host);
   };
 
   const toggleHostSelection = (host: HostConfig) => {
-    setActiveHost((prev) => {
-      if (prev === host.host) {
-        return "";
+    if (activeHost === host.host) {
+      setActiveHost("");
+      if (openHostMenuHostAlias === host.host) {
+        setOpenHostMenuHostAlias("");
       }
+      return;
+    }
+    if (
+      openHostMenuHostAlias &&
+      openHostMenuHostAlias !== host.host &&
+      isSidebarHostSettingsDirty(
+        openHostMenuHostAlias,
+        hosts,
+        metadataStore.hosts,
+        currentHost,
+        tagDraft,
+        hostKeyPolicyDraft,
+        entityStore,
+        sidebarHostBindingDraft,
+      )
+    ) {
+      if (!window.confirm("You have unsaved changes for this host. Discard them and switch?")) {
+        return;
+      }
+    }
+    setActiveHost(host.host);
+    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
+    setHostKeyPolicyDraft(
+      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
+    );
+    if (openHostMenuHostAlias) {
+      const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
+      const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
+        host,
+        draft,
+        storeKeys,
+        storeUsers,
+        hosts,
+      );
+      setCurrentHost(syncedHost);
+      setSidebarHostBindingDraft(syncedBinding);
+      setOpenHostMenuHostAlias(host.host);
+    } else {
       setCurrentHost(host);
-      setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-      return host.host;
-    });
+    }
   };
 
   const clearPendingRemoveConfirm = useCallback(() => {
@@ -2063,6 +2292,7 @@ export function App() {
     await upsertHostMetadata(hostAlias, (current) => ({
       ...current,
       tags: normalizedTags,
+      ...metadataPatchForHostKeyPolicy(hostKeyPolicyDraft),
     }));
   };
 
@@ -2087,11 +2317,15 @@ export function App() {
   const clearFilters = () => {
     setSearchQuery("");
     setStatusFilter("all");
-    setFavoritesOnly(false);
     setRecentOnly(false);
     setSelectedTagFilter("all");
     setPortFilter("");
+    setShowAdvancedFilters(false);
   };
+
+  const closeAdvancedFilters = useCallback(() => {
+    setShowAdvancedFilters(false);
+  }, []);
 
   const selectViewProfileForSettings = (profileId: string) => {
     setSelectedViewProfileIdInSettings(profileId);
@@ -2225,7 +2459,13 @@ export function App() {
     setError("");
     try {
       const normalizedAlias = currentHost.host.trim();
-      await Promise.all([saveHost(currentHost), saveTagsForHost(normalizedAlias)]);
+      await saveHost(currentHost);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [normalizedAlias]: sidebarHostBindingDraft },
+        updatedAt: Date.now(),
+      });
+      await saveTagsForHost(normalizedAlias);
       await load();
     } catch (e) {
       setError(String(e));
@@ -2255,6 +2495,8 @@ export function App() {
         const cleared = emptyHost();
         setCurrentHost(cleared);
         setTagDraft("");
+        setHostKeyPolicyDraft("ask");
+        setSidebarHostBindingDraft(createDefaultHostBinding());
       }
       if (activeHost === normalizedAlias) {
         setActiveHost("");
@@ -2282,6 +2524,7 @@ export function App() {
 
   const openAddHostModal = () => {
     setNewHostDraft(emptyHost());
+    setAddHostBindingDraft(createDefaultHostBinding());
     setIsQuickAddMenuOpen(false);
     setOpenHostMenuHostAlias("");
     setIsAddHostModalOpen(true);
@@ -2290,6 +2533,7 @@ export function App() {
   const closeAddHostModal = () => {
     setIsAddHostModalOpen(false);
     setNewHostDraft(emptyHost());
+    setAddHostBindingDraft(createDefaultHostBinding());
   };
 
   const openQuickConnectModal = (paneIndex: number | null = null) => {
@@ -2342,7 +2586,13 @@ export function App() {
   const createHost = async () => {
     setError("");
     try {
+      const alias = newHostDraft.host.trim();
       await saveHost(newHostDraft);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [alias]: addHostBindingDraft },
+        updatedAt: Date.now(),
+      });
       await load();
       closeAddHostModal();
     } catch (e) {
@@ -2506,6 +2756,7 @@ export function App() {
       identityFile: normalizedDraft.identityFile,
       proxyJump: normalizedDraft.proxyJump,
       proxyCommand: normalizedDraft.proxyCommand,
+      ...(quickConnectAutoTrust ? { strictHostKeyPolicy: "accept-new" as const } : {}),
     };
   };
 
@@ -3051,7 +3302,7 @@ export function App() {
       if (saveTrustHostAsDefault && promptSession?.kind === "sshSaved") {
         await upsertHostMetadata(promptSession.hostAlias, (current) => ({
           ...current,
-          trustHostDefault: true,
+          ...metadataPatchForHostKeyPolicy("accept-new"),
         }));
       }
       await sendInput(activeTrustPrompt.sessionId, "yes\n");
@@ -4013,6 +4264,7 @@ export function App() {
     getFileExportDestPath,
     fileExportArchiveFormat,
     onFilePaneTitleChange,
+    semanticFileNameColors: filePaneSemanticNameColors.enabled,
   });
 
   const appShellStyle = {
@@ -4068,6 +4320,11 @@ export function App() {
     >
       <div
         className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}
+        onMouseEnter={() => {
+          if (!isSidebarPinned && !isSidebarOpen) {
+            revealSidebar();
+          }
+        }}
       >
         {!isSidebarOpen && (
           <button
@@ -4095,6 +4352,13 @@ export function App() {
           </button>
         )}
       </div>
+      {!isStackedShell && !isSidebarPinned && !isSidebarOpen ? (
+        <div
+          className="left-rail-hover-reveal-zone"
+          aria-hidden
+          onMouseEnter={revealSidebar}
+        />
+      ) : null}
       <HostSidebar
         isSidebarOpen={isSidebarOpen}
         isSidebarPinned={isSidebarPinned}
@@ -4116,6 +4380,7 @@ export function App() {
         onSearchQueryChange={setSearchQuery}
         showAdvancedFilters={showAdvancedFilters}
         onToggleAdvancedFilters={() => setShowAdvancedFilters((prev) => !prev)}
+        onCloseAdvancedFilters={closeAdvancedFilters}
         filteredHostCount={filteredHostRows.length}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
@@ -4124,8 +4389,6 @@ export function App() {
         availableTags={availableTags}
         selectedTagFilter={selectedTagFilter}
         onSelectedTagFilterChange={setSelectedTagFilter}
-        favoritesOnly={favoritesOnly}
-        onToggleFavorites={() => setFavoritesOnly((prev) => !prev)}
         recentOnly={recentOnly}
         onToggleRecent={() => setRecentOnly((prev) => !prev)}
         onClearFilters={clearFilters}
@@ -4139,7 +4402,12 @@ export function App() {
           hosts,
           tagDraft,
           setTagDraft,
-          activeHostMetadata,
+          hostKeyPolicyDraft,
+          setHostKeyPolicyDraft,
+          storeKeys,
+          storeUsers,
+          sidebarHostBindingDraft,
+          setSidebarHostBindingDraft,
           error,
           canSave,
           pendingRemoveConfirm,
@@ -4250,6 +4518,8 @@ export function App() {
           setFileExportPathKey={setFileExportPathKey}
           fileExportArchiveFormat={fileExportArchiveFormat}
           setFileExportArchiveFormat={setFileExportArchiveFormat}
+          filePaneSemanticNameColors={filePaneSemanticNameColors}
+          setFilePaneSemanticNameColors={setFilePaneSemanticNameColors}
           layoutMode={layoutMode}
           setLayoutMode={setLayoutMode}
           splitRatioPreset={splitRatioPreset}
@@ -4394,6 +4664,11 @@ export function App() {
         <AddHostModal
           newHostDraft={newHostDraft}
           onChangeNewHost={setNewHostDraft}
+          storeKeys={storeKeys}
+          storeUsers={storeUsers}
+          sshHosts={hosts}
+          hostBindingDraft={addHostBindingDraft}
+          onHostBindingDraftChange={setAddHostBindingDraft}
           onClose={closeAddHostModal}
           onCreateHost={createHost}
           canCreateHost={canCreateHost}

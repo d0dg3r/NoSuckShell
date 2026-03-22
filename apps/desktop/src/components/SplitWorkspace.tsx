@@ -78,6 +78,7 @@ export type SplitPaneRendererBridge = {
   getFileExportDestPath: () => Promise<string | null>;
   fileExportArchiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
+  semanticFileNameColors: boolean;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -488,6 +489,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   archiveFormat={b.fileExportArchiveFormat}
                   onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
                   onFilePaneTitleChange={b.onFilePaneTitleChange}
+                  semanticFileNameColors={b.semanticFileNameColors}
                 />
               </Suspense>
             ) : paneFileView === "local" ? (
@@ -501,6 +503,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   archiveFormat={b.fileExportArchiveFormat}
                   onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
                   onFilePaneTitleChange={b.onFilePaneTitleChange}
+                  semanticFileNameColors={b.semanticFileNameColors}
                 />
               </Suspense>
             ) : (

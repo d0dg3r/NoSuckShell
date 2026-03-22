@@ -1,9 +1,14 @@
-import type { HostConfig } from "../types";
+import type { HostBinding, HostConfig, SshKeyObject, UserObject } from "../types";
 import { HostForm } from "./HostForm";
 
 export type AddHostModalProps = {
   newHostDraft: HostConfig;
   onChangeNewHost: (host: HostConfig) => void;
+  storeKeys: SshKeyObject[];
+  storeUsers: UserObject[];
+  sshHosts: HostConfig[];
+  hostBindingDraft: HostBinding;
+  onHostBindingDraftChange: (binding: HostBinding) => void;
   onClose: () => void;
   onCreateHost: () => void;
   canCreateHost: boolean;
@@ -13,6 +18,11 @@ export type AddHostModalProps = {
 export function AddHostModal({
   newHostDraft,
   onChangeNewHost,
+  storeKeys,
+  storeUsers,
+  sshHosts,
+  hostBindingDraft,
+  onHostBindingDraftChange,
   onClose,
   onCreateHost,
   canCreateHost,
@@ -28,7 +38,16 @@ export function AddHostModal({
           </button>
         </header>
         <div className="app-settings-content">
-          <HostForm host={newHostDraft} onChange={onChangeNewHost} />
+          <HostForm
+            host={newHostDraft}
+            onChange={onChangeNewHost}
+            storeKeys={storeKeys}
+            hostBinding={hostBindingDraft}
+            onHostBindingChange={onHostBindingDraftChange}
+            storeUsers={storeUsers}
+            sshHosts={sshHosts}
+            hostAliasForJumpExclude={newHostDraft.host.trim()}
+          />
           <div className="action-row">
             <button className="btn" onClick={onClose}>
               Cancel

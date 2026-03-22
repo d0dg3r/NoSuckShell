@@ -1,5 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { GroupObject, HostKeyRef, SshKeyObject, UserObject } from "../../../types";
+import {
+  applyBindingOnlyProxyJumpSelect,
+  getBindingOnlyProxyJumpSelectValue,
+  getUserObjectProxyJumpSelectValue,
+  jumpHostCandidates,
+  JUMP_SELECT_CUSTOM,
+  JUMP_SELECT_NONE,
+  jumpSelectHopValue,
+  userProxyJumpFromSelect,
+} from "../../../features/host-form-store-links";
+import {
+  PROXY_COMMAND_PRESET_CUSTOM,
+  PROXY_COMMAND_PRESETS,
+  proxyCommandFromPresetSelect,
+  proxyCommandPresetSelectValue,
+} from "../../../features/ssh-proxy-presets";
 import type { IdentityStoreSubTab } from "../app-settings-types";
 import type { AppSettingsPanelProps } from "../app-settings-panel-props";
 
@@ -113,6 +129,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     setStoreBindingDraft,
     saveHostBindingDraft,
   } = rest;
+
+  const allHostJumpCandidates = useMemo(() => jumpHostCandidates(hosts, ""), [hosts]);
+  const bindingJumpCandidates = useMemo(
+    () => jumpHostCandidates(hosts, storeSelectedHostForBinding.trim()),
+    [hosts, storeSelectedHostForBinding],
+  );
 
   const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
     refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
@@ -298,9 +320,34 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         </span>
                       </label>
                       <label className="field">
+                        <span className="field-label">Jump shortcut (optional)</span>
+                        <select
+                          className="input density-profile-select"
+                          aria-label="Store user ProxyJump shortcut"
+                          value={getUserObjectProxyJumpSelectValue(user, allHostJumpCandidates)}
+                          onChange={(event) => {
+                            const v = event.target.value;
+                            if (v === JUMP_SELECT_CUSTOM) {
+                              return;
+                            }
+                            void updateStoreUser(user.id, {
+                              proxyJump: userProxyJumpFromSelect(v, user),
+                            });
+                          }}
+                        >
+                          <option value={JUMP_SELECT_NONE}>None</option>
+                          {allHostJumpCandidates.map((alias) => (
+                            <option key={alias} value={jumpSelectHopValue(alias)}>
+                              {alias}
+                            </option>
+                          ))}
+                          <option value={JUMP_SELECT_CUSTOM}>Custom value (edit below)</option>
+                        </select>
+                      </label>
+                      <label className="field">
                         <span className="field-label">ProxyJump (optional)</span>
                         <input
-                          key={`${user.id}-proxyJump`}
+                          key={`${user.id}-proxyJump-${user.proxyJump}`}
                           className="input"
                           defaultValue={user.proxyJump}
                           onBlur={(event) => {
@@ -309,11 +356,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                               void updateStoreUser(user.id, { proxyJump: v });
                             }
                           }}
-                          placeholder="bastion"
+                          placeholder="bastion or user@jump"
                         />
                         <span className="field-help">
-                          Used when this user is linked on a host and the host binding has no ProxyJump set. Per-host
-                          ProxyJump in the Hosts tab still wins.
+                          Used when this user is linked on a host and that host&apos;s binding has no ProxyJump set. A
+                          ProxyJump saved on the host binding for that host still wins. The hop is usually another host
+                          alias in your list or a custom ProxyJump string.
                         </span>
                       </label>
                       <div className="field">
@@ -740,7 +788,28 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 )}
               </div>
             </div>
-            <div className="store-inline">
+            <div className="field">
+              <span className="field-label">ProxyJump shortcut</span>
+              <select
+                className="input density-profile-select"
+                aria-label="Host binding ProxyJump shortcut"
+                value={getBindingOnlyProxyJumpSelectValue(storeBindingDraft, bindingJumpCandidates)}
+                onChange={(event) => {
+                  const patch = applyBindingOnlyProxyJumpSelect(event.target.value, storeBindingDraft);
+                  setStoreBindingDraft((prev) => ({ ...prev, ...patch }));
+                }}
+              >
+                <option value={JUMP_SELECT_NONE}>None</option>
+                {bindingJumpCandidates.map((alias) => (
+                  <option key={alias} value={jumpSelectHopValue(alias)}>
+                    {alias}
+                  </option>
+                ))}
+                <option value={JUMP_SELECT_CUSTOM}>Custom value (edit below)</option>
+              </select>
+            </div>
+            <div className="field">
+              <span className="field-label">ProxyJump override</span>
               <input
                 className="input"
                 value={storeBindingDraft.proxyJump}
@@ -750,8 +819,43 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     proxyJump: event.target.value,
                   }))
                 }
-                placeholder="ProxyJump override"
+                placeholder="bastion or user@jump"
               />
+            </div>
+            <div className="field">
+              <span className="field-label">ProxyCommand preset (optional)</span>
+              <select
+                className="input density-profile-select"
+                aria-label="Host binding ProxyCommand preset"
+                value={proxyCommandPresetSelectValue(storeBindingDraft.legacyProxyCommand)}
+                onChange={(event) => {
+                  const next = proxyCommandFromPresetSelect(event.target.value, storeBindingDraft.legacyProxyCommand);
+                  setStoreBindingDraft((prev) => ({ ...prev, legacyProxyCommand: next.trim() }));
+                }}
+              >
+                <option value={PROXY_COMMAND_PRESET_CUSTOM}>Custom (edit below)</option>
+                {PROXY_COMMAND_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <span className="field-label">ProxyCommand</span>
+              <input
+                className="input"
+                value={storeBindingDraft.legacyProxyCommand}
+                onChange={(event) =>
+                  setStoreBindingDraft((prev) => ({
+                    ...prev,
+                    legacyProxyCommand: event.target.value,
+                  }))
+                }
+                placeholder="ssh -W %h:%p bastion"
+              />
+            </div>
+            <div className="store-inline">
               <button type="button" className="btn btn-settings-commit" onClick={() => void saveHostBindingDraft()}>
                 Save host binding
               </button>

@@ -1,3 +1,4 @@
+use crate::host_metadata::StrictHostKeyPolicy;
 use crate::ssh_config::HostConfig;
 use anyhow::Context;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
@@ -86,11 +87,11 @@ fn resolve_ssh_program() -> String {
     }
 }
 
-pub fn build_ssh_command(host: &HostConfig) -> CommandBuilder {
+pub fn build_ssh_command(host: &HostConfig, strict_host_key_checking: &str) -> CommandBuilder {
     let ssh = resolve_ssh_program();
     let mut command = CommandBuilder::new(&ssh);
     command.arg("-o");
-    command.arg("StrictHostKeyChecking=ask");
+    command.arg(format!("StrictHostKeyChecking={strict_host_key_checking}"));
     command.arg("-o");
     command.arg(ssh_user_known_hosts_option());
     command.arg("-p");
@@ -172,7 +173,13 @@ pub fn build_local_shell_command(explicit_shell: Option<&str>) -> CommandBuilder
 }
 
 impl SessionState {
-    pub fn start(&self, app: AppHandle, host: HostConfig) -> anyhow::Result<String> {
+    /// `quick_policy` overrides host-metadata resolution (used for Quick Connect).
+    pub fn start(
+        &self,
+        app: AppHandle,
+        host: HostConfig,
+        quick_policy: Option<StrictHostKeyPolicy>,
+    ) -> anyhow::Result<String> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -182,7 +189,11 @@ impl SessionState {
                 pixel_height: 0,
             })
             .context("failed to allocate pty")?;
-        let command = build_ssh_command(&host);
+        let sk = match quick_policy {
+            Some(p) => p.as_ssh_value(),
+            None => crate::host_metadata::resolved_strict_host_key_for_alias(&host.host),
+        };
+        let command = build_ssh_command(&host, sk);
         self.spawn_and_register_command(app, pair, command)
     }
 
@@ -378,7 +389,7 @@ mod tests {
             proxy_command: String::new(),
         };
 
-        let cmd = build_ssh_command(&host);
+        let cmd = build_ssh_command(&host, "ask");
         let rendered = format!("{cmd:?}");
         assert!(rendered.to_lowercase().contains("ssh"));
         assert!(rendered.contains("-p"));
@@ -386,9 +397,26 @@ mod tests {
         assert!(rendered.contains("-i"));
         assert!(rendered.contains("id_prod"));
         assert!(rendered.contains("UserKnownHostsFile="));
+        assert!(rendered.contains("StrictHostKeyChecking=ask"));
         assert!(rendered.contains("-J"));
         assert!(rendered.contains("bastion"));
         assert!(rendered.contains("deploy@10.0.0.5"));
+    }
+
+    #[test]
+    fn ssh_command_respects_strict_host_key_mode() {
+        let host = HostConfig {
+            host: "h".to_string(),
+            host_name: "example.com".to_string(),
+            user: "u".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let cmd = build_ssh_command(&host, "accept-new");
+        let rendered = format!("{cmd:?}");
+        assert!(rendered.contains("StrictHostKeyChecking=accept-new"));
     }
 
     #[test]

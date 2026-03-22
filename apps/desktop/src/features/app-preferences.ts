@@ -25,6 +25,9 @@ export const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
 /** When true, split-pane label shows full file path (ellipsis); otherwise folder basename only. Tooltip always shows full path in file view. */
 export const FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY = "nosuckshell.ui.filePaneShowFullPathInPaneTitle";
 
+/** JSON `{ enabled, colors }` for semantic file-name tints in the file browser. */
+export const FILE_PANE_SEMANTIC_NAME_COLORS_STORAGE_KEY = "nosuckshell.ui.filePaneSemanticNameColors";
+
 export const FILE_EXPORT_DEST_MODE_STORAGE_KEY = "nosuckshell.fileExport.destMode";
 export const FILE_EXPORT_PATH_KEY_STORAGE_KEY = "nosuckshell.fileExport.pathKey";
 export const FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY = "nosuckshell.fileExport.archiveFormat";
