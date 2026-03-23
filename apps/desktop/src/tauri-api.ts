@@ -326,8 +326,14 @@ export const proxmuxWsProxyStart = (
   upstreamWssUrl: string,
   allowInsecureTls: boolean,
   authHeader?: string,
+  authCookie?: string,
 ): Promise<ProxmuxWsProxyStartResult> =>
-  invoke("proxmux_ws_proxy_start", { upstreamWssUrl, allowInsecureTls, authHeader: authHeader ?? null });
+  invoke("proxmux_ws_proxy_start", {
+    upstreamWssUrl,
+    allowInsecureTls,
+    authHeader: authHeader ?? null,
+    authCookie: authCookie ?? null,
+  });
 
 export const proxmuxWsProxyStop = (proxyId: string): Promise<void> =>
   invoke("proxmux_ws_proxy_stop", { proxyId });

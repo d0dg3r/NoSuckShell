@@ -215,6 +215,210 @@
   --pad-panel: 10px;
 }
 
+.app-shell[data-density="aggressive"][data-density-offset="-2"] {
+  --space-1: 1px;
+  --space-2: 2px;
+  --space-3: 4px;
+  --space-4: 6px;
+  --space-5: 8px;
+  --space-6: 10px;
+  --space-7: 12px;
+  --control-height-sm: 22px;
+  --control-height-md: 26px;
+  --control-height-lg: 30px;
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --pad-shell: 6px;
+  --pad-panel: 4px;
+}
+
+.app-shell[data-density="aggressive"][data-density-offset="-1"] {
+  --space-1: 1px;
+  --space-2: 3px;
+  --space-3: 5px;
+  --space-4: 7px;
+  --space-5: 9px;
+  --space-6: 11px;
+  --space-7: 13px;
+  --control-height-sm: 23px;
+  --control-height-md: 27px;
+  --control-height-lg: 31px;
+  --radius-control: 7px;
+  --radius-panel: 11px;
+  --pad-shell: 7px;
+  --pad-panel: 5px;
+}
+
+.app-shell[data-density="aggressive"][data-density-offset="1"] {
+  --space-1: 3px;
+  --space-2: 5px;
+  --space-3: 7px;
+  --space-4: 9px;
+  --space-5: 11px;
+  --space-6: 13px;
+  --space-7: 15px;
+  --control-height-sm: 25px;
+  --control-height-md: 29px;
+  --control-height-lg: 33px;
+  --radius-control: 9px;
+  --radius-panel: 13px;
+  --pad-shell: 9px;
+  --pad-panel: 7px;
+}
+
+.app-shell[data-density="aggressive"][data-density-offset="2"] {
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-7: 16px;
+  --control-height-sm: 26px;
+  --control-height-md: 30px;
+  --control-height-lg: 34px;
+  --radius-control: 10px;
+  --radius-panel: 14px;
+  --pad-shell: 10px;
+  --pad-panel: 8px;
+}
+
+.app-shell[data-density="balanced"][data-density-offset="-2"] {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --control-height-sm: 26px;
+  --control-height-md: 30px;
+  --control-height-lg: 34px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --pad-shell: 8px;
+  --pad-panel: 6px;
+}
+
+.app-shell[data-density="balanced"][data-density-offset="-1"] {
+  --space-1: 3px;
+  --space-2: 5px;
+  --space-3: 7px;
+  --space-4: 9px;
+  --space-5: 11px;
+  --space-6: 13px;
+  --space-7: 15px;
+  --control-height-sm: 27px;
+  --control-height-md: 31px;
+  --control-height-lg: 35px;
+  --radius-control: 9px;
+  --radius-panel: 13px;
+  --pad-shell: 9px;
+  --pad-panel: 7px;
+}
+
+.app-shell[data-density="balanced"][data-density-offset="1"] {
+  --space-1: 5px;
+  --space-2: 7px;
+  --space-3: 9px;
+  --space-4: 11px;
+  --space-5: 13px;
+  --space-6: 15px;
+  --space-7: 17px;
+  --control-height-sm: 29px;
+  --control-height-md: 33px;
+  --control-height-lg: 37px;
+  --radius-control: 11px;
+  --radius-panel: 15px;
+  --pad-shell: 11px;
+  --pad-panel: 9px;
+}
+
+.app-shell[data-density="balanced"][data-density-offset="2"] {
+  --space-1: 6px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 14px;
+  --space-6: 16px;
+  --space-7: 18px;
+  --control-height-sm: 30px;
+  --control-height-md: 34px;
+  --control-height-lg: 38px;
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --pad-shell: 12px;
+  --pad-panel: 10px;
+}
+
+.app-shell[data-density="safe"][data-density-offset="-2"] {
+  --space-1: 3px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-7: 16px;
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --control-height-lg: 38px;
+  --radius-control: 9px;
+  --radius-panel: 13px;
+  --pad-shell: 10px;
+  --pad-panel: 8px;
+}
+
+.app-shell[data-density="safe"][data-density-offset="-1"] {
+  --space-1: 4px;
+  --space-2: 7px;
+  --space-3: 9px;
+  --space-4: 11px;
+  --space-5: 13px;
+  --space-6: 15px;
+  --space-7: 17px;
+  --control-height-sm: 29px;
+  --control-height-md: 33px;
+  --control-height-lg: 39px;
+  --radius-control: 10px;
+  --radius-panel: 14px;
+  --pad-shell: 11px;
+  --pad-panel: 9px;
+}
+
+.app-shell[data-density="safe"][data-density-offset="1"] {
+  --space-1: 6px;
+  --space-2: 9px;
+  --space-3: 11px;
+  --space-4: 13px;
+  --space-5: 15px;
+  --space-6: 17px;
+  --space-7: 19px;
+  --control-height-sm: 31px;
+  --control-height-md: 35px;
+  --control-height-lg: 41px;
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --pad-shell: 13px;
+  --pad-panel: 11px;
+}
+
+.app-shell[data-density="safe"][data-density-offset="2"] {
+  --space-1: 7px;
+  --space-2: 10px;
+  --space-3: 12px;
+  --space-4: 14px;
+  --space-5: 16px;
+  --space-6: 18px;
+  --space-7: 20px;
+  --control-height-sm: 32px;
+  --control-height-md: 36px;
+  --control-height-lg: 42px;
+  --radius-control: 13px;
+  --radius-panel: 17px;
+  --pad-shell: 14px;
+  --pad-panel: 12px;
+}
+
 .app-shell[data-ui-font="inter"] {
   --font-ui-family:
     "Inter",

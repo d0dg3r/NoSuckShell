@@ -21,7 +21,35 @@ fn proxy_tasks() -> &'static JoinMap {
 
 type UpstreamWs = WebSocketStream<tokio_native_tls::TlsStream<TcpStream>>;
 
-async fn connect_upstream_wss(upstream_wss_url: &str, allow_insecure_tls: bool, auth_header: Option<&str>) -> anyhow::Result<UpstreamWs> {
+fn apply_upstream_auth_headers(
+    req: &mut http::Request<()>,
+    auth_header: Option<&str>,
+    auth_cookie: Option<&str>,
+) {
+    if let Some(auth) = auth_header {
+        let trimmed = auth.trim();
+        if !trimmed.is_empty() {
+            if let Ok(v) = http::HeaderValue::from_str(trimmed) {
+                req.headers_mut().insert(http::header::AUTHORIZATION, v);
+            }
+        }
+    }
+    if let Some(cookie) = auth_cookie {
+        let trimmed = cookie.trim();
+        if !trimmed.is_empty() {
+            if let Ok(v) = http::HeaderValue::from_str(trimmed) {
+                req.headers_mut().insert(http::header::COOKIE, v);
+            }
+        }
+    }
+}
+
+async fn connect_upstream_wss(
+    upstream_wss_url: &str,
+    allow_insecure_tls: bool,
+    auth_header: Option<&str>,
+    auth_cookie: Option<&str>,
+) -> anyhow::Result<UpstreamWs> {
     let parsed = url::Url::parse(upstream_wss_url)?;
     let host = parsed.host_str().ok_or_else(|| anyhow::anyhow!("upstream URL missing host"))?;
     let port = parsed.port_or_known_default().unwrap_or(443);
@@ -37,12 +65,7 @@ async fn connect_upstream_wss(upstream_wss_url: &str, allow_insecure_tls: bool, 
 
     let uri: Uri = upstream_wss_url.parse()?;
     let mut req = uri.into_client_request()?;
-    if let Some(auth) = auth_header {
-        req.headers_mut().insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_str(auth).unwrap_or_else(|_| http::HeaderValue::from_static("")),
-        );
-    }
+    apply_upstream_auth_headers(&mut req, auth_header, auth_cookie);
     req.headers_mut().insert(
         http::header::SEC_WEBSOCKET_PROTOCOL,
         http::HeaderValue::from_static("binary"),
@@ -51,122 +74,70 @@ async fn connect_upstream_wss(upstream_wss_url: &str, allow_insecure_tls: bool, 
     Ok(ws)
 }
 
-fn debug_log(location: &str, message: &str, data: &str) {
-    use std::io::Write;
-    let path = std::path::Path::new("/home/joe/Development/devops-geek/NoSuckShell/.cursor/debug-fb87e7.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
-        let _ = writeln!(f, r#"{{"sessionId":"fb87e7","runId":"vnc-debug","hypothesisId":"H2","location":"{location}","message":"{message}","data":{data},"timestamp":{ts}}}"#);
-    }
-}
-
 async fn proxy_one_browser_connection(
     browser_tcp: TcpStream,
     upstream_wss_url: String,
     allow_insecure_tls: bool,
     auth_header: Option<String>,
+    auth_cookie: Option<String>,
 ) {
-    debug_log("proxmux_ws_proxy.rs:browser_accept", "accepting browser ws", "{}");
     let browser_ws = match accept_async(browser_tcp).await {
-        Ok(ws) => {
-            debug_log("proxmux_ws_proxy.rs:browser_accept", "browser ws accepted OK", "{}");
-            ws
-        }
+        Ok(ws) => ws,
         Err(e) => {
-            debug_log("proxmux_ws_proxy.rs:browser_accept", "browser ws accept FAILED", &format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'")));
             eprintln!("proxmux ws proxy: accept browser ws: {e}");
             return;
         }
     };
 
-    debug_log("proxmux_ws_proxy.rs:upstream_connect", "connecting upstream", &format!(r#"{{"url":"{}","insecure":{},"hasAuth":{}}}"#, upstream_wss_url.chars().take(120).collect::<String>().replace('"', "'"), allow_insecure_tls, auth_header.is_some()));
-    let upstream_ws = match connect_upstream_wss(&upstream_wss_url, allow_insecure_tls, auth_header.as_deref()).await {
-        Ok(ws) => {
-            debug_log("proxmux_ws_proxy.rs:upstream_connect", "upstream connected OK", "{}");
-            ws
-        }
+    let upstream_ws = match connect_upstream_wss(
+        &upstream_wss_url,
+        allow_insecure_tls,
+        auth_header.as_deref(),
+        auth_cookie.as_deref(),
+    )
+    .await
+    {
+        Ok(ws) => ws,
         Err(e) => {
-            debug_log("proxmux_ws_proxy.rs:upstream_connect", "upstream connect FAILED", &format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'")));
             eprintln!("proxmux ws proxy: connect upstream: {e}");
             return;
         }
     };
 
-    // #region agent log
-    debug_log("proxmux_ws_proxy.rs:forwarding", "starting bidirectional forwarding", "{}");
-    // #endregion
     let (mut b_sink, mut b_stream) = browser_ws.split();
     let (mut u_sink, mut u_stream) = upstream_ws.split();
 
     let up = async {
-        // #region agent log
-        let mut up_count: u64 = 0;
-        // #endregion
         while let Some(msg) = u_stream.next().await {
             match msg {
                 Ok(m) => {
-                    // #region agent log
-                    up_count += 1;
-                    if up_count <= 3 {
-                        let desc = format!(r#"{{"n":{},"kind":"{}","len":{}}}"#, up_count, if m.is_binary() { "bin" } else if m.is_text() { "text" } else { "other" }, m.len());
-                        debug_log("proxmux_ws_proxy.rs:up", "upstream→browser msg", &desc);
-                    }
-                    // #endregion
                     if b_sink.send(m).await.is_err() {
-                        // #region agent log
-                        debug_log("proxmux_ws_proxy.rs:up", "browser sink send FAILED", "{}");
-                        // #endregion
                         break;
                     }
                 }
                 Err(e) => {
-                    // #region agent log
-                    debug_log("proxmux_ws_proxy.rs:up", "upstream read ERROR", &format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'")));
-                    // #endregion
                     eprintln!("proxmux ws proxy: upstream read: {e}");
                     break;
                 }
             }
         }
-        // #region agent log
-        debug_log("proxmux_ws_proxy.rs:up", "upstream stream ended", &format!(r#"{{"totalMsgs":{}}}"#, up_count));
-        // #endregion
         let _ = b_sink.close().await;
     };
 
     let down = async {
-        // #region agent log
-        let mut down_count: u64 = 0;
-        // #endregion
         while let Some(msg) = b_stream.next().await {
             match msg {
                 Ok(m) => {
-                    // #region agent log
-                    down_count += 1;
-                    if down_count <= 3 {
-                        let desc = format!(r#"{{"n":{},"kind":"{}","len":{}}}"#, down_count, if m.is_binary() { "bin" } else if m.is_text() { "text" } else { "other" }, m.len());
-                        debug_log("proxmux_ws_proxy.rs:down", "browser→upstream msg", &desc);
-                    }
-                    // #endregion
                     if u_sink.send(m).await.is_err() {
-                        // #region agent log
-                        debug_log("proxmux_ws_proxy.rs:down", "upstream sink send FAILED", "{}");
-                        // #endregion
                         break;
                     }
                 }
                 Err(e) => {
-                    // #region agent log
-                    debug_log("proxmux_ws_proxy.rs:down", "browser read ERROR", &format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'")));
-                    // #endregion
                     eprintln!("proxmux ws proxy: browser read: {e}");
                     break;
                 }
             }
         }
-        // #region agent log
-        debug_log("proxmux_ws_proxy.rs:down", "browser stream ended", &format!(r#"{{"totalMsgs":{}}}"#, down_count));
-        // #endregion
         let _ = u_sink.close().await;
     };
 
@@ -184,7 +155,12 @@ pub struct ProxmuxWsProxyStartResult {
 }
 
 #[tauri::command]
-pub async fn proxmux_ws_proxy_start(upstream_wss_url: String, allow_insecure_tls: bool, auth_header: Option<String>) -> Result<ProxmuxWsProxyStartResult, String> {
+pub async fn proxmux_ws_proxy_start(
+    upstream_wss_url: String,
+    allow_insecure_tls: bool,
+    auth_header: Option<String>,
+    auth_cookie: Option<String>,
+) -> Result<ProxmuxWsProxyStartResult, String> {
     let upstream_wss_url = upstream_wss_url.trim().to_string();
     if !upstream_wss_url.to_ascii_lowercase().starts_with("wss://") {
         return Err("upstream URL must start with wss://".to_string());
@@ -203,7 +179,14 @@ pub async fn proxmux_ws_proxy_start(upstream_wss_url: String, allow_insecure_tls
                 Ok((stream, _)) => {
                     let upstream = upstream.clone();
                     let auth = auth_header.clone();
-                    tokio::spawn(proxy_one_browser_connection(stream, upstream, allow_insecure_tls, auth));
+                    let cookie = auth_cookie.clone();
+                    tokio::spawn(proxy_one_browser_connection(
+                        stream,
+                        upstream,
+                        allow_insecure_tls,
+                        auth,
+                        cookie,
+                    ));
                 }
                 Err(e) => {
                     eprintln!("proxmux ws proxy: accept: {e}");
@@ -234,4 +217,42 @@ pub fn proxmux_ws_proxy_stop(proxy_id: String) -> Result<(), String> {
         h.abort();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_upstream_auth_headers;
+
+    #[test]
+    fn forwards_cookie_header_for_session_auth() {
+        let mut req = http::Request::builder()
+            .uri("wss://pve.local:8006/api2/json/nodes/pve/qemu/101/vncwebsocket")
+            .body(())
+            .expect("request");
+
+        apply_upstream_auth_headers(
+            &mut req,
+            None,
+            Some("PVEAuthCookie=PVE:user@pam:abcdef"),
+        );
+
+        let cookie = req
+            .headers()
+            .get(http::header::COOKIE)
+            .expect("cookie header");
+        assert_eq!(cookie, "PVEAuthCookie=PVE:user@pam:abcdef");
+    }
+
+    #[test]
+    fn ignores_blank_auth_values() {
+        let mut req = http::Request::builder()
+            .uri("wss://pve.local:8006/api2/json/nodes/pve/lxc/101/vncwebsocket")
+            .body(())
+            .expect("request");
+
+        apply_upstream_auth_headers(&mut req, Some("  "), Some("  "));
+
+        assert!(req.headers().get(http::header::AUTHORIZATION).is_none());
+        assert!(req.headers().get(http::header::COOKIE).is_none());
+    }
 }

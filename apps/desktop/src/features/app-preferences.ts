@@ -8,6 +8,7 @@ export const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 export const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
 export const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
+export const UI_DENSITY_OFFSET_STORAGE_KEY = "nosuckshell.ui.densityOffset";
 export const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
 export const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
 export const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";

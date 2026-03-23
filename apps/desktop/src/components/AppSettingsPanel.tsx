@@ -57,6 +57,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setActiveAppSettingsTab,
     densityProfile,
     setDensityProfile,
+    uiDensityOffset,
+    setUiDensityOffset,
     uiFontPreset,
     setUiFontPreset,
     terminalFontPreset,
@@ -261,6 +263,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             <AppSettingsAppearanceTab
               densityProfile={densityProfile}
               setDensityProfile={setDensityProfile}
+              uiDensityOffset={uiDensityOffset}
+              setUiDensityOffset={setUiDensityOffset}
               uiFontPreset={uiFontPreset}
               setUiFontPreset={setUiFontPreset}
               terminalFontPreset={terminalFontPreset}

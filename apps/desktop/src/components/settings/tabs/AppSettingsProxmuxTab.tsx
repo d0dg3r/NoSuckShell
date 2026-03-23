@@ -11,8 +11,9 @@ type ProxmuxClusterRow = {
   name: string;
   proxmoxUrl: string;
   apiUser: string;
-  apiTokenId: string;
-  hasApiSecret: boolean;
+  totpCode?: string;
+  hasPassword: boolean;
+  requiresReauth: boolean;
   failoverUrls: string[];
   isEnabled: boolean;
   allowInsecureTls: boolean;
@@ -23,6 +24,7 @@ type ListStateResponse = {
   clusters: ProxmuxClusterRow[];
   usesEncryptedSecrets?: boolean;
   usesPlainSecrets?: boolean;
+  legacyTokenClusters?: number;
   favoritesByCluster?: Record<string, string[]>;
 };
 
@@ -57,8 +59,8 @@ export function AppSettingsProxmuxTab({
   const [draftName, setDraftName] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
   const [draftUser, setDraftUser] = useState("");
-  const [draftTokenId, setDraftTokenId] = useState("");
-  const [draftSecret, setDraftSecret] = useState("");
+  const [draftTotpCode, setDraftTotpCode] = useState("");
+  const [draftPassword, setDraftPassword] = useState("");
   const [draftFailoverText, setDraftFailoverText] = useState("");
   const [draftInsecure, setDraftInsecure] = useState(false);
 
@@ -126,8 +128,8 @@ export function AppSettingsProxmuxTab({
     setDraftName("");
     setDraftUrl("");
     setDraftUser("");
-    setDraftTokenId("");
-    setDraftSecret("");
+    setDraftTotpCode("");
+    setDraftPassword("");
     setDraftFailoverText("");
     setDraftInsecure(false);
   };
@@ -137,8 +139,8 @@ export function AppSettingsProxmuxTab({
     setDraftName(c.name);
     setDraftUrl(c.proxmoxUrl);
     setDraftUser(c.apiUser);
-    setDraftTokenId(c.apiTokenId);
-    setDraftSecret("");
+    setDraftTotpCode(c.totpCode ?? "");
+    setDraftPassword("");
     setDraftFailoverText(c.failoverUrls.join("\n"));
     setDraftInsecure(c.allowInsecureTls);
   };
@@ -158,8 +160,8 @@ export function AppSettingsProxmuxTab({
           name: draftName.trim(),
           proxmoxUrl: draftUrl.trim(),
           apiUser: draftUser.trim(),
-          apiTokenId: draftTokenId.trim(),
-          apiSecret: draftSecret,
+          totpCode: draftTotpCode.trim(),
+          password: draftPassword,
           failoverUrls,
           isEnabled: true,
           allowInsecureTls: draftInsecure,
@@ -219,8 +221,8 @@ export function AppSettingsProxmuxTab({
       const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "testConnectionDraft", {
         proxmoxUrl: draftUrl.trim(),
         apiUser: draftUser.trim(),
-        apiTokenId: draftTokenId.trim(),
-        apiSecret: draftSecret,
+        totpCode: draftTotpCode.trim(),
+        password: draftPassword,
         failoverUrls,
         allowInsecureTls: draftInsecure,
       })) as { ok?: boolean; message?: string };
@@ -329,14 +331,20 @@ export function AppSettingsProxmuxTab({
         <header className="settings-card-head">
           <h3>PROXMUX</h3>
           <p className="muted-copy">
-            Connect to <strong>Proxmox VE</strong> with an API token (<code className="inline-code">user@realm</code>, token ID, secret). Use{" "}
+            Connect to <strong>Proxmox VE</strong> with username/password login (<code className="inline-code">user@realm</code>) and optional TOTP. Use{" "}
             <strong>Allow insecure TLS</strong> only for homelab hosts with self-signed certificates.
           </p>
           {state?.usesPlainSecrets ? (
             <p className="muted-copy">
               Secrets are stored in <code className="inline-code">nosuckshell.proxmux.v1.json</code> under your SSH directory. Set{" "}
               <code className="inline-code">NOSUCKSHELL_MASTER_KEY</code> or create <code className="inline-code">nosuckshell.master.key</code> there to
-              encrypt API tokens like other app credentials.
+              encrypt passwords like other app credentials.
+            </p>
+          ) : null}
+          {(state?.legacyTokenClusters ?? 0) > 0 ? (
+            <p className="muted-copy">
+              {state?.legacyTokenClusters} legacy token-based cluster{state?.legacyTokenClusters === 1 ? "" : "s"} detected. Edit and save each one with a
+              password to finish the direct-login migration.
             </p>
           ) : null}
         </header>
@@ -392,7 +400,7 @@ export function AppSettingsProxmuxTab({
             />
           </label>
           <label className="settings-field">
-            <span>API user</span>
+            <span>Username</span>
             <input
               className="input"
               value={draftUser}
@@ -402,23 +410,23 @@ export function AppSettingsProxmuxTab({
             />
           </label>
           <label className="settings-field">
-            <span>Token ID</span>
+            <span>TOTP code (optional)</span>
             <input
               className="input"
-              value={draftTokenId}
-              onChange={(e) => setDraftTokenId(e.target.value)}
-              placeholder="mytoken"
+              value={draftTotpCode}
+              onChange={(e) => setDraftTotpCode(e.target.value)}
+              placeholder="123456"
               disabled={busy}
             />
           </label>
           <label className="settings-field settings-field-span-2">
-            <span>Token secret {draftId ? "(leave blank to keep)" : ""}</span>
+            <span>Password {draftId ? "(leave blank to keep)" : ""}</span>
             <input
               className="input"
               type="password"
               autoComplete="off"
-              value={draftSecret}
-              onChange={(e) => setDraftSecret(e.target.value)}
+              value={draftPassword}
+              onChange={(e) => setDraftPassword(e.target.value)}
               placeholder="••••••••"
               disabled={busy}
             />
@@ -467,6 +475,7 @@ export function AppSettingsProxmuxTab({
                     <code className="inline-code">{c.id}</code>
                   </span>
                   <div className="muted-copy">{c.proxmoxUrl}</div>
+                  {c.requiresReauth ? <span className="proxmux-badge-insecure">Re-auth required</span> : null}
                   {c.allowInsecureTls ? <span className="proxmux-badge-insecure">Insecure TLS</span> : null}
                 </div>
                 <div className="proxmux-cluster-actions">

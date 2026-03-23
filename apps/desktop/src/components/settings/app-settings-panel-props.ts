@@ -51,6 +51,8 @@ export type AppSettingsPanelProps = {
   setActiveAppSettingsTab: (tab: AppSettingsTab) => void;
   densityProfile: DensityProfile;
   setDensityProfile: (value: DensityProfile) => void;
+  uiDensityOffset: number;
+  setUiDensityOffset: (value: number) => void;
   uiFontPreset: UiFontPreset;
   setUiFontPreset: (value: UiFontPreset) => void;
   terminalFontPreset: TerminalFontPreset;

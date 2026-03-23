@@ -19,6 +19,45 @@ type ListStateResponse = {
 
 type ResourceRow = Record<string, unknown>;
 
+const RESOURCE_TTL_MS = 9_000;
+const GUEST_STATUS_TTL_MS = 5_000;
+const GUEST_POLL_BASELINE_MS = 5_000;
+const GUEST_POLL_JITTER_MS = 1_200;
+
+type TimedCacheEntry<T> = {
+  value: T;
+  fetchedAt: number;
+};
+
+export function isSufficientlyFresh(fetchedAt: number, ttlMs: number, now = Date.now()): boolean {
+  if (!Number.isFinite(fetchedAt) || fetchedAt <= 0) return false;
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) return false;
+  return now - fetchedAt <= ttlMs;
+}
+
+export function computeAdaptiveGuestPollDelayMs(randomValue = Math.random()): number {
+  const clamped = Math.min(1, Math.max(0, randomValue));
+  return GUEST_POLL_BASELINE_MS + Math.round(clamped * GUEST_POLL_JITTER_MS);
+}
+
+export function shouldRunAdaptiveGuestPollTick(
+  appVisible: boolean,
+  docVisibility: DocumentVisibilityState | string,
+): boolean {
+  return appVisible && docVisibility === "visible";
+}
+
+function proxmuxDebugEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem("nss.proxmux.debugCache") === "1";
+}
+
+function proxmuxDebugMark(event: string, details: string) {
+  if (!proxmuxDebugEnabled()) return;
+  // Debug-only trace to inspect refresh cadence and cache reuse.
+  console.debug(`[proxmux][${event}] ${details}`);
+}
+
 function rowText(row: ResourceRow): string {
   const parts = [row.type, row.vmid, row.name, row.node, row.status, row.ip4, row.ip6].map((v) =>
     v == null ? "" : String(v),
@@ -247,6 +286,9 @@ export function ProxmuxSidebarPanel({
   const [clusters, setClusters] = useState<ProxmuxClusterRow[]>([]);
   const [clusterId, setClusterId] = useState<string | null>(null);
   const [resources, setResources] = useState<ResourceRow[]>([]);
+  const [appVisible, setAppVisible] = useState(() =>
+    typeof document !== "undefined" && typeof document.hasFocus === "function" ? document.hasFocus() : true,
+  );
   /** Expanded slide row: `guestKey` for qemu/lxc or `node:{name}` for PVE nodes. */
   const [expandedRowKey, setExpandedRowKey] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -263,10 +305,20 @@ export function ProxmuxSidebarPanel({
   const [spiceCapableByGuestKey, setSpiceCapableByGuestKey] = useState<Record<string, boolean>>({});
   const spiceProbeDoneRef = useRef<Set<string>>(new Set());
   const spiceProbeInflightRef = useRef<Set<string>>(new Set());
+  const resourcesCacheRef = useRef<Record<string, TimedCacheEntry<ResourceRow[]>>>({});
+  const resourcesInflightRef = useRef<Record<string, Promise<void> | undefined>>({});
+  const guestStatusCacheRef = useRef<Record<string, TimedCacheEntry<Record<string, unknown>>>>({});
 
   const expandedGuestParsed = useMemo(
     () => (expandedRowKey ? parseGuestKey(expandedRowKey) : null),
     [expandedRowKey],
+  );
+  const expandedGuestCacheKey = useMemo(
+    () =>
+      clusterId && expandedGuestParsed
+        ? `${clusterId}:${expandedGuestParsed.guestType}:${expandedGuestParsed.node}:${expandedGuestParsed.vmid}`
+        : null,
+    [clusterId, expandedGuestParsed],
   );
 
   const expandedNodeName = useMemo(
@@ -310,23 +362,83 @@ export function ProxmuxSidebarPanel({
     void refreshClusters();
   }, [refreshClusters]);
 
-  const fetchResources = useCallback(async () => {
+  useEffect(() => {
+    const onFocus = () => setAppVisible(true);
+    const onBlur = () => setAppVisible(false);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && typeof document.hasFocus === "function") {
+        setAppVisible(document.hasFocus());
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        setAppVisible(false);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  const fetchResources = useCallback(async (opts?: { force?: boolean }) => {
     if (!clusterId) {
       setResources([]);
       return;
     }
-    setBusy(true);
+    const now = Date.now();
+    const cacheEntry = resourcesCacheRef.current[clusterId];
+    const force = Boolean(opts?.force);
+    if (cacheEntry) {
+      setResources(cacheEntry.value);
+      proxmuxDebugMark("resources-cache-read", `cluster=${clusterId}`);
+    }
+    if (!force && cacheEntry && isSufficientlyFresh(cacheEntry.fetchedAt, RESOURCE_TTL_MS, now)) {
+      proxmuxDebugMark("resources-cache-hit", `cluster=${clusterId}`);
+      return;
+    }
+    const existingInflight = resourcesInflightRef.current[clusterId];
+    if (existingInflight) {
+      await existingInflight;
+      return;
+    }
+    const showBusy = !cacheEntry || force;
+    if (showBusy) {
+      setBusy(true);
+    }
     setLoadError("");
+    const run = (async () => {
+      try {
+        proxmuxDebugMark("resources-fetch", `cluster=${clusterId} force=${String(force)}`);
+        const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", {
+          clusterId,
+        })) as { ok?: boolean; resources?: ResourceRow[] };
+        const nextResources = out.resources ?? [];
+        resourcesCacheRef.current[clusterId] = {
+          value: nextResources,
+          fetchedAt: Date.now(),
+        };
+        setResources(nextResources);
+        proxmuxDebugMark("resources-store", `cluster=${clusterId} count=${nextResources.length}`);
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : String(e));
+        if (!cacheEntry) {
+          setResources([]);
+        }
+      } finally {
+        if (showBusy) {
+          setBusy(false);
+        }
+      }
+    })();
+    resourcesInflightRef.current[clusterId] = run;
     try {
-      const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", {
-        clusterId,
-      })) as { ok?: boolean; resources?: ResourceRow[] };
-      setResources(out.resources ?? []);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-      setResources([]);
+      await run;
     } finally {
-      setBusy(false);
+      resourcesInflightRef.current[clusterId] = undefined;
     }
   }, [clusterId]);
 
@@ -405,7 +517,7 @@ export function ProxmuxSidebarPanel({
     if (!exists) setExpandedRowKey("");
   }, [resources, expandedRowKey]);
 
-  const loadGuestStatus = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadGuestStatus = useCallback(async (opts?: { silent?: boolean; force?: boolean }) => {
     if (!clusterId || !expandedGuestParsed) {
       setGuestStatus(null);
       setGuestDetailError("");
@@ -413,11 +525,33 @@ export function ProxmuxSidebarPanel({
     }
     const my = ++guestStatusReq.current;
     const silent = Boolean(opts?.silent);
-    if (!silent) {
+    const now = Date.now();
+    const cacheKey = expandedGuestCacheKey;
+    const cachedStatus = cacheKey ? guestStatusCacheRef.current[cacheKey] : undefined;
+    if (cachedStatus) {
+      setGuestStatus(cachedStatus.value);
+      proxmuxDebugMark("guest-cache-read", `key=${cacheKey ?? "n/a"}`);
+    }
+    const shouldSkipFetch =
+      silent &&
+      !opts?.force &&
+      cachedStatus != null &&
+      isSufficientlyFresh(cachedStatus.fetchedAt, GUEST_STATUS_TTL_MS, now);
+    if (shouldSkipFetch) {
+      proxmuxDebugMark("guest-cache-hit", `key=${cacheKey ?? "n/a"}`);
+      setGuestStatusLoading(false);
+      setGuestDetailError("");
+      return;
+    }
+    if (!silent && !cachedStatus) {
       setGuestStatusLoading(true);
     }
     setGuestDetailError("");
     try {
+      proxmuxDebugMark(
+        "guest-fetch",
+        `cluster=${clusterId} node=${expandedGuestParsed.node} vmid=${expandedGuestParsed.vmid} force=${String(Boolean(opts?.force))}`,
+      );
       const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "guestStatus", {
         clusterId,
         node: expandedGuestParsed.node,
@@ -426,7 +560,15 @@ export function ProxmuxSidebarPanel({
       })) as { ok?: boolean; data?: Record<string, unknown> };
       if (my !== guestStatusReq.current) return;
       if (out.ok && out.data != null && typeof out.data === "object" && !Array.isArray(out.data)) {
-        setGuestStatus(out.data as Record<string, unknown>);
+        const nextStatus = out.data as Record<string, unknown>;
+        if (cacheKey) {
+          guestStatusCacheRef.current[cacheKey] = {
+            value: nextStatus,
+            fetchedAt: Date.now(),
+          };
+        }
+        setGuestStatus(nextStatus);
+        proxmuxDebugMark("guest-store", `key=${cacheKey ?? "n/a"}`);
       } else {
         setGuestStatus(null);
         setGuestDetailError("Unexpected guest status response.");
@@ -440,7 +582,7 @@ export function ProxmuxSidebarPanel({
         setGuestStatusLoading(false);
       }
     }
-  }, [clusterId, expandedGuestParsed]);
+  }, [clusterId, expandedGuestParsed, expandedGuestCacheKey]);
 
   useEffect(() => {
     if (!clusterId || !expandedGuestParsed) {
@@ -455,11 +597,27 @@ export function ProxmuxSidebarPanel({
 
   useEffect(() => {
     if (!clusterId || !expandedGuestParsed) return;
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadGuestStatus({ silent: true });
-    }, 4000);
-    return () => clearInterval(id);
-  }, [clusterId, expandedGuestParsed, loadGuestStatus]);
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = computeAdaptiveGuestPollDelayMs();
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        if (shouldRunAdaptiveGuestPollTick(appVisible, document.visibilityState)) {
+          void loadGuestStatus({ silent: true, force: true });
+        }
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [clusterId, expandedGuestParsed, loadGuestStatus, appVisible]);
 
   const runPowerAction = useCallback(
     async (action: string) => {
@@ -474,7 +632,7 @@ export function ProxmuxSidebarPanel({
           vmid: expandedGuestParsed.vmid,
           action,
         });
-        await loadGuestStatus();
+        await loadGuestStatus({ force: true });
       } catch (e) {
         setGuestDetailError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -785,7 +943,7 @@ export function ProxmuxSidebarPanel({
           type="button"
           className="btn btn-settings-tool proxmux-sidebar-refresh"
           disabled={busy || !clusterId}
-          onClick={() => void fetchResources()}
+          onClick={() => void fetchResources({ force: true })}
           title="Refresh inventory"
         >
           Refresh
@@ -1027,7 +1185,7 @@ export function ProxmuxSidebarPanel({
                                           type="button"
                                           className="btn btn-settings-tool"
                                           disabled={powerBusy || busy}
-                                          onClick={() => void loadGuestStatus()}
+                                          onClick={() => void loadGuestStatus({ force: true })}
                                         >
                                           Retry status
                                         </button>

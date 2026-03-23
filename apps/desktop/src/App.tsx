@@ -162,6 +162,11 @@ import {
 import { createId } from "./features/app-id";
 import { validateExternalHttpUrl } from "./features/external-http-url";
 import { isProxmoxConsoleDeepLinkUrl } from "./features/proxmox-console-urls";
+import {
+  computeProxmuxWarmupDelayMs,
+  selectProxmuxWarmupClusterId,
+  shouldRunProxmuxStartupWarmup,
+} from "./features/proxmux-startup-warmup";
 import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window";
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
@@ -194,6 +199,7 @@ import {
   TERMINAL_FONT_OFFSET_MIN,
   TERMINAL_FONT_OFFSET_STORAGE_KEY,
   TERMINAL_FONT_PRESET_STORAGE_KEY,
+  UI_DENSITY_OFFSET_STORAGE_KEY,
   UI_FONT_PRESET_STORAGE_KEY,
   clampSidebarWidth,
   parseFileExportArchiveFormat,
@@ -443,6 +449,8 @@ export function App() {
   const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
   const [proxmuxSidebarAvailable, setProxmuxSidebarAvailable] = useState(false);
   const [proxmuxResourceCount, setProxmuxResourceCount] = useState(0);
+  const proxmuxWarmupTimerRef = useRef<number | null>(null);
+  const proxmuxWarmupDoneRef = useRef(false);
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -486,6 +494,8 @@ export function App() {
   const [hostSettingsKeyPolicy, setHostSettingsKeyPolicy] = useState<StrictHostKeyPolicy>("ask");
   const [pendingRemoveHostsTab, setPendingRemoveHostsTab] = useState<boolean>(false);
   const removeHostsTabTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const proxmuxStartupWarmupTimerRef = useRef<number | null>(null);
+  const proxmuxStartupWarmupDoneRef = useRef<boolean>(false);
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
   const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState<number | null>(null);
@@ -513,6 +523,16 @@ export function App() {
     }
     const persisted = window.localStorage.getItem(DENSITY_PROFILE_STORAGE_KEY);
     return persisted === "aggressive" || persisted === "safe" || persisted === "balanced" ? persisted : "balanced";
+  });
+  const [uiDensityOffset, setUiDensityOffset] = useState<number>(() => {
+    if (typeof window === "undefined") {
+      return 0;
+    }
+    const persisted = Number(window.localStorage.getItem(UI_DENSITY_OFFSET_STORAGE_KEY));
+    if (!Number.isFinite(persisted)) {
+      return 0;
+    }
+    return Math.min(2, Math.max(-2, Math.round(persisted)));
   });
   const [listTonePreset, setListTonePreset] = useState<ListTonePreset>(() => {
     if (typeof window === "undefined") {
@@ -824,6 +844,95 @@ export function App() {
     }
     prevAppSettingsOpenRef.current = isAppSettingsOpen;
   }, [isAppSettingsOpen, refreshLicensedPlugins]);
+
+  useEffect(() => {
+    if (!proxmuxSidebarAvailable) {
+      proxmuxWarmupDoneRef.current = false;
+      if (proxmuxWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxWarmupTimerRef.current);
+        proxmuxWarmupTimerRef.current = null;
+      }
+      return;
+    }
+    if (proxmuxWarmupDoneRef.current) {
+      return;
+    }
+    proxmuxWarmupDoneRef.current = true;
+    const delayMs = 1_000 + Math.round(Math.random() * 2_000);
+    proxmuxWarmupTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const raw = (await pluginInvoke(PROXMUX_PLUGIN_ID, "listState", {})) as {
+            activeClusterId?: string | null;
+            clusters?: Array<{ id: string }>;
+          };
+          const clusters = Array.isArray(raw.clusters) ? raw.clusters : [];
+          const selectedClusterId =
+            (raw.activeClusterId && clusters.some((cluster) => cluster.id === raw.activeClusterId)
+              ? raw.activeClusterId
+              : null) ?? clusters[0]?.id ?? null;
+          if (!selectedClusterId) {
+            return;
+          }
+          await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", { clusterId: selectedClusterId });
+        } catch {
+          // Warmup is best effort only; foreground fetch handles hard errors.
+        }
+      })();
+    }, delayMs);
+    return () => {
+      if (proxmuxWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxWarmupTimerRef.current);
+        proxmuxWarmupTimerRef.current = null;
+      }
+    };
+  }, [proxmuxSidebarAvailable]);
+
+  useEffect(() => {
+    if (!proxmuxSidebarAvailable) {
+      if (proxmuxStartupWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxStartupWarmupTimerRef.current);
+        proxmuxStartupWarmupTimerRef.current = null;
+      }
+      proxmuxStartupWarmupDoneRef.current = false;
+      return;
+    }
+    if (!shouldRunProxmuxStartupWarmup(proxmuxSidebarAvailable, proxmuxStartupWarmupDoneRef.current)) {
+      return;
+    }
+    const delayMs = computeProxmuxWarmupDelayMs(Math.random());
+    proxmuxStartupWarmupTimerRef.current = window.setTimeout(() => {
+      proxmuxStartupWarmupTimerRef.current = null;
+      void (async () => {
+        try {
+          const raw = (await pluginInvoke(PROXMUX_PLUGIN_ID, "listState", {})) as {
+            activeClusterId?: string | null;
+            clusters?: Array<{ id?: unknown }>;
+          };
+          const clusters = Array.isArray(raw.clusters)
+            ? raw.clusters
+                .map((entry) => ({ id: typeof entry?.id === "string" ? entry.id : "" }))
+                .filter((entry) => entry.id.length > 0)
+            : [];
+          const clusterId = selectProxmuxWarmupClusterId(raw.activeClusterId ?? null, clusters);
+          if (!clusterId) {
+            return;
+          }
+          await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", { clusterId });
+        } catch {
+          // Best-effort warmup only; the sidebar performs explicit loads.
+        } finally {
+          proxmuxStartupWarmupDoneRef.current = true;
+        }
+      })();
+    }, delayMs);
+    return () => {
+      if (proxmuxStartupWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxStartupWarmupTimerRef.current);
+        proxmuxStartupWarmupTimerRef.current = null;
+      }
+    };
+  }, [proxmuxSidebarAvailable]);
 
   useEffect(() => {
     if (!fileWorkspacePluginEnabled) {
@@ -2029,6 +2138,9 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(DENSITY_PROFILE_STORAGE_KEY, densityProfile);
   }, [densityProfile]);
+  useEffect(() => {
+    window.localStorage.setItem(UI_DENSITY_OFFSET_STORAGE_KEY, String(uiDensityOffset));
+  }, [uiDensityOffset]);
   useEffect(() => {
     window.localStorage.setItem(LIST_TONE_PRESET_STORAGE_KEY, listTonePreset);
   }, [listTonePreset]);
@@ -4886,6 +4998,7 @@ export function App() {
         isStackedShell && mobileShellTab === "terminal" ? " app-shell--mobile-panel-terminal" : ""
       }`}
       data-density={densityProfile}
+      data-density-offset={uiDensityOffset}
       data-list-tone={listTonePreset}
       data-frame-mode={frameModePreset}
       data-ui-font={uiFontPreset}
@@ -5101,6 +5214,8 @@ export function App() {
           setActiveAppSettingsTab={setActiveAppSettingsTab}
           densityProfile={densityProfile}
           setDensityProfile={setDensityProfile}
+          uiDensityOffset={uiDensityOffset}
+          setUiDensityOffset={setUiDensityOffset}
           uiFontPreset={uiFontPreset}
           setUiFontPreset={setUiFontPreset}
           terminalFontPreset={terminalFontPreset}

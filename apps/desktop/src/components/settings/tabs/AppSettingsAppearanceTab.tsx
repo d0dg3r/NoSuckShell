@@ -7,9 +7,14 @@ import type {
 } from "../app-settings-types";
 import { TERMINAL_FONT_OFFSET_MAX, TERMINAL_FONT_OFFSET_MIN } from "../app-settings-constants";
 
+const UI_DENSITY_OFFSET_MIN = -2;
+const UI_DENSITY_OFFSET_MAX = 2;
+
 export type AppSettingsAppearanceTabProps = {
   densityProfile: DensityProfile;
   setDensityProfile: (value: DensityProfile) => void;
+  uiDensityOffset: number;
+  setUiDensityOffset: (value: number) => void;
   uiFontPreset: UiFontPreset;
   setUiFontPreset: (value: UiFontPreset) => void;
   terminalFontPreset: TerminalFontPreset;
@@ -28,6 +33,8 @@ export type AppSettingsAppearanceTabProps = {
 export function AppSettingsAppearanceTab({
   densityProfile,
   setDensityProfile,
+  uiDensityOffset,
+  setUiDensityOffset,
   uiFontPreset,
   setUiFontPreset,
   terminalFontPreset,
@@ -61,7 +68,25 @@ export function AppSettingsAppearanceTab({
               <option value="balanced">Balanced compact</option>
               <option value="safe">Safe compact</option>
             </select>
-            <span className="field-help">Controls spacing and font density across the app.</span>
+            <input
+              className="input"
+              type="range"
+              value={uiDensityOffset}
+              min={UI_DENSITY_OFFSET_MIN}
+              max={UI_DENSITY_OFFSET_MAX}
+              step={1}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                if (!Number.isFinite(parsed)) {
+                  return;
+                }
+                setUiDensityOffset(Math.min(UI_DENSITY_OFFSET_MAX, Math.max(UI_DENSITY_OFFSET_MIN, Math.round(parsed))));
+              }}
+            />
+            <span className="field-help">
+              Preset baseline for spacing and typography across the app. Fine tune: {uiDensityOffset > 0 ? "+" : ""}
+              {uiDensityOffset}.
+            </span>
           </label>
           <label className="field">
             <span className="field-label">GUI font</span>
@@ -90,7 +115,24 @@ export function AppSettingsAppearanceTab({
             <span className="field-help">Nerd font fallbacks remain active for symbols.</span>
           </label>
           <label className="field">
-            <span className="field-label">Terminal font offset</span>
+            <span className="field-label">Terminal density fine tune</span>
+            <input
+              className="input"
+              type="range"
+              value={terminalFontOffset}
+              min={TERMINAL_FONT_OFFSET_MIN}
+              max={TERMINAL_FONT_OFFSET_MAX}
+              step={1}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                if (!Number.isFinite(parsed)) {
+                  return;
+                }
+                setTerminalFontOffset(
+                  Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
+                );
+              }}
+            />
             <input
               className="input"
               type="number"
@@ -107,7 +149,10 @@ export function AppSettingsAppearanceTab({
                 );
               }}
             />
-            <span className="field-help">Current terminal size: {terminalFontSize}px.</span>
+            <span className="field-help">
+              Keep your selected density preset and fine tune terminal readability. Current terminal size: {terminalFontSize}
+              px.
+            </span>
           </label>
           <label className="field">
             <span className="field-label">List tone intensity</span>

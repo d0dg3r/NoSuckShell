@@ -193,7 +193,7 @@ export function ProxmoxLxcTermPane({
           node,
           guestType: "lxc",
           vmid,
-        })) as { ok?: boolean; apiOrigin?: string; apiUser?: string; authHeader?: string; data?: unknown };
+        })) as { ok?: boolean; apiOrigin?: string; apiUser?: string; authCookie?: string; data?: unknown };
         if (cancelled) {
           return;
         }
@@ -211,7 +211,7 @@ export function ProxmoxLxcTermPane({
         let connectUrl = wssUrl;
         if (allowInsecureTls) {
           setStatusMessage("Starting local TLS bridge…");
-          const proxy = await proxmuxWsProxyStart(wssUrl, true, raw.authHeader);
+          const proxy = await proxmuxWsProxyStart(wssUrl, true, undefined, raw.authCookie);
           if (cancelled) {
             await proxmuxWsProxyStop(proxy.proxyId).catch(() => {});
             return;

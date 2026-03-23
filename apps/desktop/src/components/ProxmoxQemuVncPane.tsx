@@ -92,7 +92,7 @@ export function ProxmoxQemuVncPane({
           node,
           guestType: "qemu",
           vmid,
-        })) as { ok?: boolean; apiOrigin?: string; authHeader?: string; data?: unknown };
+        })) as { ok?: boolean; apiOrigin?: string; authCookie?: string; data?: unknown };
         if (cancelled) {
           return;
         }
@@ -108,13 +108,7 @@ export function ProxmoxQemuVncPane({
         let rfbUrl: string | WebSocket = wssUrl;
         if (allowInsecureTls) {
           setStatusMessage("Starting local TLS bridge…");
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H2',location:'ProxmoxQemuVncPane.tsx:110',message:'proxy start called',data:{wssUrl:wssUrl.slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
-          const proxy = await proxmuxWsProxyStart(wssUrl, true, raw.authHeader);
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H5',location:'ProxmoxQemuVncPane.tsx:113',message:'proxy start result',data:{proxyId:proxy.proxyId,localWsUrl:proxy.localWsUrl},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
+          const proxy = await proxmuxWsProxyStart(wssUrl, true, undefined, raw.authCookie);
           if (cancelled) {
             await proxmuxWsProxyStop(proxy.proxyId).catch(() => {});
             return;
@@ -124,9 +118,6 @@ export function ProxmoxQemuVncPane({
         }
         setStatusMessage("Establishing VNC session…");
 
-        // #region agent log
-        fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H3',location:'ProxmoxQemuVncPane.tsx:125',message:'rfb url final',data:{rfbUrl:String(rfbUrl).slice(0,150),allowInsecureTls},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const mod = await import("@novnc/novnc/lib/rfb.js");
         const rfbMaybeCtor =
           typeof mod.default === "function"
@@ -143,31 +134,19 @@ export function ProxmoxQemuVncPane({
         }
 
         screenRef.current.innerHTML = "";
-        // #region agent log
-        fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H9',location:'ProxmoxQemuVncPane.tsx:146',message:'creating noVNC RFB instance',data:{},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const rfb = new rfbMaybeCtor(screenRef.current, rfbUrl);
         rfb.scaleViewport = true;
         rfb.resizeSession = true;
         rfbRef.current = rfb;
-        // #region agent log
-        fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H9',location:'ProxmoxQemuVncPane.tsx:151',message:'noVNC RFB instance created',data:{},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
 
         const onConnect = () => {
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H4',location:'ProxmoxQemuVncPane.tsx:onConnect',message:'rfb connected OK',data:{},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           if (!cancelled) {
             setPhase("connected");
             setStatusMessage("");
           }
         };
         const onDisconnect = (ev: Event) => {
-          // #region agent log
-          const detail = (ev as CustomEvent<{ clean?: boolean; reason?: string }>).detail;
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H1',location:'ProxmoxQemuVncPane.tsx:onDisconnect',message:'rfb disconnected',data:{clean:detail?.clean,reason:detail?.reason},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
+          void ev;
           if (!cancelled) {
             setPhase("disconnected");
             setStatusMessage("Disconnected.");
@@ -176,9 +155,6 @@ export function ProxmoxQemuVncPane({
         const onSecurityFailure = (ev: Event) => {
           const detail = (ev as CustomEvent<{ reason?: string }>).detail;
           const reason = detail?.reason ?? "Security handshake failed.";
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H4',location:'ProxmoxQemuVncPane.tsx:onSecurityFailure',message:'rfb security failure',data:{reason},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           if (!cancelled) {
             setPhase("error");
             setStatusMessage(reason);
@@ -186,36 +162,21 @@ export function ProxmoxQemuVncPane({
           }
         };
         const onCredentialsRequired = () => {
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H9',location:'ProxmoxQemuVncPane.tsx:onCredentialsRequired',message:'rfb credentials required',data:{},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           try {
             const client = rfb as unknown as { sendCredentials?: (creds: { username?: string; password?: string; target?: string }) => void };
             client.sendCredentials?.({ password: String(ticket.ticket) });
-            // #region agent log
-            fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H11',location:'ProxmoxQemuVncPane.tsx:onCredentialsRequired',message:'rfb credentials sent',data:{hasPassword:Boolean(ticket.ticket)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             if (!cancelled) {
               setStatusMessage("Authenticating VNC session…");
             }
-          } catch (e) {
-            // #region agent log
-            fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H11',location:'ProxmoxQemuVncPane.tsx:onCredentialsRequired',message:'rfb credentials send failed',data:{error:String(e)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
+          } catch {
+            // ignore and let noVNC surface failure via events
           }
-        };
-        const onDesktopName = (ev: Event) => {
-          const detail = (ev as CustomEvent<{ name?: string }>).detail;
-          // #region agent log
-          fetch('http://127.0.0.1:7291/ingest/699ba312-3910-42fe-8ae6-1ba147b8af4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb87e7'},body:JSON.stringify({sessionId:'fb87e7',runId:'vnc-debug',hypothesisId:'H10',location:'ProxmoxQemuVncPane.tsx:onDesktopName',message:'rfb desktop name event',data:{name:detail?.name},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         };
 
         rfb.addEventListener("connect", onConnect);
         rfb.addEventListener("disconnect", onDisconnect);
         rfb.addEventListener("securityfailure", onSecurityFailure);
         rfb.addEventListener("credentialsrequired", onCredentialsRequired);
-        rfb.addEventListener("desktopname", onDesktopName);
       } catch (e) {
         if (!cancelled) {
           const msg = String(e);

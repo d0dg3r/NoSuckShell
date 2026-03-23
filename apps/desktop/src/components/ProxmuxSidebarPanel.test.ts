@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeAdaptiveGuestPollDelayMs,
   expandableProxmuxRow,
   expansionKeyForRow,
+  isSufficientlyFresh,
   proxmuxCategory,
   proxmuxPower,
   resourceIpStat,
+  shouldRunAdaptiveGuestPollTick,
 } from "./ProxmuxSidebarPanel";
 
 describe("proxmuxCategory / proxmuxPower", () => {
@@ -66,5 +69,39 @@ describe("resourceIpStat", () => {
   it("returns trimmed address strings", () => {
     expect(resourceIpStat({ ip4: " 10.0.0.1 " }, "ip4")).toBe("10.0.0.1");
     expect(resourceIpStat({ ip6: "2001:db8::1" }, "ip6")).toBe("2001:db8::1");
+  });
+});
+
+describe("isSufficientlyFresh", () => {
+  it("returns true within ttl", () => {
+    expect(isSufficientlyFresh(1_000, 5_000, 5_500)).toBe(true);
+  });
+
+  it("returns false when ttl elapsed", () => {
+    expect(isSufficientlyFresh(1_000, 5_000, 6_001)).toBe(false);
+  });
+});
+
+describe("computeAdaptiveGuestPollDelayMs", () => {
+  it("stays inside baseline+jitter range", () => {
+    const delay = computeAdaptiveGuestPollDelayMs(0.5);
+    expect(delay).toBeGreaterThanOrEqual(5_000);
+    expect(delay).toBeLessThanOrEqual(6_200);
+  });
+
+  it("clamps very low random values", () => {
+    expect(computeAdaptiveGuestPollDelayMs(-1)).toBe(5_000);
+  });
+
+  it("clamps very high random values", () => {
+    expect(computeAdaptiveGuestPollDelayMs(5)).toBe(6_200);
+  });
+});
+
+describe("shouldRunAdaptiveGuestPollTick", () => {
+  it("requires both app visibility and document visibility", () => {
+    expect(shouldRunAdaptiveGuestPollTick(false, "visible")).toBe(false);
+    expect(shouldRunAdaptiveGuestPollTick(true, "hidden")).toBe(false);
+    expect(shouldRunAdaptiveGuestPollTick(true, "visible")).toBe(true);
   });
 });

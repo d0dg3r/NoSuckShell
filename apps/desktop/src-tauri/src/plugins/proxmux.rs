@@ -1,4 +1,4 @@
-//! PROXMUX: Proxmox VE cluster inventory using the Proxmox API (token auth).
+//! PROXMUX: Proxmox VE cluster inventory using the Proxmox API (ticket session auth).
 //! Storage lives next to other NoSuckShell SSH-dir files; API secrets use the app master key when set, else plain text in a user-only file.
 
 use super::{HostEnrichContext, NssPlugin, PluginCapability, PluginManifest};
@@ -14,6 +14,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const PROXMUX_PLUGIN_ID: &str = "dev.nosuckshell.plugin.proxmux";
@@ -78,6 +79,9 @@ struct StoredCluster {
     name: String,
     proxmox_url: String,
     api_user: String,
+    #[serde(default)]
+    totp_code: String,
+    #[serde(default)]
     api_token_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_secret_plain: Option<String>,
@@ -113,7 +117,11 @@ fn load_state() -> Result<ProxmuxState> {
         return Ok(ProxmuxState::default());
     }
     let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_str(&raw).context("parse proxmux state")
+    let mut state: ProxmuxState = serde_json::from_str(&raw).context("parse proxmux state")?;
+    if migrate_legacy_token_clusters(&mut state) > 0 {
+        save_state(&state)?;
+    }
+    Ok(state)
 }
 
 fn save_state(state: &ProxmuxState) -> Result<()> {
@@ -136,11 +144,258 @@ fn normalize_base_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
+#[derive(Debug, Clone)]
+struct ProxmoxSessionAuth {
+    cookie_header: String,
+    csrf_prevention_token: String,
+}
+
+#[derive(Debug, Clone)]
+struct CachedSession {
+    auth: ProxmoxSessionAuth,
+    created_at_unix_secs: u64,
+}
+
+const SESSION_CACHE_TTL_SECS: u64 = 60 * 60;
+
+fn session_cache() -> &'static std::sync::Mutex<HashMap<String, CachedSession>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, CachedSession>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProxmuxCacheBucket {
+    FetchResources,
+    GuestStatus,
+}
+
+#[derive(Debug, Clone)]
+struct ProxmuxCacheEntry {
+    value: Value,
+    cached_at_ms: u64,
+    expires_at_ms: u64,
+}
+
+impl ProxmuxCacheEntry {
+    fn is_fresh_at(&self, now_ms: u64) -> bool {
+        now_ms < self.expires_at_ms
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct ProxmuxCacheStats {
+    hits: u64,
+    misses: u64,
+    stores: u64,
+    deduped_waits: u64,
+    invalidations: u64,
+}
+
+#[derive(Debug, Default)]
+struct ProxmuxCacheState {
+    entries: HashMap<String, ProxmuxCacheEntry>,
+    in_flight: HashSet<String>,
+    stats: ProxmuxCacheStats,
+}
+
+impl ProxmuxCacheState {
+    fn invalidate_prefix(&mut self, prefix: &str) -> usize {
+        let before = self.entries.len();
+        self.entries.retain(|k, _| !k.starts_with(prefix));
+        let removed = before.saturating_sub(self.entries.len());
+        if removed > 0 {
+            self.stats.invalidations = self.stats.invalidations.saturating_add(removed as u64);
+        }
+        removed
+    }
+
+    fn purge_expired(&mut self, now_ms: u64) {
+        self.entries.retain(|_, entry| entry.is_fresh_at(now_ms));
+    }
+
+    fn evict_if_needed(&mut self) {
+        if self.entries.len() <= PROXMUX_CACHE_MAX_ENTRIES {
+            return;
+        }
+        let mut by_age: Vec<(String, u64)> = self
+            .entries
+            .iter()
+            .map(|(k, v)| (k.clone(), v.cached_at_ms))
+            .collect();
+        by_age.sort_by_key(|(_, ts)| *ts);
+        let drop_count = self.entries.len().saturating_sub(PROXMUX_CACHE_MAX_ENTRIES);
+        for (key, _) in by_age.into_iter().take(drop_count) {
+            self.entries.remove(&key);
+        }
+    }
+}
+
+const PROXMUX_CACHE_TTL_FETCH_RESOURCES_MS: u64 = 9_000;
+const PROXMUX_CACHE_TTL_GUEST_STATUS_MS: u64 = 5_000;
+const PROXMUX_CACHE_MAX_ENTRIES: usize = 96;
+
+fn proxmux_cache_ttl_ms(bucket: ProxmuxCacheBucket) -> u64 {
+    match bucket {
+        ProxmuxCacheBucket::FetchResources => PROXMUX_CACHE_TTL_FETCH_RESOURCES_MS,
+        ProxmuxCacheBucket::GuestStatus => PROXMUX_CACHE_TTL_GUEST_STATUS_MS,
+    }
+}
+
+fn proxmux_cache_key_for_fetch_resources(cluster_id: &str) -> String {
+    format!("fetchResources:{cluster_id}")
+}
+
+fn proxmux_cache_key_for_guest_status(
+    cluster_id: &str,
+    node: &str,
+    guest_type: &str,
+    vmid: &str,
+) -> String {
+    format!("guestStatus:{cluster_id}:{node}:{guest_type}:{vmid}")
+}
+
+fn proxmux_cache_sync() -> &'static (Mutex<ProxmuxCacheState>, Condvar) {
+    static CACHE: OnceLock<(Mutex<ProxmuxCacheState>, Condvar)> = OnceLock::new();
+    CACHE.get_or_init(|| (Mutex::new(ProxmuxCacheState::default()), Condvar::new()))
+}
+
+fn now_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn proxmux_cache_debug_enabled() -> bool {
+    matches!(std::env::var("NSS_PROXMUX_CACHE_DEBUG").ok().as_deref(), Some("1"))
+}
+
+fn proxmux_cache_debug_log(message: &str) {
+    if proxmux_cache_debug_enabled() {
+        eprintln!("[proxmux-cache] {message}");
+    }
+}
+
+fn proxmux_cache_invalidate_prefix(prefix: &str) {
+    let (lock, cv) = proxmux_cache_sync();
+    if let Ok(mut state) = lock.lock() {
+        let removed = state.invalidate_prefix(prefix);
+        if removed > 0 {
+            proxmux_cache_debug_log(&format!("invalidate prefix={prefix} removed={removed}"));
+        }
+    }
+    cv.notify_all();
+}
+
+fn proxmux_cache_invalidate_cluster(cluster_id: &str) {
+    proxmux_cache_invalidate_prefix(&format!("fetchResources:{cluster_id}"));
+    proxmux_cache_invalidate_prefix(&format!("guestStatus:{cluster_id}:"));
+}
+
+fn proxmux_cache_invalidate_exact(key: &str) {
+    let (lock, cv) = proxmux_cache_sync();
+    if let Ok(mut state) = lock.lock() {
+        if state.entries.remove(key).is_some() {
+            state.stats.invalidations = state.stats.invalidations.saturating_add(1);
+            proxmux_cache_debug_log(&format!("invalidate exact key={key}"));
+        }
+    }
+    cv.notify_all();
+}
+
+fn proxmux_cache_invalidate_after_guest_power(
+    cluster_id: &str,
+    node: &str,
+    guest_type: &str,
+    vmid: &str,
+) {
+    proxmux_cache_invalidate_exact(&proxmux_cache_key_for_guest_status(
+        cluster_id,
+        node,
+        guest_type,
+        vmid,
+    ));
+    proxmux_cache_invalidate_exact(&proxmux_cache_key_for_fetch_resources(cluster_id));
+}
+
+fn proxmux_cache_invalidate_after_toggle_favorite(cluster_id: &str) {
+    proxmux_cache_invalidate_exact(&proxmux_cache_key_for_fetch_resources(cluster_id));
+}
+
+fn proxmux_cached_json<F>(cache_key: String, bucket: ProxmuxCacheBucket, fetcher: F) -> Result<Value>
+where
+    F: FnOnce() -> Result<Value>,
+{
+    let ttl_ms = proxmux_cache_ttl_ms(bucket);
+    let (lock, cv) = proxmux_cache_sync();
+    loop {
+        let now_ms = now_unix_millis();
+        let mut state = lock
+            .lock()
+            .map_err(|_| anyhow::anyhow!("proxmux cache lock poisoned"))?;
+        state.purge_expired(now_ms);
+        if let Some(value) = state
+            .entries
+            .get(&cache_key)
+            .filter(|entry| entry.is_fresh_at(now_ms))
+            .map(|entry| entry.value.clone())
+        {
+            state.stats.hits = state.stats.hits.saturating_add(1);
+            proxmux_cache_debug_log(&format!("hit key={cache_key}"));
+            return Ok(value);
+        }
+        if !state.in_flight.contains(&cache_key) {
+            state.in_flight.insert(cache_key.clone());
+            state.stats.misses = state.stats.misses.saturating_add(1);
+            drop(state);
+            let fetched = fetcher();
+            let mut state = lock
+                .lock()
+                .map_err(|_| anyhow::anyhow!("proxmux cache lock poisoned"))?;
+            state.in_flight.remove(&cache_key);
+            if let Ok(value) = &fetched {
+                let cached_at_ms = now_unix_millis();
+                state.entries.insert(
+                    cache_key.clone(),
+                    ProxmuxCacheEntry {
+                        value: value.clone(),
+                        cached_at_ms,
+                        expires_at_ms: cached_at_ms.saturating_add(ttl_ms),
+                    },
+                );
+                state.evict_if_needed();
+                state.stats.stores = state.stats.stores.saturating_add(1);
+                proxmux_cache_debug_log(&format!("store key={cache_key} ttl_ms={ttl_ms}"));
+            } else {
+                proxmux_cache_debug_log(&format!("fetch error key={cache_key}"));
+            }
+            cv.notify_all();
+            return fetched;
+        }
+        state.stats.deduped_waits = state.stats.deduped_waits.saturating_add(1);
+        let _guard = cv
+            .wait(state)
+            .map_err(|_| anyhow::anyhow!("proxmux cache wait poisoned"))?;
+    }
+}
+
+#[allow(dead_code)]
 fn pve_api_token_header(user: &str, token_id: &str, secret: &str) -> String {
     format!("PVEAPIToken={user}!{token_id}={secret}")
 }
 
-fn read_api_secret(c: &StoredCluster) -> Result<String> {
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn session_cache_key(cluster_id: &str, base_url: &str) -> String {
+    format!("{cluster_id}|{}", normalize_base_url(base_url))
+}
+
+fn read_cluster_password(c: &StoredCluster) -> Result<String> {
     if let Some(enc) = &c.api_secret_encrypted {
         return decrypt_with_app_master(&enc.ciphertext, &enc.salt, &enc.nonce);
     }
@@ -149,7 +404,163 @@ fn read_api_secret(c: &StoredCluster) -> Result<String> {
             return Ok(p.clone());
         }
     }
-    anyhow::bail!("Missing API token secret for this cluster")
+    anyhow::bail!("Missing password for this cluster")
+}
+
+fn invalidate_cached_session(cluster_id: &str, base_url: &str) {
+    let key = session_cache_key(cluster_id, base_url);
+    if let Ok(mut cache) = session_cache().lock() {
+        cache.remove(&key);
+    }
+}
+
+fn parse_json_data_field(body: Value, context: &str) -> Result<Value> {
+    body.get("data")
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("missing data in {context} response"))
+}
+
+fn parse_ticket_session_auth(body: &Value) -> Result<ProxmoxSessionAuth> {
+    let data = body
+        .get("data")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| anyhow::anyhow!("missing data in access/ticket response"))?;
+    let ticket = data
+        .get("ticket")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing ticket in access/ticket response"))?;
+    let csrf = data
+        .get("CSRFPreventionToken")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    Ok(ProxmoxSessionAuth {
+        cookie_header: format!("PVEAuthCookie={ticket}"),
+        csrf_prevention_token: csrf,
+    })
+}
+
+fn login_ticket_session(client: &reqwest::blocking::Client, base_url: &str, c: &StoredCluster) -> Result<ProxmoxSessionAuth> {
+    let password = read_cluster_password(c)?;
+    if c.api_user.trim().is_empty() {
+        anyhow::bail!("apiUser is required");
+    }
+    let url = format!("{}/api2/json/access/ticket", normalize_base_url(base_url));
+    let mut form: Vec<(&str, String)> = vec![
+        ("username", c.api_user.trim().to_string()),
+        ("password", password),
+    ];
+    if !c.totp_code.trim().is_empty() {
+        form.push(("otp", c.totp_code.trim().to_string()));
+    }
+    let response = client
+        .post(&url)
+        .header("Accept", "application/json")
+        .form(&form)
+        .send()
+        .with_context(|| format!("POST {url}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().unwrap_or_default();
+        anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+    }
+    let body: Value = response.json().context("parse access/ticket JSON")?;
+    parse_ticket_session_auth(&body)
+}
+
+fn session_auth_for_base(client: &reqwest::blocking::Client, c: &StoredCluster, base_url: &str, force_refresh: bool) -> Result<ProxmoxSessionAuth> {
+    let normalized = normalize_base_url(base_url);
+    if normalized.is_empty() {
+        anyhow::bail!("empty base URL");
+    }
+    let key = session_cache_key(&c.id, &normalized);
+    if !force_refresh {
+        if let Ok(cache) = session_cache().lock() {
+            if let Some(entry) = cache.get(&key) {
+                let age = now_unix_secs().saturating_sub(entry.created_at_unix_secs);
+                if age < SESSION_CACHE_TTL_SECS {
+                    return Ok(entry.auth.clone());
+                }
+            }
+        }
+    }
+    let auth = login_ticket_session(client, &normalized, c)?;
+    if let Ok(mut cache) = session_cache().lock() {
+        cache.insert(
+            key,
+            CachedSession {
+                auth: auth.clone(),
+                created_at_unix_secs: now_unix_secs(),
+            },
+        );
+    }
+    Ok(auth)
+}
+
+fn pve_get_json_data(client: &reqwest::blocking::Client, c: &StoredCluster, base_url: &str, path_tail: &str) -> Result<Value> {
+    let normalized = normalize_base_url(base_url);
+    let url = format!("{normalized}{path_tail}");
+    for attempt in 0..2 {
+        let auth = session_auth_for_base(client, c, &normalized, attempt > 0)?;
+        let response = client
+            .get(&url)
+            .header("Cookie", &auth.cookie_header)
+            .header("Accept", "application/json")
+            .send()
+            .with_context(|| format!("GET {url}"))?;
+        let status = response.status();
+        if status.as_u16() == 401 && attempt == 0 {
+            invalidate_cached_session(&c.id, &normalized);
+            continue;
+        }
+        if !status.is_success() {
+            let text = response.text().unwrap_or_default();
+            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+        }
+        let body: Value = response.json().context("parse Proxmox JSON")?;
+        return parse_json_data_field(body, "Proxmox GET");
+    }
+    anyhow::bail!("Proxmox GET failed after retry")
+}
+
+fn pve_post_json_data(
+    client: &reqwest::blocking::Client,
+    c: &StoredCluster,
+    base_url: &str,
+    path_tail: &str,
+    form_fields: &[(&str, String)],
+) -> Result<Value> {
+    let normalized = normalize_base_url(base_url);
+    let url = format!("{normalized}{path_tail}");
+    for attempt in 0..2 {
+        let auth = session_auth_for_base(client, c, &normalized, attempt > 0)?;
+        let mut req = client
+            .post(&url)
+            .header("Cookie", &auth.cookie_header)
+            .header("Accept", "application/json");
+        if !auth.csrf_prevention_token.is_empty() {
+            req = req.header("CSRFPreventionToken", &auth.csrf_prevention_token);
+        }
+        if !form_fields.is_empty() {
+            req = req.form(form_fields);
+        }
+        let response = req.send().with_context(|| format!("POST {url}"))?;
+        let status = response.status();
+        if status.as_u16() == 401 && attempt == 0 {
+            invalidate_cached_session(&c.id, &normalized);
+            continue;
+        }
+        if !status.is_success() {
+            let text = response.text().unwrap_or_default();
+            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+        }
+        let body: Value = response.json().context("parse Proxmox JSON")?;
+        return parse_json_data_field(body, "Proxmox POST");
+    }
+    anyhow::bail!("Proxmox POST failed after retry")
 }
 
 fn write_api_secret_fields(secret: &str) -> Result<(Option<String>, Option<ApiSecretEncrypted>)> {
@@ -226,24 +637,9 @@ fn http_client(allow_insecure_tls: bool) -> Result<reqwest::blocking::Client> {
 fn try_fetch_version(
     client: &reqwest::blocking::Client,
     base_url: &str,
-    auth_header: &str,
+    cluster: &StoredCluster,
 ) -> Result<serde_json::Value> {
-    let url = format!("{}/api2/json/version", normalize_base_url(base_url));
-    let response = client
-        .get(&url)
-        .header("Authorization", auth_header)
-        .header("Accept", "application/json")
-        .send()
-        .with_context(|| format!("GET {url}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let text = response.text().unwrap_or_default();
-        anyhow::bail!("{status}: {text}");
-    }
-    let body: serde_json::Value = response.json().context("parse version JSON")?;
-    body.get("data")
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("missing data in version response"))
+    pve_get_json_data(client, cluster, base_url, "/api2/json/version")
 }
 
 fn with_failover<T, F>(primary: &str, failover: &[String], mut f: F) -> Result<T>
@@ -267,7 +663,7 @@ where
 /// Best-effort GET returning the Proxmox `data` JSON value; used for inventory IP enrichment only.
 fn try_pve_get_json_data_optional(
     client: &reqwest::blocking::Client,
-    auth: &str,
+    cluster: &StoredCluster,
     primary: &str,
     failover: &[String],
     path_tail: &str,
@@ -277,23 +673,8 @@ fn try_pve_get_json_data_optional(
         if base.is_empty() {
             continue;
         }
-        let url = format!("{base}{path_tail}");
-        let Ok(response) = client
-            .get(&url)
-            .header("Authorization", auth)
-            .header("Accept", "application/json")
-            .send()
-        else {
-            continue;
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-        let Ok(body) = response.json::<Value>() else {
-            continue;
-        };
-        if let Some(d) = body.get("data") {
-            return Some(d.clone());
+        if let Ok(data) = pve_get_json_data(client, cluster, &base, path_tail) {
+            return Some(data);
         }
     }
     None
@@ -511,14 +892,57 @@ fn map_vmid_string(map: &Map<String, Value>) -> Option<String> {
     })
 }
 
+fn legacy_api_user_from_token_id(api_token_id: &str) -> Option<String> {
+    let trimmed = api_token_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let user = trimmed.split('!').next().unwrap_or("").trim();
+    if user.is_empty() {
+        None
+    } else {
+        Some(user.to_string())
+    }
+}
+
+/// Migrates token-based clusters to direct-login semantics.
+/// Token secrets are dropped so UI can request a real password.
+fn migrate_legacy_token_clusters(state: &mut ProxmuxState) -> usize {
+    let mut changed = 0usize;
+    for cluster in state.clusters.values_mut() {
+        if cluster.api_token_id.trim().is_empty() {
+            continue;
+        }
+        let mut cluster_changed = false;
+        if cluster.api_user.trim().is_empty() {
+            if let Some(legacy_user) = legacy_api_user_from_token_id(&cluster.api_token_id) {
+                cluster.api_user = legacy_user;
+                cluster_changed = true;
+            }
+        }
+        if cluster.api_secret_plain.as_ref().is_some_and(|s| !s.is_empty()) || cluster.api_secret_encrypted.is_some() {
+            cluster.api_secret_plain = None;
+            cluster.api_secret_encrypted = None;
+            cluster_changed = true;
+        }
+        if cluster_changed {
+            changed += 1;
+        }
+    }
+    changed
+}
+
 fn cluster_to_public(c: &StoredCluster) -> Value {
+    let has_password = c.api_secret_plain.as_ref().is_some_and(|s| !s.is_empty()) || c.api_secret_encrypted.is_some();
+    let requires_reauth = !c.api_token_id.trim().is_empty();
     json!({
         "id": c.id,
         "name": c.name,
         "proxmoxUrl": normalize_base_url(&c.proxmox_url),
         "apiUser": c.api_user,
-        "apiTokenId": c.api_token_id,
-        "hasApiSecret": c.api_secret_plain.as_ref().is_some_and(|s| !s.is_empty()) || c.api_secret_encrypted.is_some(),
+        "totpCode": c.totp_code,
+        "hasPassword": has_password,
+        "requiresReauth": requires_reauth,
         "failoverUrls": c.failover_urls.iter().map(|u| normalize_base_url(u)).collect::<Vec<_>>(),
         "isEnabled": c.is_enabled,
         "allowInsecureTls": c.allow_insecure_tls,
@@ -542,6 +966,7 @@ fn list_state() -> Result<Value> {
         "clusters": clusters,
         "usesEncryptedSecrets": s.clusters.values().any(|c| c.api_secret_encrypted.is_some()),
         "usesPlainSecrets": s.clusters.values().any(|c| c.api_secret_plain.as_ref().is_some_and(|p| !p.is_empty())),
+        "legacyTokenClusters": s.clusters.values().filter(|c| !c.api_token_id.trim().is_empty()).count(),
         "favoritesByCluster": favorites_by_cluster,
     }))
 }
@@ -555,9 +980,9 @@ struct SaveClusterPayload {
     #[serde(default)]
     api_user: String,
     #[serde(default)]
-    api_token_id: String,
+    totp_code: String,
     #[serde(default)]
-    api_secret: String,
+    password: String,
     #[serde(default)]
     failover_urls: Vec<String>,
     #[serde(default = "default_true")]
@@ -595,12 +1020,12 @@ fn save_cluster(arg: &Value) -> Result<Value> {
     }
 
     let (plain, enc) = if let Some(existing) = state.clusters.get(&id) {
-        merge_stored_secret(&payload.api_secret, existing)?
+        merge_stored_secret(&payload.password, existing)?
     } else {
-        if payload.api_secret.is_empty() {
-            anyhow::bail!("apiSecret is required for a new cluster");
+        if payload.password.is_empty() {
+            anyhow::bail!("password is required for a new cluster");
         }
-        write_api_secret_fields(&payload.api_secret)?
+        write_api_secret_fields(&payload.password)?
     };
 
     let failover_urls: Vec<String> = payload
@@ -615,7 +1040,8 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         name: payload.name.trim().to_string(),
         proxmox_url,
         api_user: payload.api_user.trim().to_string(),
-        api_token_id: payload.api_token_id.trim().to_string(),
+        totp_code: payload.totp_code.trim().to_string(),
+        api_token_id: String::new(),
         api_secret_plain: plain,
         api_secret_encrypted: enc,
         failover_urls,
@@ -628,6 +1054,7 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         state.active_cluster_id = Some(id.clone());
     }
     save_state(&state)?;
+    proxmux_cache_invalidate_cluster(&id);
     Ok(json!({ "ok": true, "clusterId": id }))
 }
 
@@ -646,6 +1073,7 @@ fn remove_cluster(arg: &Value) -> Result<Value> {
         state.active_cluster_id = state.clusters.keys().next().cloned();
     }
     save_state(&state)?;
+    proxmux_cache_invalidate_cluster(&cluster_id);
     Ok(json!({ "ok": true }))
 }
 
@@ -657,6 +1085,7 @@ fn set_active_cluster(arg: &Value) -> Result<Value> {
     }
     state.active_cluster_id = Some(cluster_id);
     save_state(&state)?;
+    proxmux_cache_debug_log("active cluster changed");
     Ok(json!({ "ok": true }))
 }
 
@@ -677,8 +1106,8 @@ struct DraftClusterArg {
     #[serde(default)]
     api_user: String,
     #[serde(default)]
-    api_token_id: String,
-    api_secret: String,
+    totp_code: String,
+    password: String,
     #[serde(default)]
     failover_urls: Vec<String>,
     #[serde(default)]
@@ -687,10 +1116,10 @@ struct DraftClusterArg {
 
 fn test_connection_draft(arg: &Value) -> Result<Value> {
     let d: DraftClusterArg = serde_json::from_value(arg.clone()).context("parse testConnectionDraft")?;
-    if d.api_secret.is_empty() {
+    if d.password.is_empty() {
         return Ok(json!({
             "ok": false,
-            "message": "API token secret is required."
+            "message": "Password is required."
         }));
     }
     let c = StoredCluster {
@@ -698,8 +1127,9 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
         name: String::new(),
         proxmox_url: normalize_base_url(&d.proxmox_url),
         api_user: d.api_user,
-        api_token_id: d.api_token_id,
-        api_secret_plain: Some(d.api_secret),
+        totp_code: d.totp_code,
+        api_token_id: String::new(),
+        api_secret_plain: Some(d.password),
         api_secret_encrypted: None,
         failover_urls: d.failover_urls,
         is_enabled: true,
@@ -709,14 +1139,12 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
 }
 
 fn test_cluster_core(c: &StoredCluster) -> Result<Value> {
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
     if primary.is_empty() {
         return Ok(json!({ "ok": false, "message": "Proxmox URL is empty." }));
     }
-    match with_failover(&primary, &c.failover_urls, |base| try_fetch_version(&client, base, &auth)) {
+    match with_failover(&primary, &c.failover_urls, |base| try_fetch_version(&client, base, c)) {
         Ok(data) => Ok(json!({
             "ok": true,
             "version": data,
@@ -736,139 +1164,125 @@ fn fetch_resources(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
-    let client = http_client(c.allow_insecure_tls)?;
-    let primary = normalize_base_url(&c.proxmox_url);
+    let cache_key = proxmux_cache_key_for_fetch_resources(&cluster_id);
+    proxmux_cached_json(cache_key, ProxmuxCacheBucket::FetchResources, || {
+        let client = http_client(c.allow_insecure_tls)?;
+        let primary = normalize_base_url(&c.proxmox_url);
 
-    let data = with_failover(&primary, &c.failover_urls, |base| {
-        let url = format!("{}/api2/json/cluster/resources", normalize_base_url(base));
-        let response = client
-            .get(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("GET {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{status}: {text}");
-        }
-        let body: Value = response.json().context("parse resources")?;
-        body.get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data"))
-    })?;
+        let data = with_failover(&primary, &c.failover_urls, |base| {
+            pve_get_json_data(&client, c, base, "/api2/json/cluster/resources")
+        })?;
 
-    let arr = data.as_array().cloned().unwrap_or_default();
-    let mut filtered: Vec<Value> = arr
-        .into_iter()
-        .filter(|row| {
-            row.get("type")
-                .and_then(|t| t.as_str())
-                .is_some_and(|t| matches!(t, "node" | "qemu" | "lxc"))
-        })
-        .collect();
+        let arr = data.as_array().cloned().unwrap_or_default();
+        let mut filtered: Vec<Value> = arr
+            .into_iter()
+            .filter(|row| {
+                row.get("type")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| matches!(t, "node" | "qemu" | "lxc"))
+            })
+            .collect();
 
-    let mut unique_nodes: HashSet<String> = HashSet::new();
-    for row in &filtered {
-        if let Some(n) = row.get("node").and_then(|x| x.as_str()) {
-            if !n.is_empty() {
-                unique_nodes.insert(n.to_string());
-            }
-        }
-    }
-
-    let mut node_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
-    for node in &unique_nodes {
-        let path = format!("/api2/json/nodes/{node}/network");
-        let pair = if let Some(net_data) =
-            try_pve_get_json_data_optional(&client, &auth, &primary, &c.failover_urls, &path)
-        {
-            let (v4s, v6s) = collect_ips_from_node_network(&net_data);
-            (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
-        } else {
-            (None, None)
-        };
-        node_ip_cache.insert(node.clone(), pair);
-    }
-
-    let mut guest_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
-    for row in &filtered {
-        let typ = row.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if typ != "qemu" && typ != "lxc" {
-            continue;
-        }
-        let status = row
-            .get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_lowercase();
-        if status != "running" {
-            continue;
-        }
-        let Some(node) = row.get("node").and_then(|n| n.as_str()) else {
-            continue;
-        };
-        let Some(map) = row.as_object() else {
-            continue;
-        };
-        let Some(vmid) = map_vmid_string(map) else {
-            continue;
-        };
-        let cache_key = format!("{typ}:{node}:{vmid}");
-        if guest_ip_cache.contains_key(&cache_key) {
-            continue;
-        }
-        let path = if typ == "qemu" {
-            format!("/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
-        } else {
-            format!("/api2/json/nodes/{node}/lxc/{vmid}/interfaces")
-        };
-        let pair = if let Some(guest_data) =
-            try_pve_get_json_data_optional(&client, &auth, &primary, &c.failover_urls, &path)
-        {
-            let (v4s, v6s) = if typ == "qemu" {
-                collect_ips_from_qemu_agent(&guest_data)
-            } else {
-                collect_ips_from_lxc_interfaces(&guest_data)
-            };
-            (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
-        } else {
-            (None, None)
-        };
-        guest_ip_cache.insert(cache_key, pair);
-    }
-
-    for row in &mut filtered {
-        let Value::Object(map) = row else {
-            continue;
-        };
-        let typ = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        let node = map.get("node").and_then(|n| n.as_str()).unwrap_or("");
-
-        let (ip4, ip6) = match typ {
-            "node" => node_ip_cache.get(node).cloned().unwrap_or((None, None)),
-            "qemu" | "lxc" => {
-                let vmid = map_vmid_string(map);
-                if let Some(vmid) = vmid {
-                    let k = format!("{typ}:{node}:{vmid}");
-                    guest_ip_cache.get(&k).cloned().unwrap_or((None, None))
-                } else {
-                    (None, None)
+        let mut unique_nodes: HashSet<String> = HashSet::new();
+        for row in &filtered {
+            if let Some(n) = row.get("node").and_then(|x| x.as_str()) {
+                if !n.is_empty() {
+                    unique_nodes.insert(n.to_string());
                 }
             }
-            _ => (None, None),
-        };
-        if let Some(s) = ip4 {
-            map.insert("ip4".to_string(), json!(s));
         }
-        if let Some(s) = ip6 {
-            map.insert("ip6".to_string(), json!(s));
-        }
-    }
 
-    Ok(json!({ "ok": true, "resources": filtered }))
+        let mut node_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+        for node in &unique_nodes {
+            let path = format!("/api2/json/nodes/{node}/network");
+            let pair = if let Some(net_data) =
+                try_pve_get_json_data_optional(&client, c, &primary, &c.failover_urls, &path)
+            {
+                let (v4s, v6s) = collect_ips_from_node_network(&net_data);
+                (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
+            } else {
+                (None, None)
+            };
+            node_ip_cache.insert(node.clone(), pair);
+        }
+
+        let mut guest_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+        for row in &filtered {
+            let typ = row.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if typ != "qemu" && typ != "lxc" {
+                continue;
+            }
+            let status = row
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if status != "running" {
+                continue;
+            }
+            let Some(node) = row.get("node").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            let Some(map) = row.as_object() else {
+                continue;
+            };
+            let Some(vmid) = map_vmid_string(map) else {
+                continue;
+            };
+            let cache_key = format!("{typ}:{node}:{vmid}");
+            if guest_ip_cache.contains_key(&cache_key) {
+                continue;
+            }
+            let path = if typ == "qemu" {
+                format!("/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
+            } else {
+                format!("/api2/json/nodes/{node}/lxc/{vmid}/interfaces")
+            };
+            let pair = if let Some(guest_data) =
+                try_pve_get_json_data_optional(&client, c, &primary, &c.failover_urls, &path)
+            {
+                let (v4s, v6s) = if typ == "qemu" {
+                    collect_ips_from_qemu_agent(&guest_data)
+                } else {
+                    collect_ips_from_lxc_interfaces(&guest_data)
+                };
+                (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
+            } else {
+                (None, None)
+            };
+            guest_ip_cache.insert(cache_key, pair);
+        }
+
+        for row in &mut filtered {
+            let Value::Object(map) = row else {
+                continue;
+            };
+            let typ = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let node = map.get("node").and_then(|n| n.as_str()).unwrap_or("");
+
+            let (ip4, ip6) = match typ {
+                "node" => node_ip_cache.get(node).cloned().unwrap_or((None, None)),
+                "qemu" | "lxc" => {
+                    let vmid = map_vmid_string(map);
+                    if let Some(vmid) = vmid {
+                        let k = format!("{typ}:{node}:{vmid}");
+                        guest_ip_cache.get(&k).cloned().unwrap_or((None, None))
+                    } else {
+                        (None, None)
+                    }
+                }
+                _ => (None, None),
+            };
+            if let Some(s) = ip4 {
+                map.insert("ip4".to_string(), json!(s));
+            }
+            if let Some(s) = ip6 {
+                map.insert("ip6".to_string(), json!(s));
+            }
+        }
+
+        Ok(json!({ "ok": true, "resources": filtered }))
+    })
 }
 
 /// Actions allowed for `POST .../status/{action}`. Unknown values are rejected before any HTTP call.
@@ -922,7 +1336,7 @@ fn normalize_guest_type(raw: &str) -> Result<&'static str> {
 fn pve_error_hint(status: u16, body: &str) -> String {
     if status == 403 {
         return format!(
-            "Permission denied (HTTP 403). Ensure the API token has power-management rights for this guest. {body}"
+            "Permission denied (HTTP 403). Ensure this account has power-management rights for this guest. {body}"
         );
     }
     format!("HTTP {status}: {body}")
@@ -962,32 +1376,18 @@ fn guest_status(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
-    let client = http_client(c.allow_insecure_tls)?;
-    let primary = normalize_base_url(&c.proxmox_url);
+    let cache_key = proxmux_cache_key_for_guest_status(&cluster_id, &node, typ, &vmid);
+    proxmux_cached_json(cache_key, ProxmuxCacheBucket::GuestStatus, || {
+        let client = http_client(c.allow_insecure_tls)?;
+        let primary = normalize_base_url(&c.proxmox_url);
 
-    let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/status/current");
-    let data = with_failover(&primary, &c.failover_urls, |base| {
-        let url = format!("{}{}", normalize_base_url(base), path_tail);
-        let response = client
-            .get(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("GET {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
-        let body: Value = response.json().context("parse guest status JSON")?;
-        body.get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data in guest status response"))
-    })?;
+        let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/status/current");
+        let data = with_failover(&primary, &c.failover_urls, |base| {
+            pve_get_json_data(&client, c, base, &path_tail)
+        })?;
 
-    Ok(json!({ "ok": true, "data": data }))
+        Ok(json!({ "ok": true, "data": data }))
+    })
 }
 
 fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
@@ -1010,29 +1410,12 @@ fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/spiceproxy");
     let data = with_failover(&primary, &c.failover_urls, |base| {
-        let url = format!("{}{}", normalize_base_url(base), path_tail);
-        let response = client
-            .post(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("POST {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
-        let body: Value = response.json().context("parse spiceproxy JSON")?;
-        body.get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data in spiceproxy response"))
+        pve_post_json_data(&client, c, base, &path_tail, &[])
     })?;
 
     Ok(json!({ "ok": true, "data": data }))
@@ -1058,35 +1441,18 @@ fn fetch_qemu_vnc_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/vncproxy");
-    let (api_origin, data) = with_failover(&primary, &c.failover_urls, |base| {
+    let (api_origin, data, auth_cookie) = with_failover(&primary, &c.failover_urls, |base| {
         let norm = normalize_base_url(base);
-        let url = format!("{norm}{path_tail}");
-        let response = client
-            .post(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("POST {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
-        let body: Value = response.json().context("parse vncproxy JSON")?;
-        let data = body
-            .get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data in vncproxy response"))?;
-        Ok((norm, data))
+        let data = pve_post_json_data(&client, c, &norm, &path_tail, &[])?;
+        let auth = session_auth_for_base(&client, c, &norm, false)?;
+        Ok((norm, data, auth.cookie_header))
     })?;
 
-    Ok(json!({ "ok": true, "apiOrigin": api_origin, "authHeader": auth, "data": data }))
+    Ok(json!({ "ok": true, "apiOrigin": api_origin, "authCookie": auth_cookie, "data": data }))
 }
 
 fn fetch_lxc_term_proxy(arg: &Value) -> Result<Value> {
@@ -1109,36 +1475,19 @@ fn fetch_lxc_term_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let api_user = c.api_user.clone();
     let path_tail = format!("/api2/json/nodes/{node}/lxc/{vmid}/termproxy");
-    let (api_origin, data) = with_failover(&primary, &c.failover_urls, |base| {
+    let (api_origin, data, auth_cookie) = with_failover(&primary, &c.failover_urls, |base| {
         let norm = normalize_base_url(base);
-        let url = format!("{norm}{path_tail}");
-        let response = client
-            .post(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("POST {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
-        let body: Value = response.json().context("parse termproxy JSON")?;
-        let data = body
-            .get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data in termproxy response"))?;
-        Ok((norm, data))
+        let data = pve_post_json_data(&client, c, &norm, &path_tail, &[])?;
+        let auth = session_auth_for_base(&client, c, &norm, false)?;
+        Ok((norm, data, auth.cookie_header))
     })?;
 
-    Ok(json!({ "ok": true, "apiOrigin": api_origin, "apiUser": api_user, "authHeader": auth, "data": data }))
+    Ok(json!({ "ok": true, "apiOrigin": api_origin, "apiUser": api_user, "authCookie": auth_cookie, "data": data }))
 }
 
 /// Matches PROXMUX-Manager `isSpiceEnabled`: SPICE is meaningful when display uses QXL, virtio-gpu, or explicit spice.
@@ -1171,29 +1520,12 @@ fn qemu_spice_capable(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/config");
     let data = with_failover(&primary, &c.failover_urls, |base| {
-        let url = format!("{}{}", normalize_base_url(base), path_tail);
-        let response = client
-            .get(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("GET {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
-        let body: Value = response.json().context("parse qemu config JSON")?;
-        body.get("data")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing data in qemu config response"))
+        pve_get_json_data(&client, c, base, &path_tail)
     })?;
 
     let spice_capable = spice_capable_from_qemu_config_data(&data);
@@ -1232,8 +1564,6 @@ fn guest_power(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let secret = read_api_secret(c)?;
-    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
     let client = http_client(c.allow_insecure_tls)?;
     let primary = normalize_base_url(&c.proxmox_url);
 
@@ -1241,20 +1571,11 @@ fn guest_power(arg: &Value) -> Result<Value> {
         "/api2/json/nodes/{node}/{typ}/{vmid}/status/{action_trim}"
     );
     with_failover(&primary, &c.failover_urls, |base| {
-        let url = format!("{}{}", normalize_base_url(base), path_tail);
-        let response = client
-            .post(&url)
-            .header("Authorization", &auth)
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("POST {url}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().unwrap_or_default();
-            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
-        }
+        pve_post_json_data(&client, c, base, &path_tail, &[])?;
         Ok(())
     })?;
+
+    proxmux_cache_invalidate_after_guest_power(&cluster_id, &node, typ, &vmid);
 
     Ok(json!({ "ok": true }))
 }
@@ -1336,6 +1657,7 @@ fn toggle_proxmux_favorite(arg: &Value) -> Result<Value> {
         state.favorites.insert(cluster_id.clone(), updated.clone());
     }
     save_state(&state)?;
+    proxmux_cache_invalidate_after_toggle_favorite(&cluster_id);
     Ok(json!({ "ok": true, "favorites": updated }))
 }
 
@@ -1349,9 +1671,114 @@ mod tests {
     }
 
     #[test]
-    fn pve_api_token_header_format() {
-        let h = pve_api_token_header("root@pam", "tok", "secret");
-        assert_eq!(h, "PVEAPIToken=root@pam!tok=secret");
+    fn parse_ticket_session_auth_extracts_cookie_and_csrf() {
+        let body = json!({
+            "data": {
+                "ticket": "PVE:user:abc",
+                "CSRFPreventionToken": "csrf-123"
+            }
+        });
+        let auth = parse_ticket_session_auth(&body).expect("ticket auth should parse");
+        assert_eq!(auth.cookie_header, "PVEAuthCookie=PVE:user:abc");
+        assert_eq!(auth.csrf_prevention_token, "csrf-123");
+    }
+
+    #[test]
+    fn parse_ticket_session_auth_requires_ticket() {
+        let body = json!({
+            "data": {
+                "CSRFPreventionToken": "csrf-123"
+            }
+        });
+        let err = parse_ticket_session_auth(&body).expect_err("missing ticket must fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("missing ticket in access/ticket response"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn legacy_api_user_from_token_id_extracts_user() {
+        assert_eq!(
+            legacy_api_user_from_token_id("root@pam!mytoken"),
+            Some("root@pam".to_string())
+        );
+        assert_eq!(
+            legacy_api_user_from_token_id("  alice@pve!ops  "),
+            Some("alice@pve".to_string())
+        );
+        assert_eq!(legacy_api_user_from_token_id(""), None);
+        assert_eq!(legacy_api_user_from_token_id("!tok"), None);
+    }
+
+    #[test]
+    fn migrate_legacy_token_clusters_drops_secret_and_preserves_metadata() {
+        let mut state = ProxmuxState::default();
+        state.active_cluster_id = Some("lab".to_string());
+        state.clusters.insert(
+            "lab".to_string(),
+            StoredCluster {
+                id: "lab".to_string(),
+                name: "Lab".to_string(),
+                proxmox_url: "https://pve.example.com:8006".to_string(),
+                api_user: String::new(),
+                totp_code: String::new(),
+                api_token_id: "root@pam!legacy".to_string(),
+                api_secret_plain: Some("legacy-token-secret".to_string()),
+                api_secret_encrypted: None,
+                failover_urls: vec!["https://pve2.example.com:8006".to_string()],
+                is_enabled: true,
+                allow_insecure_tls: true,
+            },
+        );
+        state.favorites.insert(
+            "lab".to_string(),
+            vec!["node:pve".to_string(), "qemu:pve:100".to_string()],
+        );
+
+        let changed = migrate_legacy_token_clusters(&mut state);
+        assert_eq!(changed, 1);
+
+        let migrated = state.clusters.get("lab").expect("cluster must exist");
+        assert_eq!(migrated.api_user, "root@pam");
+        assert_eq!(migrated.api_token_id, "root@pam!legacy");
+        assert!(migrated.api_secret_plain.is_none());
+        assert!(migrated.api_secret_encrypted.is_none());
+        assert_eq!(migrated.failover_urls, vec!["https://pve2.example.com:8006".to_string()]);
+        assert!(migrated.allow_insecure_tls);
+        assert_eq!(state.active_cluster_id.as_deref(), Some("lab"));
+        assert_eq!(
+            state.favorites.get("lab").cloned().unwrap_or_default(),
+            vec!["node:pve".to_string(), "qemu:pve:100".to_string()]
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_token_clusters_skips_non_legacy_entries() {
+        let mut state = ProxmuxState::default();
+        state.clusters.insert(
+            "new".to_string(),
+            StoredCluster {
+                id: "new".to_string(),
+                name: "New".to_string(),
+                proxmox_url: "https://pve.example.com:8006".to_string(),
+                api_user: "root@pam".to_string(),
+                totp_code: "123456".to_string(),
+                api_token_id: String::new(),
+                api_secret_plain: Some("real-password".to_string()),
+                api_secret_encrypted: None,
+                failover_urls: vec![],
+                is_enabled: true,
+                allow_insecure_tls: false,
+            },
+        );
+
+        let changed = migrate_legacy_token_clusters(&mut state);
+        assert_eq!(changed, 0);
+        let cluster = state.clusters.get("new").expect("cluster must exist");
+        assert_eq!(cluster.api_user, "root@pam");
+        assert_eq!(cluster.api_secret_plain.as_deref(), Some("real-password"));
     }
 
     #[test]
@@ -1461,5 +1888,169 @@ mod tests {
             normalize_ip_candidate("192.0.2.4/24").as_deref(),
             Some("192.0.2.4")
         );
+    }
+
+    #[test]
+    fn cache_key_for_fetch_resources_includes_cluster() {
+        assert_eq!(
+            proxmux_cache_key_for_fetch_resources("homelab"),
+            "fetchResources:homelab"
+        );
+    }
+
+    #[test]
+    fn cache_key_for_guest_status_is_stable() {
+        assert_eq!(
+            proxmux_cache_key_for_guest_status("a", "pve1", "qemu", "100"),
+            "guestStatus:a:pve1:qemu:100"
+        );
+    }
+
+    #[test]
+    fn proxmux_ttl_matrix_defaults_are_balanced() {
+        assert_eq!(
+            proxmux_cache_ttl_ms(ProxmuxCacheBucket::FetchResources),
+            9_000
+        );
+        assert_eq!(
+            proxmux_cache_ttl_ms(ProxmuxCacheBucket::GuestStatus),
+            5_000
+        );
+    }
+
+    #[test]
+    fn proxmux_cache_entry_freshness_checks_expiry() {
+        let entry = ProxmuxCacheEntry {
+            value: json!({"ok": true}),
+            cached_at_ms: 1_000,
+            expires_at_ms: 2_000,
+        };
+        assert!(entry.is_fresh_at(1_999));
+        assert!(!entry.is_fresh_at(2_000));
+    }
+
+    #[test]
+    fn proxmux_cache_state_invalidation_by_prefix_removes_matching_keys() {
+        let mut state = ProxmuxCacheState::default();
+        state.entries.insert(
+            "fetchResources:a".to_string(),
+            ProxmuxCacheEntry {
+                value: json!({"ok": true}),
+                cached_at_ms: 1,
+                expires_at_ms: 2,
+            },
+        );
+        state.entries.insert(
+            "guestStatus:a:n1:qemu:100".to_string(),
+            ProxmuxCacheEntry {
+                value: json!({"ok": true}),
+                cached_at_ms: 1,
+                expires_at_ms: 2,
+            },
+        );
+        state.entries.insert(
+            "fetchResources:b".to_string(),
+            ProxmuxCacheEntry {
+                value: json!({"ok": true}),
+                cached_at_ms: 1,
+                expires_at_ms: 2,
+            },
+        );
+        let removed = state.invalidate_prefix("fetchResources:a");
+        assert_eq!(removed, 1);
+        assert!(state.entries.contains_key("guestStatus:a:n1:qemu:100"));
+        assert!(state.entries.contains_key("fetchResources:b"));
+        assert!(!state.entries.contains_key("fetchResources:a"));
+    }
+
+    #[test]
+    fn guest_power_invalidation_removes_targeted_keys_only() {
+        let (lock, _) = proxmux_cache_sync();
+        {
+            let mut state = lock.lock().expect("cache lock");
+            state.entries.clear();
+            state.in_flight.clear();
+            state.entries.insert(
+                "fetchResources:a".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+            state.entries.insert(
+                "guestStatus:a:n1:qemu:100".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+            state.entries.insert(
+                "guestStatus:a:n1:qemu:200".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+            state.entries.insert(
+                "fetchResources:b".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+        }
+
+        proxmux_cache_invalidate_after_guest_power("a", "n1", "qemu", "100");
+
+        let state = lock.lock().expect("cache lock");
+        assert!(!state.entries.contains_key("fetchResources:a"));
+        assert!(!state.entries.contains_key("guestStatus:a:n1:qemu:100"));
+        assert!(state.entries.contains_key("guestStatus:a:n1:qemu:200"));
+        assert!(state.entries.contains_key("fetchResources:b"));
+    }
+
+    #[test]
+    fn toggle_favorite_invalidation_removes_only_cluster_resources_cache() {
+        let (lock, _) = proxmux_cache_sync();
+        {
+            let mut state = lock.lock().expect("cache lock");
+            state.entries.clear();
+            state.in_flight.clear();
+            state.entries.insert(
+                "fetchResources:a".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+            state.entries.insert(
+                "guestStatus:a:n1:qemu:100".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+            state.entries.insert(
+                "fetchResources:b".to_string(),
+                ProxmuxCacheEntry {
+                    value: json!({"ok": true}),
+                    cached_at_ms: 1,
+                    expires_at_ms: 10_000,
+                },
+            );
+        }
+
+        proxmux_cache_invalidate_after_toggle_favorite("a");
+
+        let state = lock.lock().expect("cache lock");
+        assert!(!state.entries.contains_key("fetchResources:a"));
+        assert!(state.entries.contains_key("guestStatus:a:n1:qemu:100"));
+        assert!(state.entries.contains_key("fetchResources:b"));
     }
 }
