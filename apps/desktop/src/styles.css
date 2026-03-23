@@ -1333,9 +1333,6 @@ body,
   gap: var(--space-1);
 }
 
-.host-item-main {
-  font-weight: 700;
-}
 
 .host-user-badge {
   margin-left: auto;
@@ -6188,7 +6185,7 @@ input.input[type="checkbox"] {
   vertical-align: middle;
 }
 
-/* Match host list primary line (.host-item-main + .host-item sizing) */
+/* Match host list primary line (.host-item sizing) */
 .proxmux-sidebar-row-main {
   font-size: inherit;
   font-weight: 700;
