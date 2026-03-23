@@ -12,16 +12,18 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
 
+type ConnHandles = Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>;
+
 /// Tracks the accept-loop task handle and all per-connection task handles for a running proxy.
 struct ProxyEntry {
-    accept_handle: tokio::task::JoinHandle<()>,
-    conn_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    accept_loop: tokio::task::JoinHandle<()>,
+    conn_handles: ConnHandles,
 }
 
-type JoinMap = Arc<Mutex<HashMap<String, ProxyEntry>>>;
+type ProxyMap = Arc<Mutex<HashMap<String, ProxyEntry>>>;
 
-fn proxy_tasks() -> &'static JoinMap {
-    static MAP: std::sync::OnceLock<JoinMap> = std::sync::OnceLock::new();
+fn proxy_tasks() -> &'static ProxyMap {
+    static MAP: std::sync::OnceLock<ProxyMap> = std::sync::OnceLock::new();
     MAP.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
 }
 
@@ -92,7 +94,7 @@ async fn proxy_one_browser_connection(
         if req.uri().path() != expected_path.as_str() {
             let err = http::Response::builder()
                 .status(http::StatusCode::FORBIDDEN)
-                .body(Some("Forbidden".to_string()))
+                .body(Some("Forbidden: invalid proxy token".to_string()))
                 .expect("response");
             return Err(err);
         }
@@ -186,22 +188,21 @@ pub async fn proxmux_ws_proxy_start(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let proxy_id = uuid::Uuid::new_v4().to_string();
-    let path_token = format!("/{proxy_id}");
-    let local_ws_url = format!("ws://127.0.0.1:{port}{path_token}");
+    let expected_path = format!("/{proxy_id}");
+    let local_ws_url = format!("ws://127.0.0.1:{port}{expected_path}");
 
     let upstream = upstream_wss_url.clone();
-    let conn_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    let conn_handles: ConnHandles = Arc::new(Mutex::new(Vec::new()));
     let conn_handles_for_loop = conn_handles.clone();
 
-    let accept_handle = tokio::spawn(async move {
+    let accept_loop = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
                     let upstream = upstream.clone();
                     let auth = auth_header.clone();
                     let cookie = auth_cookie.clone();
-                    let path = path_token.clone();
+                    let path = expected_path.clone();
                     let conn_handle = tokio::spawn(proxy_one_browser_connection(
                         stream,
                         path,
@@ -211,7 +212,6 @@ pub async fn proxmux_ws_proxy_start(
                         cookie,
                     ));
                     let mut guard = conn_handles_for_loop.lock().expect("conn handles lock");
-                    // Prune finished task handles to avoid unbounded growth.
                     guard.retain(|h| !h.is_finished());
                     guard.push(conn_handle);
                 }
@@ -226,7 +226,7 @@ pub async fn proxmux_ws_proxy_start(
     proxy_tasks()
         .lock()
         .expect("proxy map lock")
-        .insert(proxy_id.clone(), ProxyEntry { accept_handle, conn_handles });
+        .insert(proxy_id.clone(), ProxyEntry { accept_loop, conn_handles });
 
     Ok(ProxmuxWsProxyStartResult {
         proxy_id,
@@ -241,9 +241,8 @@ pub fn proxmux_ws_proxy_stop(proxy_id: String) -> Result<(), String> {
         return Err("proxyId is required".to_string());
     }
     if let Some(entry) = proxy_tasks().lock().expect("proxy map lock").remove(&id) {
-        entry.accept_handle.abort();
-        let handles = entry.conn_handles.lock().expect("conn handles lock");
-        for h in handles.iter() {
+        entry.accept_loop.abort();
+        for h in entry.conn_handles.lock().expect("conn handles lock").drain(..) {
             h.abort();
         }
     }

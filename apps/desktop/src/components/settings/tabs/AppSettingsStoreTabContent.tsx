@@ -164,10 +164,10 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 description="Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as objects."
               />
             </p>
-            <label className="field field-span-2">
+            <label className="field">
               <span className="field-label">Master passphrase (Keychain fallback)</span>
               <input
-                className="input"
+                className="input settings-store-master-passphrase-input"
                 type="password"
                 value={storePassphrase}
                 onChange={(event) => setStorePassphrase(event.target.value)}

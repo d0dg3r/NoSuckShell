@@ -1,4 +1,13 @@
-import type { AutoArrangeMode, DensityProfile, LayoutMode, SplitRatioPreset, TerminalFontPreset } from "../components/AppSettingsPanel";
+import type {
+  AutoArrangeMode,
+  DensityProfile,
+  FrameModePreset,
+  LayoutMode,
+  ListTonePreset,
+  SplitRatioPreset,
+  TerminalFontPreset,
+  UiFontPreset,
+} from "../components/AppSettingsPanel";
 import type { FileExportArchiveFormat, FileExportDestMode } from "../components/settings/app-settings-types";
 
 export const SIDEBAR_MIN_WIDTH = 240;
@@ -36,6 +45,27 @@ export const FILE_EXPORT_PATH_KEY_STORAGE_KEY = "nosuckshell.fileExport.pathKey"
 export const FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY = "nosuckshell.fileExport.archiveFormat";
 /** Must match CSS breakpoint for stacked-mobile shell */
 export const MOBILE_STACKED_MEDIA = "(max-width: 900px)";
+
+/** Defaults for Appearance → Visual style (matches first-run / empty-storage behavior in App.tsx). */
+export const DEFAULT_VISUAL_STYLE: Readonly<{
+  densityProfile: DensityProfile;
+  uiDensityOffset: number;
+  uiFontPreset: UiFontPreset;
+  terminalFontPreset: TerminalFontPreset;
+  terminalFontOffset: number;
+  listTonePreset: ListTonePreset;
+  frameModePreset: FrameModePreset;
+  showFullPathInFilePaneTitle: boolean;
+}> = {
+  densityProfile: "balanced",
+  uiDensityOffset: 0,
+  uiFontPreset: "inter",
+  terminalFontPreset: "jetbrains-mono",
+  terminalFontOffset: 0,
+  listTonePreset: "subtle",
+  frameModePreset: "balanced",
+  showFullPathInFilePaneTitle: false,
+};
 
 export const SPLIT_RATIO_PRESET_VALUE: Record<SplitRatioPreset, number> = {
   "50-50": 0.5,

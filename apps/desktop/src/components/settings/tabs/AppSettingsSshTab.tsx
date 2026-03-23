@@ -59,7 +59,7 @@ export function AppSettingsSshTab({
   };
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack settings-stack--equal-cols settings-stack--ssh">
       <section className="settings-card">
         <header className="settings-card-head">
           <div className="settings-card-head-row">

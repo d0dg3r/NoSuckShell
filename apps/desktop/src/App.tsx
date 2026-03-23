@@ -66,10 +66,15 @@ import {
   AppSettingsPanel,
   type AppSettingsTab,
   type AutoArrangeMode,
+  type ConnectionSubTab,
   type DensityProfile,
   type FileExportArchiveFormat,
   type FileExportDestMode,
   type FrameModePreset,
+  type HelpAboutSubTab,
+  type IdentityStoreSubTab,
+  type IntegrationsSubTab,
+  type InterfaceSubTab,
   type LayoutMode,
   type ListTonePreset,
   type QuickConnectMode,
@@ -77,6 +82,7 @@ import {
   type SplitRatioPreset,
   type TerminalFontPreset,
   type UiFontPreset,
+  type WorkspaceSubTab,
 } from "./components/AppSettingsPanel";
 
 const LayoutCommandCenter = lazy(async () => {
@@ -171,6 +177,7 @@ import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
+  DEFAULT_VISUAL_STYLE,
   DENSITY_PROFILE_STORAGE_KEY,
   FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY,
   FILE_EXPORT_DEST_MODE_STORAGE_KEY,
@@ -411,7 +418,13 @@ export function App() {
   });
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("hosts");
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("connection");
+  const [connectionSubTab, setConnectionSubTab] = useState<ConnectionSubTab>("hosts");
+  const [workspaceSubTab, setWorkspaceSubTab] = useState<WorkspaceSubTab>("views");
+  const [integrationsSubTab, setIntegrationsSubTab] = useState<IntegrationsSubTab>("proxmux");
+  const [interfaceSubTab, setInterfaceSubTab] = useState<InterfaceSubTab>("appearance");
+  const [helpAboutSubTab, setHelpAboutSubTab] = useState<HelpAboutSubTab>("help");
+  const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
   const [keyboardShortcutChords, setKeyboardShortcutChords] = useState<Record<KeyboardShortcutCommandId, KeyChord>>(() =>
     mergeChordMap(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
   );
@@ -822,6 +835,18 @@ export function App() {
     }
     layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
+
+  const resetVisualStyle = useCallback(() => {
+    const d = DEFAULT_VISUAL_STYLE;
+    setDensityProfile(d.densityProfile);
+    setUiDensityOffset(d.uiDensityOffset);
+    setUiFontPreset(d.uiFontPreset);
+    setTerminalFontPreset(d.terminalFontPreset);
+    setTerminalFontOffset(d.terminalFontOffset);
+    setListTonePreset(d.listTonePreset);
+    setFrameModePreset(d.frameModePreset);
+    setShowFullPathInFilePaneTitle(d.showFullPathInFilePaneTitle);
+  }, []);
 
   const refreshLicensedPlugins = useCallback(async () => {
     try {
@@ -1245,7 +1270,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAppSettingsOpen || activeAppSettingsTab !== "ssh") {
+    if (!isAppSettingsOpen || activeAppSettingsTab !== "connection" || connectionSubTab !== "ssh") {
       return;
     }
     let cancelled = false;
@@ -1265,7 +1290,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isAppSettingsOpen, activeAppSettingsTab]);
+  }, [isAppSettingsOpen, activeAppSettingsTab, connectionSubTab]);
 
   const handleApplySshDirOverride = useCallback(async () => {
     setError("");
@@ -1786,14 +1811,15 @@ export function App() {
   const openHostSettingsForHost = useCallback(
     (alias: string) => {
       loadHostIntoSettingsEditor(alias);
-      setActiveAppSettingsTab("hosts");
+      setActiveAppSettingsTab("connection");
+      setConnectionSubTab("hosts");
       setIsAppSettingsOpen(true);
     },
     [loadHostIntoSettingsEditor],
   );
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "hosts") {
+    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
       return;
     }
     if (hosts.length === 0) {
@@ -1804,13 +1830,13 @@ export function App() {
     if (!valid) {
       loadHostIntoSettingsEditor(hosts[0].host);
     }
-  }, [activeAppSettingsTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
+  }, [activeAppSettingsTab, connectionSubTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "hosts") {
+    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
       clearPendingRemoveHostsTab();
     }
-  }, [activeAppSettingsTab, clearPendingRemoveHostsTab]);
+  }, [activeAppSettingsTab, connectionSubTab, clearPendingRemoveHostsTab]);
 
   useSessionOutputTrustListener({
     sessionsRef,
@@ -4195,7 +4221,8 @@ export function App() {
         break;
       case "pane.toggleRemoteFiles": {
         if (!fileWorkspacePluginEnabled) {
-          setActiveAppSettingsTab("plugins");
+          setActiveAppSettingsTab("integrations");
+          setIntegrationsSubTab("plugins");
           setIsAppSettingsOpen(true);
           break;
         }
@@ -4227,7 +4254,8 @@ export function App() {
       }
       case "pane.toggleLocalFiles": {
         if (!fileWorkspacePluginEnabled) {
-          setActiveAppSettingsTab("plugins");
+          setActiveAppSettingsTab("integrations");
+          setIntegrationsSubTab("plugins");
           setIsAppSettingsOpen(true);
           break;
         }
@@ -4445,7 +4473,8 @@ export function App() {
     },
     openSettingsKeyboardTab: () => {
       setIsAppSettingsOpen(true);
-      setActiveAppSettingsTab("keyboard");
+      setActiveAppSettingsTab("interface");
+      setInterfaceSubTab("keyboard");
     },
   };
 
@@ -5315,6 +5344,18 @@ export function App() {
           settingsModalPosition={settingsModalPosition}
           activeAppSettingsTab={activeAppSettingsTab}
           setActiveAppSettingsTab={setActiveAppSettingsTab}
+          connectionSubTab={connectionSubTab}
+          setConnectionSubTab={setConnectionSubTab}
+          workspaceSubTab={workspaceSubTab}
+          setWorkspaceSubTab={setWorkspaceSubTab}
+          integrationsSubTab={integrationsSubTab}
+          setIntegrationsSubTab={setIntegrationsSubTab}
+          interfaceSubTab={interfaceSubTab}
+          setInterfaceSubTab={setInterfaceSubTab}
+          helpAboutSubTab={helpAboutSubTab}
+          setHelpAboutSubTab={setHelpAboutSubTab}
+          identityStoreSubTab={identityStoreSubTab}
+          setIdentityStoreSubTab={setIdentityStoreSubTab}
           densityProfile={densityProfile}
           setDensityProfile={setDensityProfile}
           uiDensityOffset={uiDensityOffset}
@@ -5332,6 +5373,7 @@ export function App() {
           setFrameModePreset={setFrameModePreset}
           showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
           setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+          onResetVisualStyle={resetVisualStyle}
           fileExportDestMode={fileExportDestMode}
           setFileExportDestMode={setFileExportDestMode}
           fileExportPathKey={fileExportPathKey}

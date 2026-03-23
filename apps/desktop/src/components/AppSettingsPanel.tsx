@@ -1,9 +1,15 @@
 import type { CSSProperties } from "react";
-import { useState } from "react";
-import { APP_SETTINGS_TABS } from "./settings/app-settings-constants";
+import {
+  APP_SETTINGS_TABS,
+  CONNECTION_SUBTABS,
+  HELP_ABOUT_SUBTABS,
+  INTEGRATIONS_SUBTABS,
+  INTERFACE_SUBTABS,
+  WORKSPACE_SUBTABS,
+} from "./settings/app-settings-constants";
 import type { AppSettingsPanelProps } from "./settings/app-settings-panel-props";
-import type { IdentityStoreSubTab } from "./settings/app-settings-types";
 import { IdentityStoreSubtabs } from "./settings/IdentityStoreSubtabs";
+import { SettingsSubtabRow } from "./settings/SettingsSubtabRow";
 import { AppSettingsAboutTab } from "./settings/tabs/AppSettingsAboutTab";
 import { AppSettingsAppearanceTab } from "./settings/tabs/AppSettingsAppearanceTab";
 import { AppSettingsDataTab } from "./settings/tabs/AppSettingsDataTab";
@@ -21,11 +27,15 @@ import { AppSettingsViewsTab } from "./settings/tabs/AppSettingsViewsTab";
 export type {
   AppSettingsTab,
   AutoArrangeMode,
+  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
   FrameModePreset,
+  HelpAboutSubTab,
   IdentityStoreSubTab,
+  IntegrationsSubTab,
+  InterfaceSubTab,
   LayoutMode,
   ListTonePreset,
   QuickConnectMode,
@@ -33,6 +43,7 @@ export type {
   SplitRatioPreset,
   TerminalFontPreset,
   UiFontPreset,
+  WorkspaceSubTab,
 } from "./settings/app-settings-types";
 
 export type { AppSettingsPanelProps } from "./settings/app-settings-panel-props";
@@ -55,6 +66,18 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     settingsModalPosition,
     activeAppSettingsTab,
     setActiveAppSettingsTab,
+    connectionSubTab,
+    setConnectionSubTab,
+    workspaceSubTab,
+    setWorkspaceSubTab,
+    integrationsSubTab,
+    setIntegrationsSubTab,
+    interfaceSubTab,
+    setInterfaceSubTab,
+    helpAboutSubTab,
+    setHelpAboutSubTab,
+    identityStoreSubTab,
+    setIdentityStoreSubTab,
     densityProfile,
     setDensityProfile,
     uiDensityOffset,
@@ -72,6 +95,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setFrameModePreset,
     showFullPathInFilePaneTitle,
     setShowFullPathInFilePaneTitle,
+    onResetVisualStyle,
     fileExportDestMode,
     setFileExportDestMode,
     fileExportPathKey,
@@ -190,8 +214,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setProxmuxOpenWebConsolesInPane,
   } = props;
 
-  const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
-
   return (
     <div
       className={`app-settings-overlay ${settingsOpenMode === "docked" ? "is-docked" : ""}`}
@@ -236,6 +258,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             </button>
           </div>
         </header>
+        <div className="app-settings-modal-body">
         <div className="app-settings-tabs" role="tablist" aria-label="Settings sections">
           {APP_SETTINGS_TABS.map((tab) => (
             <button
@@ -255,11 +278,51 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             </button>
           ))}
         </div>
+        {activeAppSettingsTab === "connection" && (
+          <SettingsSubtabRow
+            ariaLabel="Connection sections"
+            tabs={CONNECTION_SUBTABS}
+            activeTab={connectionSubTab}
+            onSelect={setConnectionSubTab}
+          />
+        )}
         {activeAppSettingsTab === "store" && (
           <IdentityStoreSubtabs identityStoreSubTab={identityStoreSubTab} setIdentityStoreSubTab={setIdentityStoreSubTab} />
         )}
+        {activeAppSettingsTab === "workspace" && (
+          <SettingsSubtabRow
+            ariaLabel="Workspace sections"
+            tabs={WORKSPACE_SUBTABS}
+            activeTab={workspaceSubTab}
+            onSelect={setWorkspaceSubTab}
+          />
+        )}
+        {activeAppSettingsTab === "integrations" && (
+          <SettingsSubtabRow
+            ariaLabel="Integrations sections"
+            tabs={INTEGRATIONS_SUBTABS}
+            activeTab={integrationsSubTab}
+            onSelect={setIntegrationsSubTab}
+          />
+        )}
+        {activeAppSettingsTab === "interface" && (
+          <SettingsSubtabRow
+            ariaLabel="Interface sections"
+            tabs={INTERFACE_SUBTABS}
+            activeTab={interfaceSubTab}
+            onSelect={setInterfaceSubTab}
+          />
+        )}
+        {activeAppSettingsTab === "help" && (
+          <SettingsSubtabRow
+            ariaLabel="Help and about sections"
+            tabs={HELP_ABOUT_SUBTABS}
+            activeTab={helpAboutSubTab}
+            onSelect={setHelpAboutSubTab}
+          />
+        )}
         <div className="app-settings-content app-settings-panel-body">
-          {activeAppSettingsTab === "appearance" && (
+          {activeAppSettingsTab === "interface" && interfaceSubTab === "appearance" && (
             <AppSettingsAppearanceTab
               densityProfile={densityProfile}
               setDensityProfile={setDensityProfile}
@@ -278,9 +341,10 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setFrameModePreset={setFrameModePreset}
               showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
               setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+              onResetVisualStyle={onResetVisualStyle}
             />
           )}
-          {activeAppSettingsTab === "keyboard" && (
+          {activeAppSettingsTab === "interface" && interfaceSubTab === "keyboard" && (
             <AppSettingsKeyboardTab
               chordMap={keyboardShortcutChords}
               setChordMap={setKeyboardShortcutChords}
@@ -289,7 +353,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               suspendEscapeRef={keyboardShortcutSuspendEscapeRef}
             />
           )}
-          {activeAppSettingsTab === "layout" && (
+          {activeAppSettingsTab === "workspace" && workspaceSubTab === "layout" && (
             <AppSettingsLayoutTab
               isSidebarPinned={isSidebarPinned}
               setSidebarPinned={setSidebarPinned}
@@ -307,7 +371,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setQuickConnectAutoTrust={setQuickConnectAutoTrust}
             />
           )}
-          {activeAppSettingsTab === "files" && (
+          {activeAppSettingsTab === "workspace" && workspaceSubTab === "files" && (
             <AppSettingsFilesTab
               fileExportDestMode={fileExportDestMode}
               setFileExportDestMode={setFileExportDestMode}
@@ -319,7 +383,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setFilePaneSemanticNameColors={setFilePaneSemanticNameColors}
             />
           )}
-          {activeAppSettingsTab === "views" && (
+          {activeAppSettingsTab === "workspace" && workspaceSubTab === "views" && (
             <AppSettingsViewsTab
               sortedViewProfiles={sortedViewProfiles}
               selectedViewProfileIdInSettings={selectedViewProfileIdInSettings}
@@ -349,7 +413,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               backupMessage={backupMessage}
             />
           )}
-          {activeAppSettingsTab === "hosts" && (
+          {activeAppSettingsTab === "connection" && connectionSubTab === "hosts" && (
             <AppSettingsHostsTab
               hosts={hosts}
               selectedHostAlias={hostSettingsSelectedAlias}
@@ -377,7 +441,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               error={error}
             />
           )}
-          {activeAppSettingsTab === "ssh" && (
+          {activeAppSettingsTab === "connection" && connectionSubTab === "ssh" && (
             <AppSettingsSshTab
               setError={setError}
               setSshConfigRaw={setSshConfigRaw}
@@ -439,20 +503,21 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               removeStoreKey={removeStoreKey}
             />
           )}
-          {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}
-          {activeAppSettingsTab === "proxmux" && (
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "plugins" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "proxmux" && (
             <AppSettingsProxmuxTab
               openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
               setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
             />
           )}
-          {activeAppSettingsTab === "help" && (
+          {activeAppSettingsTab === "help" && helpAboutSubTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}
               shortcutCheatsheetLines={shortcutCheatsheetLines}
             />
           )}
-          {activeAppSettingsTab === "about" && <AppSettingsAboutTab />}
+          {activeAppSettingsTab === "help" && helpAboutSubTab === "about" && <AppSettingsAboutTab />}
+        </div>
         </div>
       </section>
     </div>

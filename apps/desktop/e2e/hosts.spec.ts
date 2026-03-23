@@ -15,7 +15,7 @@ test.describe("hosts", () => {
 
     await page.locator("section.add-host-modal").getByRole("button", { name: "Add host" }).click();
 
-    await expect(page.locator(".host-item-main").filter({ hasText: "e2e-test" })).toBeVisible({
+    await expect(page.locator(".proxmux-sidebar-row-main").filter({ hasText: "e2e-test" })).toBeVisible({
       timeout: 15_000,
     });
 
