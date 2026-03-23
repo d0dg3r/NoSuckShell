@@ -21,6 +21,41 @@ const LocalFilePane = lazy(async () => {
   return { default: m.LocalFilePane };
 });
 
+const WebPane = lazy(async () => {
+  const m = await import("./WebPane");
+  return { default: m.WebPane };
+});
+
+const ProxmoxQemuVncPane = lazy(async () => {
+  const m = await import("./ProxmoxQemuVncPane");
+  return { default: m.ProxmoxQemuVncPane };
+});
+
+const ProxmoxLxcTermPane = lazy(async () => {
+  const m = await import("./ProxmoxLxcTermPane");
+  return { default: m.ProxmoxLxcTermPane };
+});
+
+export type ProxmoxNativeConsolePanePayload =
+  | {
+      kind: "qemu-vnc";
+      clusterId: string;
+      node: string;
+      vmid: string;
+      paneTitle: string;
+      proxmoxBaseUrl: string;
+      allowInsecureTls?: boolean;
+    }
+  | {
+      kind: "lxc-term";
+      clusterId: string;
+      node: string;
+      vmid: string;
+      paneTitle: string;
+      proxmoxBaseUrl: string;
+      allowInsecureTls?: boolean;
+    };
+
 export type SplitPaneRendererBridge = {
   splitSlots: Array<string | null>;
   activePaneIndex: number;
@@ -60,10 +95,13 @@ export type SplitPaneRendererBridge = {
   isBroadcastModeEnabled: boolean;
   setBroadcastMode: (enabled: boolean) => void;
   visiblePaneSessionIds: string[];
+  /** Panes that accept terminal keyboard broadcast (excludes web iframe panes). */
+  broadcastEligibleVisiblePaneSessionIds: string[];
   broadcastTargets: Set<string>;
   terminalFontSize: number;
   terminalFontFamily: string;
   handleTerminalInput: (originSessionId: string, data: string) => void;
+  onSessionWorkingDirectoryChange: (sessionId: string, path: string) => void;
   connectLocalShellInPane: (paneIndex: number) => void | Promise<void>;
   logoTransparentSrc: string;
   splitNodeRefs: MutableRefObject<Record<string, HTMLDivElement | null>>;
@@ -81,6 +119,17 @@ export type SplitPaneRendererBridge = {
   semanticFileNameColors: boolean;
   /** When false, SFTP/local file browser toolbar and views are disabled (File workspace plugin). */
   fileWorkspacePluginEnabled: boolean;
+  /** When set, pane shows embedded web UI instead of terminal or file browser. */
+  webPanePayloadForPane: (paneIndex: number) => { url: string; title: string; allowInsecureTls?: boolean } | null;
+  /** PROXMUX pane-native QEMU noVNC or LXC terminal (ticket + WebSocket), when session kind matches. */
+  proxmoxNativeConsoleForPane: (paneIndex: number) => ProxmoxNativeConsolePanePayload | null;
+  /** Surface errors from the web pane (e.g. failed in-app webview window). */
+  onWebPaneOpenInAppWindowError?: (message: string) => void;
+  /** Proxmox console deep links need login first; same payload as the main-window assist banner. */
+  onWebPaneLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
+  /** When true, leaf pane roots register for scroll-into-view (vertical stack workspace). */
+  verticalStackScrollEnabled: boolean;
+  registerPaneScrollAnchor: (paneIndex: number, element: HTMLElement | null) => void;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -103,29 +152,46 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
       const canClosePane = b.paneOrder.length > 1;
       const isPaneBroadcastTarget = paneSessionId ? b.broadcastTargets.has(paneSessionId) : false;
       const isToolbarExpanded = b.expandedPaneToolbarIndices.has(paneIndex);
+      const eligible = b.broadcastEligibleVisiblePaneSessionIds;
       const allVisibleAlreadyTargeted =
         b.isBroadcastModeEnabled &&
-        b.visiblePaneSessionIds.length > 0 &&
-        b.visiblePaneSessionIds.every((sessionId) => b.broadcastTargets.has(sessionId));
+        eligible.length > 0 &&
+        eligible.every((sessionId) => b.broadcastTargets.has(sessionId));
+      const isPaneBroadcastEligible = Boolean(
+        paneSessionId && b.webPanePayloadForPane(paneIndex) === null && b.proxmoxNativeConsoleForPane(paneIndex) === null,
+      );
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
+      const activatePaneAndMaybeFocusTerminal = () => {
+        b.setActivePaneIndex(paneIndex);
+        if (paneSessionId) {
+          b.setActiveSession(paneSessionId);
+          b.requestTerminalFocus(paneSessionId);
+        }
+      };
       return (
         <div
           key={`pane-${paneIndex}`}
           data-pane-index={paneIndex}
+          ref={(element) => {
+            b.registerPaneScrollAnchor(paneIndex, b.verticalStackScrollEnabled ? element : null);
+          }}
           className={`split-pane ${b.activePaneIndex === paneIndex ? "is-focused" : ""} ${
             b.dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
           } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${
             isHoverDimmed ? "is-host-hover-dimmed" : ""
           } ${b.highlightedHostAlias ? "is-host-hovering" : ""}`}
           draggable={false}
-          onClick={() => {
-            b.setActivePaneIndex(paneIndex);
-            if (paneSessionId) {
-              b.setActiveSession(paneSessionId);
-              b.requestTerminalFocus(paneSessionId);
+          onClick={activatePaneAndMaybeFocusTerminal}
+          onMouseEnter={() => {
+            if (b.draggingKind !== null) {
+              return;
             }
+            if (!paneSessionId || paneFileView !== "terminal") {
+              return;
+            }
+            activatePaneAndMaybeFocusTerminal();
           }}
           onDragOverCapture={(event) => {
             event.preventDefault();
@@ -236,7 +302,11 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 {paneLabel.display}
               </span>
+            </div>
+            <div className="split-pane-toolbar-trailing">
+            <div className="split-pane-toolbar-expand-slot">
               <button
+                type="button"
                 className={`btn action-icon-btn pane-toolbar-btn pane-toolbar-expand-toggle ${
                   isToolbarExpanded ? "is-expanded" : ""
                 }`}
@@ -259,8 +329,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 <span aria-hidden="true">{isToolbarExpanded ? "▾" : "▸"}</span>
               </button>
-            </div>
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
+              <div className="split-pane-toolbar-group split-pane-toolbar-group-layout">
               <button
                 className="btn action-icon-btn pane-toolbar-btn pane-toolbar-btn-split"
                 title="Split pane left"
@@ -309,9 +378,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               >
                 <span className="split-icon split-icon-horizontal split-icon-horizontal-inverse" aria-hidden="true" />
               </button>
-            </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
-            <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
+              </div>
+              <span className="pane-toolbar-separator pane-toolbar-separator--expand-only" aria-hidden="true" />
+              <div className="split-pane-toolbar-group split-pane-toolbar-group-broadcast">
               <button
                 className={`btn action-icon-btn pane-toolbar-btn ${b.isBroadcastModeEnabled ? "is-broadcast-active" : ""}`}
                 title={
@@ -342,7 +411,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 }`}
                 title="Toggle pane target"
                 aria-label={`Toggle pane ${paneIndex + 1} broadcast target`}
-                disabled={!b.isBroadcastModeEnabled || !hasPaneSession}
+                disabled={!b.isBroadcastModeEnabled || !hasPaneSession || !isPaneBroadcastEligible}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -374,13 +443,40 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   <path d="M8 11.1l2.3-2.2M13.7 8.9l2.3 2.2M8.3 13.6h7.4" />
                 </svg>
               </button>
+              </div>
             </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-files">
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "terminal" ? (
+              {!hasPaneSession ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
-                  title="Browse remote files (SFTP)"
+                  title="Quick Connect — add a session, then browse files"
+                  aria-label="Quick Connect to add a session"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.quickConnect", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                  </svg>
+                </button>
+              ) : paneCtxKind === "ssh" && paneFileView === "terminal" ? (
+                <button
+                  type="button"
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title={
+                    b.fileWorkspacePluginEnabled
+                      ? "Browse remote files (SFTP)"
+                      : "Browse remote files (SFTP) — enable File workspace in Settings → Plugins"
+                  }
                   aria-label={`Browse remote files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
@@ -392,9 +488,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "ssh" && hasPaneSession && paneFileView === "remote" ? (
+              ) : paneCtxKind === "ssh" && paneFileView === "remote" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"
                   aria-label={`Return to terminal in pane ${paneIndex + 1}`}
@@ -409,11 +505,15 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "terminal" ? (
+              ) : paneCtxKind === "local" && paneFileView === "terminal" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
-                  title="Browse local files"
+                  title={
+                    b.fileWorkspacePluginEnabled
+                      ? "Browse local files"
+                      : "Browse local files — enable File workspace in Settings → Plugins"
+                  }
                   aria-label={`Browse local files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
@@ -425,9 +525,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M12 4.5l7.5 5.2v9.3a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V9.7L12 4.5z" fill="none" stroke="currentColor" strokeWidth="1.4" />
                   </svg>
                 </button>
-              ) : null}
-              {b.fileWorkspacePluginEnabled && paneCtxKind === "local" && hasPaneSession && paneFileView === "local" ? (
+              ) : paneCtxKind === "local" && paneFileView === "local" ? (
                 <button
+                  type="button"
                   className="btn action-icon-btn pane-toolbar-btn"
                   title="Back to terminal"
                   aria-label={`Return to terminal in pane ${paneIndex + 1}`}
@@ -442,9 +542,30 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     <path d="M7.5 9.5h9M7.5 12h6" stroke="currentColor" strokeWidth="1.2" />
                   </svg>
                 </button>
-              ) : null}
+              ) : paneCtxKind === "web" ? null : (
+                <button
+                  type="button"
+                  className="btn action-icon-btn pane-toolbar-btn"
+                  title="Browse files"
+                  aria-label="Browse files"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.handleContextAction("pane.toggleRemoteFiles", paneIndex);
+                  }}
+                >
+                  <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M4 6.5h7l1 1.5h8V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V6.5z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
-            <span className="pane-toolbar-separator" aria-hidden="true" />
+            <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
             <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
               <button
                 className="btn action-icon-btn pane-toolbar-btn"
@@ -478,67 +599,129 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 </svg>
               </button>
             </div>
-          </div>
-          {paneSessionId ? (
-            paneFileView === "remote" && remoteSpec ? (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
-              >
-                <RemoteFilePane
-                  paneIndex={paneIndex}
-                  spec={remoteSpec}
-                  getExportDestPath={b.getFileExportDestPath}
-                  archiveFormat={b.fileExportArchiveFormat}
-                  onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
-                  onFilePaneTitleChange={b.onFilePaneTitleChange}
-                  semanticFileNameColors={b.semanticFileNameColors}
-                />
-              </Suspense>
-            ) : paneFileView === "local" ? (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
-              >
-                <LocalFilePane
-                  paneIndex={paneIndex}
-                  onPathChange={(pathKey) => b.onLocalFilePanePathChange(paneIndex, pathKey)}
-                  getExportDestPath={b.getFileExportDestPath}
-                  archiveFormat={b.fileExportArchiveFormat}
-                  onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
-                  onFilePaneTitleChange={b.onFilePaneTitleChange}
-                  semanticFileNameColors={b.semanticFileNameColors}
-                />
-              </Suspense>
-            ) : (
-              <Suspense
-                fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
-              >
-                <TerminalPane
-                  sessionId={paneSessionId}
-                  onUserInput={b.handleTerminalInput}
-                  fontSize={b.terminalFontSize}
-                  fontFamily={b.terminalFontFamily}
-                />
-              </Suspense>
-            )
-          ) : (
-            <div className="empty-pane split-empty-pane">
-              <p className="split-empty-pane-copy">One click and we both get what we want</p>
-              <button
-                type="button"
-                className="split-empty-pane-logo-btn"
-                title="Open local terminal in this pane"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void b.connectLocalShellInPane(paneIndex);
-                }}
-              >
-                <img src={b.logoTransparentSrc} alt="Open local terminal in this pane" className="split-empty-pane-image" />
-              </button>
-              <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
-                Or drop that host right here - I&apos;m waiting
-              </p>
             </div>
-          )}
+          </div>
+          {(() => {
+            const webPayload = paneSessionId ? b.webPanePayloadForPane(paneIndex) : null;
+            if (webPayload) {
+              return (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading web pane" />}
+                >
+                  <WebPane
+                    url={webPayload.url}
+                    paneTitle={webPayload.title}
+                    allowInsecureTls={webPayload.allowInsecureTls === true}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            const px = paneSessionId ? b.proxmoxNativeConsoleForPane(paneIndex) : null;
+            if (px?.kind === "qemu-vnc") {
+              return (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading noVNC" />}
+                >
+                  <ProxmoxQemuVncPane
+                    clusterId={px.clusterId}
+                    node={px.node}
+                    vmid={px.vmid}
+                    paneTitle={px.paneTitle}
+                    proxmoxBaseUrl={px.proxmoxBaseUrl}
+                    allowInsecureTls={px.allowInsecureTls === true}
+                    onError={b.onWebPaneOpenInAppWindowError}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            if (px?.kind === "lxc-term") {
+              return (
+                <Suspense
+                  fallback={
+                    <div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading LXC console" />
+                  }
+                >
+                  <ProxmoxLxcTermPane
+                    clusterId={px.clusterId}
+                    node={px.node}
+                    vmid={px.vmid}
+                    paneTitle={px.paneTitle}
+                    proxmoxBaseUrl={px.proxmoxBaseUrl}
+                    allowInsecureTls={px.allowInsecureTls === true}
+                    onError={b.onWebPaneOpenInAppWindowError}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            if (paneSessionId) {
+              return paneFileView === "remote" && remoteSpec ? (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+                >
+                  <RemoteFilePane
+                    paneIndex={paneIndex}
+                    spec={remoteSpec}
+                    getExportDestPath={b.getFileExportDestPath}
+                    archiveFormat={b.fileExportArchiveFormat}
+                    onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
+                    onFilePaneTitleChange={b.onFilePaneTitleChange}
+                    semanticFileNameColors={b.semanticFileNameColors}
+                  />
+                </Suspense>
+              ) : paneFileView === "local" ? (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading file browser" />}
+                >
+                  <LocalFilePane
+                    paneIndex={paneIndex}
+                    onPathChange={(pathKey) => b.onLocalFilePanePathChange(paneIndex, pathKey)}
+                    getExportDestPath={b.getFileExportDestPath}
+                    archiveFormat={b.fileExportArchiveFormat}
+                    onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
+                    onFilePaneTitleChange={b.onFilePaneTitleChange}
+                    semanticFileNameColors={b.semanticFileNameColors}
+                  />
+                </Suspense>
+              ) : (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading terminal" />}
+                >
+                  <TerminalPane
+                    sessionId={paneSessionId}
+                    onUserInput={b.handleTerminalInput}
+                    onSessionWorkingDirectoryChange={b.onSessionWorkingDirectoryChange}
+                    fontSize={b.terminalFontSize}
+                    fontFamily={b.terminalFontFamily}
+                  />
+                </Suspense>
+              );
+            }
+            return (
+              <div className="empty-pane split-empty-pane">
+                <p className="split-empty-pane-copy">One click and we both get what we want</p>
+                <button
+                  type="button"
+                  className="split-empty-pane-logo-btn"
+                  title="Open local terminal in this pane"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void b.connectLocalShellInPane(paneIndex);
+                  }}
+                >
+                  <img src={b.logoTransparentSrc} alt="Open local terminal in this pane" className="split-empty-pane-image" />
+                </button>
+                <p className="split-empty-pane-copy split-empty-pane-copy-secondary">
+                  Or drop that host right here - I&apos;m waiting
+                </p>
+              </div>
+            );
+          })()}
         </div>
       );
     }

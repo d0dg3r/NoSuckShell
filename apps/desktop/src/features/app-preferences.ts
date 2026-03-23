@@ -8,6 +8,7 @@ export const SIDEBAR_AUTO_HIDE_DELAY_MS = 300;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "nosuckshell.sidebar.width";
 export const SIDEBAR_PINNED_STORAGE_KEY = "nosuckshell.sidebar.pinned";
 export const DENSITY_PROFILE_STORAGE_KEY = "nosuckshell.ui.densityProfile";
+export const UI_DENSITY_OFFSET_STORAGE_KEY = "nosuckshell.ui.densityOffset";
 export const LIST_TONE_PRESET_STORAGE_KEY = "nosuckshell.ui.listTonePreset";
 export const FRAME_MODE_PRESET_STORAGE_KEY = "nosuckshell.ui.frameModePreset";
 export const TERMINAL_FONT_OFFSET_STORAGE_KEY = "nosuckshell.terminal.fontOffset";
@@ -21,6 +22,8 @@ export const WORKSPACES_STORAGE_KEY = "nosuckshell.layout.workspaces.v1";
 export const SETTINGS_OPEN_MODE_STORAGE_KEY = "nosuckshell.settings.openMode";
 export const DEFAULT_BACKUP_PATH = "~/.ssh/nosuckshell.backup.json";
 export const SIDEBAR_VIEW_STORAGE_KEY = "nosuckshell.sidebar.selectedView";
+/** When true, PROXMUX VNC / web consoles open in a split pane (iframe); when false, system browser. */
+export const PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY = "nosuckshell.proxmux.openWebConsolesInAppPane";
 export const LAYOUT_MODE_STORAGE_KEY = "nosuckshell.layout.mode";
 /** When true, split-pane label shows full file path (ellipsis); otherwise folder basename only. Tooltip always shows full path in file view. */
 export const FILE_PANE_SHOW_FULL_PATH_IN_PANE_TITLE_KEY = "nosuckshell.ui.filePaneShowFullPathInPaneTitle";

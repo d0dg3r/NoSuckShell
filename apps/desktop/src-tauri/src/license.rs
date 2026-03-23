@@ -15,6 +15,11 @@ const DEV_LICENSE_SEED: [u8; 32] = *b"nosuckshell-dev-1-license-seed!!";
 const DEV_LICENSE_VERIFYING_KEY_HEX: &str =
     "1190c7277b2d5bf268179b4286c2232ed656d27ba9917481d797f0098eec3efe";
 
+/// Compile-time public key for official release builds (64 hex chars = 32 bytes).
+/// Set in the build environment, e.g. `NOSUCKSHELL_LICENSE_PUBKEY_HEX=... cargo build`.
+/// When unset, only runtime env and the dev fallback apply.
+const EMBEDDED_LICENSE_PUBKEY_HEX: Option<&str> = option_env!("NOSUCKSHELL_LICENSE_PUBKEY_HEX");
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LicensePayload {
@@ -42,15 +47,26 @@ fn license_message(payload: &LicensePayload) -> Result<String> {
     Ok(serde_json::to_string(payload)?)
 }
 
+fn verifying_key_from_hex_64(trimmed: &str) -> Result<VerifyingKey> {
+    let bytes = hex::decode(trimmed).context("decode license public key hex")?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
+    VerifyingKey::from_bytes(&arr).map_err(|_| anyhow::anyhow!("invalid Ed25519 public key"))
+}
+
+/// Resolution order: runtime `NOSUCKSHELL_LICENSE_PUBKEY_HEX`, then compile-time embed, then dev key.
 fn verifying_key_from_env_or_dev() -> Result<VerifyingKey> {
     if let Ok(hex_str) = std::env::var("NOSUCKSHELL_LICENSE_PUBKEY_HEX") {
         let trimmed = hex_str.trim();
         if trimmed.len() == 64 {
-            let bytes = hex::decode(trimmed).context("decode NOSUCKSHELL_LICENSE_PUBKEY_HEX")?;
-            let arr: [u8; 32] = bytes
-                .try_into()
-                .map_err(|_| anyhow::anyhow!("public key must be 32 bytes"))?;
-            return VerifyingKey::from_bytes(&arr).map_err(|_| anyhow::anyhow!("invalid Ed25519 public key"));
+            return verifying_key_from_hex_64(trimmed);
+        }
+    }
+    if let Some(embedded) = EMBEDDED_LICENSE_PUBKEY_HEX {
+        let trimmed = embedded.trim();
+        if trimmed.len() == 64 {
+            return verifying_key_from_hex_64(trimmed);
         }
     }
     let bytes = hex::decode(DEV_LICENSE_VERIFYING_KEY_HEX.trim()).context("decode dev license pubkey")?;
@@ -131,8 +147,37 @@ pub fn has_entitlement(entitlement: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Repair common paste mistakes:
+/// - **Fused duplicates:** `payload.sig` twice becomes `payload.(sig+payload).sig` → 3+ segments when split on `.`;
+///   keep first segment + last segment (valid `payload.sig` when both tokens were the same).
+/// - **Exact duplicate:** the whole string is `token+token` with identical halves → keep first half.
+fn normalize_license_token_input(input: &str) -> (String, &'static str) {
+    let t = input.trim();
+    if t.is_empty() {
+        return (String::new(), "none");
+    }
+    let bytes = t.as_bytes();
+    if bytes.len() % 2 == 0 && !bytes.is_empty() {
+        let mid = bytes.len() / 2;
+        if bytes[..mid] == bytes[mid..] {
+            return (t[..mid].to_string(), "identical_halves");
+        }
+    }
+    let parts: Vec<&str> = t.split('.').collect();
+    if parts.len() >= 3 {
+        let fused = format!("{}.{}", parts[0], parts[parts.len() - 1]);
+        if fused != t {
+            return (fused, "fused_first_last");
+        }
+    }
+    (t.to_string(), "none")
+}
+
 pub fn activate_license_token(token: String) -> Result<LicensePayload> {
-    let trimmed = token.trim();
+    let (trimmed, _) = normalize_license_token_input(&token);
+    if trimmed.is_empty() {
+        anyhow::bail!("license token is empty");
+    }
     let (payload_part, sig_part) = trimmed
         .split_once('.')
         .context("license token must be `base64url(payload).base64url(signature)` or use import_license_json")?;
@@ -226,5 +271,23 @@ mod tests {
         let msg = license_message(&payload).unwrap();
         let sig = sk.sign(msg.as_bytes());
         verify_payload(&payload, &hex::encode(sig.to_bytes())).unwrap();
+    }
+
+    #[test]
+    fn normalize_strips_accidental_duplicate_token_paste() {
+        let once = "a.b";
+        let doubled = format!("{once}{once}");
+        let (n, mode) = normalize_license_token_input(&doubled);
+        assert_eq!(mode, "identical_halves");
+        assert_eq!(n, once);
+    }
+
+    #[test]
+    fn normalize_fuses_concatenated_same_token_two_dots() {
+        // Two toy tokens back-to-back: "aaaa.bbbb" + "cccc.dddd" => two dots, unequal halves, fuse first+last.
+        let fused_input = "aaaa.bbbbcccc.dddd";
+        let (n, mode) = normalize_license_token_input(fused_input);
+        assert_eq!(mode, "fused_first_last");
+        assert_eq!(n, "aaaa.dddd");
     }
 }

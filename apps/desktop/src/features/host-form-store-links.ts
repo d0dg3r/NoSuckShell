@@ -1,4 +1,5 @@
-import type { HostBinding, HostConfig, UserObject } from "../types";
+import type { HostBinding, HostConfig, HostMetadata, UserObject } from "../types";
+import { anyHostMarkedAsJumpHost, hostMetadataIsJumpHost } from "./jump-host";
 
 export const USER_SELECT_LEGACY = "__user_legacy";
 export const USER_ID_PREFIX = "user:";
@@ -7,12 +8,26 @@ export function userSelectIdValue(id: string): string {
   return `${USER_ID_PREFIX}${id}`;
 }
 
-export function jumpHostCandidates(allHosts: HostConfig[], excludeAlias: string): string[] {
+/**
+ * Aliases offered as ProxyJump shortcuts. When at least one host has `isJumpHost`, only those
+ * hosts are listed; otherwise all saved hosts except `excludeAlias` (migration-friendly).
+ */
+export function jumpHostCandidates(
+  allHosts: HostConfig[],
+  excludeAlias: string,
+  metadataByHost: Record<string, HostMetadata | undefined> = {},
+): string[] {
   const ex = excludeAlias.trim();
-  return allHosts
+  const base = allHosts
     .map((h) => h.host.trim())
-    .filter((alias) => alias.length > 0 && alias !== ex)
-    .sort((a, b) => a.localeCompare(b));
+    .filter((alias) => alias.length > 0 && alias !== ex);
+
+  const useJumpOnly = anyHostMarkedAsJumpHost(metadataByHost);
+  const filtered = useJumpOnly
+    ? base.filter((alias) => hostMetadataIsJumpHost(metadataByHost[alias]))
+    : base;
+
+  return filtered.sort((a, b) => a.localeCompare(b));
 }
 
 export function getUserSelectValue(_host: HostConfig, binding: HostBinding, users: UserObject[]): string {

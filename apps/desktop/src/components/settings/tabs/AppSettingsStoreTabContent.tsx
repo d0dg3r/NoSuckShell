@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import type { GroupObject, HostKeyRef, SshKeyObject, UserObject } from "../../../types";
 import {
-  applyBindingOnlyProxyJumpSelect,
-  getBindingOnlyProxyJumpSelectValue,
   getUserObjectProxyJumpSelectValue,
   jumpHostCandidates,
   JUMP_SELECT_CUSTOM,
@@ -10,14 +8,9 @@ import {
   jumpSelectHopValue,
   userProxyJumpFromSelect,
 } from "../../../features/host-form-store-links";
-import {
-  PROXY_COMMAND_PRESET_CUSTOM,
-  PROXY_COMMAND_PRESETS,
-  proxyCommandFromPresetSelect,
-  proxyCommandPresetSelectValue,
-} from "../../../features/ssh-proxy-presets";
 import type { IdentityStoreSubTab } from "../app-settings-types";
 import type { AppSettingsPanelProps } from "../app-settings-panel-props";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsStoreTabContentProps = Pick<
   AppSettingsPanelProps,
@@ -65,11 +58,6 @@ export type AppSettingsStoreTabContentProps = Pick<
   | "addStoreEncryptedKey"
   | "unlockStoreKey"
   | "removeStoreKey"
-  | "storeSelectedHostForBinding"
-  | "setStoreSelectedHostForBinding"
-  | "storeBindingDraft"
-  | "setStoreBindingDraft"
-  | "saveHostBindingDraft"
 > & {
   identityStoreSubTab: IdentityStoreSubTab;
 };
@@ -123,17 +111,11 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     addStoreEncryptedKey,
     unlockStoreKey,
     removeStoreKey,
-    storeSelectedHostForBinding,
-    setStoreSelectedHostForBinding,
-    storeBindingDraft,
-    setStoreBindingDraft,
-    saveHostBindingDraft,
   } = rest;
 
-  const allHostJumpCandidates = useMemo(() => jumpHostCandidates(hosts, ""), [hosts]);
-  const bindingJumpCandidates = useMemo(
-    () => jumpHostCandidates(hosts, storeSelectedHostForBinding.trim()),
-    [hosts, storeSelectedHostForBinding],
+  const allHostJumpCandidates = useMemo(
+    () => jumpHostCandidates(hosts, "", metadataStore.hosts),
+    [hosts, metadataStore.hosts],
   );
 
   const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
@@ -158,30 +140,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     void setStoreUserGroupMembership(userId, next);
   };
 
-  const toggleHostBindingKey = (keyId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => {
-      let next = prev.keyRefs.filter((r) => r.keyId !== keyId);
-      if (checked) {
-        next = [...next, { keyId, usage: "additional" }];
-      }
-      return { ...prev, keyRefs: normalizeKeyRefs(next) };
-    });
-  };
-
-  const toggleHostBindingTag = (tagId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => ({
-      ...prev,
-      tagIds: checked ? [...prev.tagIds, tagId] : prev.tagIds.filter((id) => id !== tagId),
-    }));
-  };
-
-  const toggleHostBindingGroup = (groupId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => ({
-      ...prev,
-      groupIds: checked ? [...prev.groupIds, groupId] : prev.groupIds.filter((id) => id !== groupId),
-    }));
-  };
-
   const toggleGroupTag = (groupId: string, group: GroupObject, tagId: string, checked: boolean) => {
     const cur = group.tagIds ?? [];
     const nextIds = checked ? [...cur, tagId] : cur.filter((id) => id !== tagId);
@@ -199,8 +157,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
       <div className="store-panel store-panel--identity">
         {identityStoreSubTab === "overview" && (
           <section className="identity-store-section">
-            <p className="muted-copy">
-              Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as objects.
+            <p className="settings-card-lead">
+              Objects link to hosts; host fields stay compatible.{" "}
+              <SettingsHelpHint
+                topic="Identity Store overview"
+                description="Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as objects."
+              />
             </p>
             <label className="field field-span-2">
               <span className="field-label">Master passphrase (Keychain fallback)</span>
@@ -209,7 +171,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 type="password"
                 value={storePassphrase}
                 onChange={(event) => setStorePassphrase(event.target.value)}
-                placeholder="Optional, fuer encrypted keys"
+                placeholder="Optional, for encrypted keys"
               />
             </label>
           </section>
@@ -217,13 +179,22 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
 
         {identityStoreSubTab === "users" && (
           <section className="identity-store-section">
-            <h4>Users</h4>
-            <p className="muted-copy">
-              Import creates store users from each distinct <span className="inline-code">User</span> value on your saved
-              hosts. Keys on the user apply when a host binding does not set its own keys.
-            </p>
+            <div className="settings-card-head-row">
+              <h4>Users</h4>
+              <SettingsHelpHint
+                topic="Store users"
+                description="Import creates store users from each distinct User value on your saved hosts. Keys on the user apply when a host binding does not set its own keys."
+              />
+            </div>
+            <p className="settings-card-lead">Import from hosts; per-user keys when the host has none.</p>
             <label className="field">
-              <span className="field-label">Default login user</span>
+              <span className="field-label field-label-inline-hint">
+                Default login user
+                <SettingsHelpHint
+                  topic="Default login user"
+                  description="Used when a host has no explicit user (SSH config / host entry)."
+                />
+              </span>
               <input
                 className="input"
                 value={metadataStore.defaultUser}
@@ -236,7 +207,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 }}
                 placeholder="ubuntu"
               />
-              <span className="field-help">Used when a host has no explicit user (SSH config / host entry).</span>
             </label>
             <div className="store-inline">
               <button type="button" className="btn btn-settings-tool" onClick={() => void importStoreUsersFromHosts()}>
@@ -301,7 +271,13 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         />
                       </label>
                       <label className="field">
-                        <span className="field-label">HostName (optional)</span>
+                        <span className="field-label field-label-inline-hint">
+                          HostName (optional)
+                          <SettingsHelpHint
+                            topic="Store user HostName"
+                            description="When this user is linked on a host, overrides the SSH HostName for that session. Leave empty to use the host entry from your config."
+                          />
+                        </span>
                         <input
                           key={`${user.id}-hostName`}
                           className="input"
@@ -314,10 +290,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                           }}
                           placeholder="10.0.1.25"
                         />
-                        <span className="field-help">
-                          When this user is linked on a host, overrides the SSH HostName for that session. Leave empty to
-                          use the host entry from your config.
-                        </span>
                       </label>
                       <label className="field">
                         <span className="field-label">Jump shortcut (optional)</span>
@@ -345,7 +317,13 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         </select>
                       </label>
                       <label className="field">
-                        <span className="field-label">ProxyJump (optional)</span>
+                        <span className="field-label field-label-inline-hint">
+                          ProxyJump (optional)
+                          <SettingsHelpHint
+                            topic="Store user ProxyJump"
+                            description="Used when this user is linked on a host and that host's binding has no ProxyJump set. A ProxyJump saved on the host binding for that host still wins. The hop is usually another host alias in your list or a custom ProxyJump string."
+                          />
+                        </span>
                         <input
                           key={`${user.id}-proxyJump-${user.proxyJump}`}
                           className="input"
@@ -358,17 +336,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                           }}
                           placeholder="bastion or user@jump"
                         />
-                        <span className="field-help">
-                          Used when this user is linked on a host and that host&apos;s binding has no ProxyJump set. A
-                          ProxyJump saved on the host binding for that host still wins. The hop is usually another host
-                          alias in your list or a custom ProxyJump string.
-                        </span>
                       </label>
                       <div className="field">
                         <span className="field-label">SSH keys (first = primary for sessions)</span>
                         <div className="store-checkbox-grid">
                           {storeKeys.length === 0 ? (
-                            <span className="muted-copy">No keys in store yet.</span>
+                            <span className="settings-card-lead">No keys in store yet.</span>
                           ) : (
                             storeKeys.map((key) => (
                               <label key={key.id} className="store-checkbox-label">
@@ -423,7 +396,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         <span className="field-label">Tags</span>
                         <div className="store-checkbox-grid">
                           {storeTags.length === 0 ? (
-                            <span className="muted-copy">No tags yet.</span>
+                            <span className="settings-card-lead">No tags yet.</span>
                           ) : (
                             storeTags.map((tag) => (
                               <label key={tag.id} className="store-checkbox-label">
@@ -442,7 +415,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         <span className="field-label">Groups</span>
                         <div className="store-checkbox-grid">
                           {storeGroups.length === 0 ? (
-                            <span className="muted-copy">No groups yet.</span>
+                            <span className="settings-card-lead">No groups yet.</span>
                           ) : (
                             storeGroups.map((group) => (
                               <label key={group.id} className="store-checkbox-label">
@@ -505,7 +478,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Members</span>
                     <div className="store-checkbox-grid">
                       {storeUsers.length === 0 ? (
-                        <span className="muted-copy">No users yet.</span>
+                        <span className="settings-card-lead">No users yet.</span>
                       ) : (
                         storeUsers.map((user) => (
                           <label key={user.id} className="store-checkbox-label">
@@ -527,7 +500,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Tags</span>
                     <div className="store-checkbox-grid">
                       {storeTags.length === 0 ? (
-                        <span className="muted-copy">No tags yet.</span>
+                        <span className="settings-card-lead">No tags yet.</span>
                       ) : (
                         storeTags.map((tag) => (
                           <label key={tag.id} className="store-checkbox-label">
@@ -609,7 +582,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     className="input"
                     value={storePathKeyNameDraft}
                     onChange={(event) => setStorePathKeyNameDraft(event.target.value)}
-                    placeholder="Pfad-Key Name"
+                    placeholder="Path key name"
                   />
                   <input
                     className="input"
@@ -672,7 +645,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Tags</span>
                     <div className="store-checkbox-grid">
                       {storeTags.length === 0 ? (
-                        <span className="muted-copy">No tags yet.</span>
+                        <span className="settings-card-lead">No tags yet.</span>
                       ) : (
                         storeTags.map((tag) => (
                           <label key={tag.id} className="store-checkbox-label">
@@ -693,175 +666,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
           </section>
         )}
 
-        {identityStoreSubTab === "hosts" && (
-          <section className="identity-store-section">
-            <h4>Hosts</h4>
-            <p className="muted-copy">
-              Per-host overrides: linked user, SSH keys (first selected = primary), groups, and tags. If no keys are set
-              here, the linked user&apos;s keys apply when a user is selected.
-            </p>
-            <div className="store-inline">
-              <select
-                className="input"
-                value={storeSelectedHostForBinding}
-                onChange={(event) => setStoreSelectedHostForBinding(event.target.value)}
-              >
-                <option value="">Select host</option>
-                {hosts.map((host, hostIndex) => (
-                  <option key={`host-opt-${hostIndex}`} value={host.host}>
-                    {host.host}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="input"
-                value={storeBindingDraft.userId ?? ""}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    userId: event.target.value || undefined,
-                  }))
-                }
-              >
-                <option value="">Store user (optional)</option>
-                {storeUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">SSH keys for this host</span>
-              <div className="store-checkbox-grid">
-                {storeKeys.length === 0 ? (
-                  <span className="muted-copy">No keys in store.</span>
-                ) : (
-                  storeKeys.map((key) => (
-                    <label key={key.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.keyRefs.some((r) => r.keyId === key.id)}
-                        onChange={(event) => toggleHostBindingKey(key.id, event.target.checked)}
-                      />
-                      {key.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">Groups</span>
-              <div className="store-checkbox-grid">
-                {storeGroups.length === 0 ? (
-                  <span className="muted-copy">No groups.</span>
-                ) : (
-                  storeGroups.map((group) => (
-                    <label key={group.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.groupIds.includes(group.id)}
-                        onChange={(event) => toggleHostBindingGroup(group.id, event.target.checked)}
-                      />
-                      {group.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">Tags</span>
-              <div className="store-checkbox-grid">
-                {storeTags.length === 0 ? (
-                  <span className="muted-copy">No tags.</span>
-                ) : (
-                  storeTags.map((tag) => (
-                    <label key={tag.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.tagIds.includes(tag.id)}
-                        onChange={(event) => toggleHostBindingTag(tag.id, event.target.checked)}
-                      />
-                      {tag.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyJump shortcut</span>
-              <select
-                className="input density-profile-select"
-                aria-label="Host binding ProxyJump shortcut"
-                value={getBindingOnlyProxyJumpSelectValue(storeBindingDraft, bindingJumpCandidates)}
-                onChange={(event) => {
-                  const patch = applyBindingOnlyProxyJumpSelect(event.target.value, storeBindingDraft);
-                  setStoreBindingDraft((prev) => ({ ...prev, ...patch }));
-                }}
-              >
-                <option value={JUMP_SELECT_NONE}>None</option>
-                {bindingJumpCandidates.map((alias) => (
-                  <option key={alias} value={jumpSelectHopValue(alias)}>
-                    {alias}
-                  </option>
-                ))}
-                <option value={JUMP_SELECT_CUSTOM}>Custom value (edit below)</option>
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyJump override</span>
-              <input
-                className="input"
-                value={storeBindingDraft.proxyJump}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    proxyJump: event.target.value,
-                  }))
-                }
-                placeholder="bastion or user@jump"
-              />
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyCommand preset (optional)</span>
-              <select
-                className="input density-profile-select"
-                aria-label="Host binding ProxyCommand preset"
-                value={proxyCommandPresetSelectValue(storeBindingDraft.legacyProxyCommand)}
-                onChange={(event) => {
-                  const next = proxyCommandFromPresetSelect(event.target.value, storeBindingDraft.legacyProxyCommand);
-                  setStoreBindingDraft((prev) => ({ ...prev, legacyProxyCommand: next.trim() }));
-                }}
-              >
-                <option value={PROXY_COMMAND_PRESET_CUSTOM}>Custom (edit below)</option>
-                {PROXY_COMMAND_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyCommand</span>
-              <input
-                className="input"
-                value={storeBindingDraft.legacyProxyCommand}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    legacyProxyCommand: event.target.value,
-                  }))
-                }
-                placeholder="ssh -W %h:%p bastion"
-              />
-            </div>
-            <div className="store-inline">
-              <button type="button" className="btn btn-settings-commit" onClick={() => void saveHostBindingDraft()}>
-                Save host binding
-              </button>
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );

@@ -6,10 +6,16 @@ import type {
   UiFontPreset,
 } from "../app-settings-types";
 import { TERMINAL_FONT_OFFSET_MAX, TERMINAL_FONT_OFFSET_MIN } from "../app-settings-constants";
+import { SettingsHelpHint } from "../SettingsHelpHint";
+
+const UI_DENSITY_OFFSET_MIN = -2;
+const UI_DENSITY_OFFSET_MAX = 2;
 
 export type AppSettingsAppearanceTabProps = {
   densityProfile: DensityProfile;
   setDensityProfile: (value: DensityProfile) => void;
+  uiDensityOffset: number;
+  setUiDensityOffset: (value: number) => void;
   uiFontPreset: UiFontPreset;
   setUiFontPreset: (value: UiFontPreset) => void;
   terminalFontPreset: TerminalFontPreset;
@@ -28,6 +34,8 @@ export type AppSettingsAppearanceTabProps = {
 export function AppSettingsAppearanceTab({
   densityProfile,
   setDensityProfile,
+  uiDensityOffset,
+  setUiDensityOffset,
   uiFontPreset,
   setUiFontPreset,
   terminalFontPreset,
@@ -46,12 +54,24 @@ export function AppSettingsAppearanceTab({
     <div className="settings-stack">
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Visual style</h3>
-          <p className="muted-copy">Tune typography, density and contrast for your workspace.</p>
+          <div className="settings-card-head-row">
+            <h3>Visual style</h3>
+            <SettingsHelpHint
+              topic="Visual style"
+              description="Typography, density, list contrast, and frame emphasis for the whole app (not connection-specific)."
+            />
+          </div>
+          <p className="settings-card-lead">Typography, density, and contrast.</p>
         </header>
         <div className="host-form-grid">
           <label className="field">
-            <span className="field-label">Density profile</span>
+            <span className="field-label field-label-inline-hint">
+              Density profile
+              <SettingsHelpHint
+                topic="Density profile"
+                description={`Preset baseline for spacing and typography. Fine tune with the slider: ${uiDensityOffset > 0 ? "+" : ""}${uiDensityOffset}.`}
+              />
+            </span>
             <select
               className="input density-profile-select"
               value={densityProfile}
@@ -61,10 +81,27 @@ export function AppSettingsAppearanceTab({
               <option value="balanced">Balanced compact</option>
               <option value="safe">Safe compact</option>
             </select>
-            <span className="field-help">Controls spacing and font density across the app.</span>
+            <input
+              className="input"
+              type="range"
+              value={uiDensityOffset}
+              min={UI_DENSITY_OFFSET_MIN}
+              max={UI_DENSITY_OFFSET_MAX}
+              step={1}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                if (!Number.isFinite(parsed)) {
+                  return;
+                }
+                setUiDensityOffset(Math.min(UI_DENSITY_OFFSET_MAX, Math.max(UI_DENSITY_OFFSET_MIN, Math.round(parsed))));
+              }}
+            />
           </label>
           <label className="field">
-            <span className="field-label">GUI font</span>
+            <span className="field-label field-label-inline-hint">
+              GUI font
+              <SettingsHelpHint topic="GUI font" description="Sets typography for labels, forms, and controls." />
+            </span>
             <select
               className="input density-profile-select"
               value={uiFontPreset}
@@ -74,10 +111,12 @@ export function AppSettingsAppearanceTab({
               <option value="manrope">Manrope (modern, tighter)</option>
               <option value="ibm-plex-sans">IBM Plex Sans (technical, clear)</option>
             </select>
-            <span className="field-help">Sets typography for labels, forms and controls.</span>
           </label>
           <label className="field">
-            <span className="field-label">Terminal font preset</span>
+            <span className="field-label field-label-inline-hint">
+              Terminal font preset
+              <SettingsHelpHint topic="Terminal font preset" description="Nerd font fallbacks remain active for symbols." />
+            </span>
             <select
               className="input density-profile-select"
               value={terminalFontPreset}
@@ -87,10 +126,32 @@ export function AppSettingsAppearanceTab({
               <option value="ibm-plex-mono">IBM Plex Mono</option>
               <option value="source-code-pro">Source Code Pro</option>
             </select>
-            <span className="field-help">Nerd font fallbacks remain active for symbols.</span>
           </label>
           <label className="field">
-            <span className="field-label">Terminal font offset</span>
+            <span className="field-label field-label-inline-hint">
+              Terminal density fine tune
+              <SettingsHelpHint
+                topic="Terminal density fine tune"
+                description={`Keep your selected density preset and fine-tune terminal readability. Current terminal size: ${terminalFontSize}px.`}
+              />
+            </span>
+            <input
+              className="input"
+              type="range"
+              value={terminalFontOffset}
+              min={TERMINAL_FONT_OFFSET_MIN}
+              max={TERMINAL_FONT_OFFSET_MAX}
+              step={1}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                if (!Number.isFinite(parsed)) {
+                  return;
+                }
+                setTerminalFontOffset(
+                  Math.min(TERMINAL_FONT_OFFSET_MAX, Math.max(TERMINAL_FONT_OFFSET_MIN, Math.round(parsed))),
+                );
+              }}
+            />
             <input
               className="input"
               type="number"
@@ -107,10 +168,13 @@ export function AppSettingsAppearanceTab({
                 );
               }}
             />
-            <span className="field-help">Current terminal size: {terminalFontSize}px.</span>
           </label>
-          <label className="field">
-            <span className="field-label">List tone intensity</span>
+          <div className="settings-form-row field-span-2">
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                List tone intensity
+                <SettingsHelpHint topic="List tone intensity" description="Controls host, session, and chip color intensity." />
+              </span>
             <select
               className="input density-profile-select"
               value={listTonePreset}
@@ -119,10 +183,12 @@ export function AppSettingsAppearanceTab({
               <option value="subtle">Subtle</option>
               <option value="strong">Strong</option>
             </select>
-            <span className="field-help">Controls host/session/chip color intensity.</span>
-          </label>
-          <label className="field">
-            <span className="field-label">Frame mode</span>
+            </label>
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                Frame mode
+                <SettingsHelpHint topic="Frame mode" description="Hover and focus frame strength for interactive panels." />
+              </span>
             <select
               className="input density-profile-select"
               value={frameModePreset}
@@ -132,8 +198,8 @@ export function AppSettingsAppearanceTab({
               <option value="balanced">Balanced</option>
               <option value="clearer">Clearer</option>
             </select>
-            <span className="field-help">Hover/focus frame strength.</span>
-          </label>
+            </label>
+          </div>
           <label className="field field-span-2 checkbox-field">
             <input
               id="settings-file-pane-full-path-title"
@@ -142,12 +208,14 @@ export function AppSettingsAppearanceTab({
               checked={showFullPathInFilePaneTitle}
               onChange={(event) => setShowFullPathInFilePaneTitle(event.target.checked)}
             />
-            <span className="field-label">Show full path in file pane titles</span>
+            <span className="field-label field-label-inline-hint">
+              Show full path in file pane titles
+              <SettingsHelpHint
+                topic="Full path in file pane titles"
+                description="When off, the split-pane title shows only the current folder name while browsing local or remote files; the tooltip always shows the full path. When on, the title shows the full path with ellipsis if space is tight."
+              />
+            </span>
           </label>
-          <p className="muted-copy field-span-2">
-            When off, the split-pane title shows only the current folder name while browsing local or remote files. The
-            tooltip always shows the full path. When on, the title shows the full path with ellipsis if space is tight.
-          </p>
         </div>
       </section>
     </div>

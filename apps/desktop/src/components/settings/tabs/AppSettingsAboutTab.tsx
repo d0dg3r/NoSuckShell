@@ -6,10 +6,10 @@ export function AppSettingsAboutTab() {
       <section className="settings-card about-hero">
         <header className="settings-card-head">
           <h3>About</h3>
-          <p className="muted-copy">NoSuckShell — SSH hosts and sessions in one workspace.</p>
+          <p className="settings-card-lead">NoSuckShell — SSH hosts and sessions in one workspace.</p>
         </header>
         <img src={logoTerminal} alt="NoSuckShell hero" className="about-hero-image" />
-        <p className="muted-copy">Manage connections, split panes, and optional keyboard broadcast without a cluttered UI.</p>
+        <p className="settings-card-lead">Connections, split panes, and optional keyboard broadcast.</p>
       </section>
     </div>
   );

@@ -6,8 +6,10 @@ export type AppSettingsTab =
   | "data"
   | "ssh"
   | "views"
+  | "hosts"
   | "store"
   | "plugins"
+  | "proxmux"
   | "help"
   | "about";
 
@@ -17,7 +19,7 @@ export type FileExportDestMode = "fixed" | "ask";
 /** Archive format for folder or multi-item export. */
 export type FileExportArchiveFormat = "tarGz" | "zip";
 
-export type IdentityStoreSubTab = "overview" | "users" | "groups" | "tags" | "keys" | "hosts";
+export type IdentityStoreSubTab = "overview" | "users" | "groups" | "tags" | "keys";
 
 export type DensityProfile = "aggressive" | "balanced" | "safe";
 export type ListTonePreset = "subtle" | "strong";

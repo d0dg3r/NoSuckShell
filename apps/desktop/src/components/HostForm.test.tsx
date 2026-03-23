@@ -25,6 +25,7 @@ describe("HostForm", () => {
         storeUsers={[]}
         sshHosts={[]}
         hostAliasForJumpExclude=""
+        hostMetadataByHost={{}}
       />,
     );
 

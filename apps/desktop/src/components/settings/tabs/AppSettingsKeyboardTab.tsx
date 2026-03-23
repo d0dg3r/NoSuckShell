@@ -5,6 +5,7 @@ import { KEYBOARD_SHORTCUT_DEFINITIONS } from "../../../features/keyboard-shortc
 import type { KeyboardShortcutCommandId, KeyChord } from "../../../features/keyboard-shortcuts-types";
 import { DEFAULT_LEADER_CHORD } from "../../../features/keyboard-shortcuts-registry";
 import { findChordConflicts } from "../../../features/keyboard-shortcuts-storage";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsKeyboardTabProps = {
   chordMap: Record<KeyboardShortcutCommandId, KeyChord>;
@@ -98,19 +99,23 @@ export function AppSettingsKeyboardTab({
   return (
     <div className="settings-stack">
       <section className="settings-card">
-        <h3 className="settings-card-title">Keyboard shortcuts</h3>
-        <p className="field-help">
-          Click <strong>Record</strong>, then press the new key combination. Press <strong>Esc</strong> while recording to
-          cancel. The leader key starts a short sequence: after it, press <strong>K</strong> (default) to open this
-          keyboard tab.
-        </p>
+        <header className="settings-card-head">
+          <div className="settings-card-head-row">
+            <h3 className="settings-card-title">Keyboard shortcuts</h3>
+            <SettingsHelpHint
+              topic="Keyboard shortcuts"
+              description='Click Record, then press the new key combination. Press Esc while recording to cancel. The leader key starts a short sequence: after it, press K (default) to open this keyboard tab.'
+            />
+          </div>
+          <p className="settings-card-lead">Record chords; Esc cancels. Leader opens a sequence.</p>
+        </header>
         {conflictSummary ? (
           <div className="file-pane-banner file-pane-banner--error" role="status">
             Duplicate bindings: {conflictSummary}
           </div>
         ) : null}
         {recording ? (
-          <p className="field-help" role="status">
+          <p className="settings-card-lead" role="status">
             Recording{recording === "leader" ? " leader key" : ` “${recording}”`}… press Esc to cancel.
           </p>
         ) : null}

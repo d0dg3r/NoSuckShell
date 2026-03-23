@@ -1,4 +1,5 @@
 import { openAuxWindow } from "../../../tauri-api";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 import type { AutoArrangeMode, LayoutMode, QuickConnectMode, SplitRatioPreset } from "../app-settings-types";
 
 export type AppSettingsLayoutTabProps = {
@@ -38,8 +39,14 @@ export function AppSettingsLayoutTab({
     <div className="settings-stack">
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Window behavior</h3>
-          <p className="muted-copy">Define how hosts and terminals are arranged across screen sizes.</p>
+          <div className="settings-card-head-row">
+            <h3>Window behavior</h3>
+            <SettingsHelpHint
+              topic="Window behavior"
+              description="Controls how the host list and terminal area are arranged across window sizes: sidebar pinning, extra windows, layout mode, split defaults, auto-arrange, and keyboard broadcast."
+            />
+          </div>
+          <p className="settings-card-lead">Hosts, terminals, and layout automation.</p>
         </header>
         <div className="host-form-grid">
           <label className="field field-span-2 checkbox-field">
@@ -50,12 +57,14 @@ export function AppSettingsLayoutTab({
               checked={isSidebarPinned}
               onChange={(event) => setSidebarPinned(event.target.checked)}
             />
-            <span className="field-label">Host sidebar always visible (pinned)</span>
+            <span className="field-label field-label-inline-hint">
+              Host sidebar always visible (pinned)
+              <SettingsHelpHint
+                topic="Pinned host sidebar"
+                description="When off, the sidebar can auto-hide after you move away. If it is collapsed, use the expand control at the left window edge. Use the pin control in the host sidebar header to pin or unpin."
+              />
+            </span>
           </label>
-          <p className="muted-copy field-span-2">
-            When off, the sidebar can auto-hide after you move away. If it is collapsed, click the expand control at the
-            left window edge to show it again. Use the pin control in the host sidebar header to pin or unpin.
-          </p>
           <div className="field field-span-2">
             <button
               type="button"
@@ -68,41 +77,57 @@ export function AppSettingsLayoutTab({
             >
               Open additional app window
             </button>
-            <p className="muted-copy field-help">
-              A second window shares the same sessions and can receive file copy/paste from the main window via the in-app
-              clipboard.
-            </p>
+            <SettingsHelpHint
+              topic="Additional app window"
+              description="A second window shares the same sessions and can receive file copy/paste from the main window via the in-app clipboard."
+            />
           </div>
-          <label className="field">
-            <span className="field-label">Window layout</span>
-            <select
-              className="input density-profile-select"
-              value={layoutMode}
-              onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
-            >
-              <option value="auto">Auto — stack below 900px</option>
-              <option value="wide">Wide — always side-by-side</option>
-              <option value="compact">Compact — always stacked</option>
-            </select>
-            <span className="field-help">
-              Auto uses mobile shell on narrow screens. Wide keeps desktop grid. Compact stays stacked.
-            </span>
-          </label>
-          <label className="field">
-            <span className="field-label">Default split ratio preset</span>
-            <select
-              className="input density-profile-select"
-              value={splitRatioPreset}
-              onChange={(event) => setSplitRatioPreset(event.target.value as SplitRatioPreset)}
-            >
-              <option value="50-50">50/50</option>
-              <option value="60-40">60/40</option>
-              <option value="70-30">70/30</option>
-            </select>
-            <span className="field-help">Applies only to newly created pane splits.</span>
-          </label>
+          <div className="settings-form-row field-span-2">
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                Window layout
+                <SettingsHelpHint
+                  topic="Window layout"
+                  description="Auto uses the mobile shell on narrow screens. Wide keeps the desktop side-by-side grid. Compact keeps the stacked layout at all sizes."
+                />
+              </span>
+              <select
+                className="input density-profile-select"
+                value={layoutMode}
+                onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
+              >
+                <option value="auto">Auto — stack below 900px</option>
+                <option value="wide">Wide — always side-by-side</option>
+                <option value="compact">Compact — always stacked</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                Default split ratio preset
+                <SettingsHelpHint
+                  topic="Default split ratio preset"
+                  description="Applies only to newly created pane splits (not existing layouts)."
+                />
+              </span>
+              <select
+                className="input density-profile-select"
+                value={splitRatioPreset}
+                onChange={(event) => setSplitRatioPreset(event.target.value as SplitRatioPreset)}
+              >
+                <option value="50-50">50/50</option>
+                <option value="60-40">60/40</option>
+                <option value="70-30">70/30</option>
+              </select>
+            </label>
+          </div>
           <label className="field field-span-2">
-            <span className="field-label">Auto arrange mode</span>
+            <span className="field-label field-label-inline-hint">
+              Auto arrange mode
+              <SettingsHelpHint
+                topic="Auto arrange mode"
+                description='Mode A compacts session slots. Mode B rebalances split ratios. Mode C applies both. "Free move" keeps your splits until you pick another mode. The pane context menu item "Pause auto-arrange (manual layout only)" switches here to Free move; "Resume auto-arrange for layout" restores the last A/B/C preset. Off stops automation without remembering manual layout.'
+              />
+            </span>
             <select
               className="input density-profile-select"
               value={autoArrangeMode}
@@ -114,13 +139,6 @@ export function AppSettingsLayoutTab({
               <option value="free">Free move (manual layout, no auto arrange)</option>
               <option value="off">Off</option>
             </select>
-            <span className="field-help">
-              Mode A compacts session slots. Mode B rebalances split ratios. Mode C applies both.{" "}
-              <strong>Free move</strong> keeps your splits until you pick another mode. The pane context menu item
-              &quot;Pause auto-arrange (manual layout only)&quot; switches here to Free move; &quot;Resume auto-arrange
-              for layout&quot; restores the last A/B/C preset. <strong>Off</strong> stops automation without remembering
-              manual layout.
-            </span>
           </label>
           <label className="field field-span-2 checkbox-field">
             <input
@@ -130,46 +148,63 @@ export function AppSettingsLayoutTab({
               checked={isBroadcastModeEnabled}
               onChange={(event) => setBroadcastMode(event.target.checked)}
             />
-            <span className="field-label">Broadcast keyboard to multiple terminals</span>
+            <span className="field-label field-label-inline-hint">
+              Broadcast keyboard to multiple terminals
+              <SettingsHelpHint
+                topic="Keyboard broadcast"
+                description="When enabled, add targets from each pane toolbar (target / all visible), the pane context menu, or this checkbox. The session footer shows state and how many panes are targeted. Turn off from the toolbar, here, or the context menu."
+              />
+            </span>
           </label>
-          <p className="muted-copy field-span-2">
-            When enabled, add targets from each pane&apos;s toolbar (target / all visible), the pane context menu, or
-            this checkbox. The session footer shows state and how many panes are targeted. Turn off from the toolbar,
-            here, or the context menu.
-          </p>
         </div>
       </section>
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Quick connect</h3>
-          <p className="muted-copy">Choose interaction style and trust behavior for ad-hoc connections.</p>
+          <div className="settings-card-head-row">
+            <h3>Quick connect</h3>
+            <SettingsHelpHint
+              topic="Quick connect"
+              description="Ad-hoc connections: choose how the connect flow is presented (wizard vs single form vs command palette) and whether host keys are trusted automatically."
+            />
+          </div>
+          <p className="settings-card-lead">Flow style and host key trust.</p>
         </header>
         <div className="host-form-grid">
-          <label className="field">
-            <span className="field-label">Quick connect mode</span>
-            <select
-              className="input density-profile-select"
-              value={quickConnectMode}
-              onChange={(event) => setQuickConnectMode(event.target.value as QuickConnectMode)}
-            >
-              <option value="wizard">Wizard (step-by-step)</option>
-              <option value="smart">Smart form (single screen)</option>
-              <option value="command">Command palette</option>
-            </select>
-            <span className="field-help">Defines how host/user input is collected.</span>
-          </label>
-          <label className="field checkbox-field">
-            <input
-              className="checkbox-input"
-              type="checkbox"
-              checked={quickConnectAutoTrust}
-              onChange={(event) => setQuickConnectAutoTrust(event.target.checked)}
-            />
-            <span className="field-label">Auto trust host keys for quick connect</span>
-          </label>
-          <p className="field-help field-span-2">
-            Default is off. When enabled, quick-connect sessions auto-accept host key prompts.
-          </p>
+          <div className="settings-form-row field-span-2">
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                Quick connect mode
+                <SettingsHelpHint
+                  topic="Quick connect mode"
+                  description="Defines how host and user input is collected for quick connections."
+                />
+              </span>
+              <select
+                className="input density-profile-select"
+                value={quickConnectMode}
+                onChange={(event) => setQuickConnectMode(event.target.value as QuickConnectMode)}
+              >
+                <option value="wizard">Wizard (step-by-step)</option>
+                <option value="smart">Smart form (single screen)</option>
+                <option value="command">Command palette</option>
+              </select>
+            </label>
+            <label className="field checkbox-field">
+              <input
+                className="checkbox-input"
+                type="checkbox"
+                checked={quickConnectAutoTrust}
+                onChange={(event) => setQuickConnectAutoTrust(event.target.checked)}
+              />
+              <span className="field-label field-label-inline-hint">
+                Auto trust host keys for quick connect
+                <SettingsHelpHint
+                  topic="Auto trust host keys for quick connect"
+                  description="Default is off. When enabled, quick-connect sessions auto-accept host key prompts."
+                />
+              </span>
+            </label>
+          </div>
         </div>
       </section>
     </div>

@@ -258,6 +258,28 @@ export const broadcastFileTransferClipboard = (payload: unknown): Promise<void> 
 
 export const openAuxWindow = (): Promise<void> => invoke("open_aux_window");
 
+export const openExternalUrl = (url: string): Promise<void> => invoke("open_external_url", { url });
+
+/** Opens the URL in a separate in-app webview window (not an iframe); use when sites block embedding. Returns the window label for {@link navigateInAppWebviewWindow}. */
+export const openInAppWebviewWindow = (
+  title: string,
+  url: string,
+  allowInsecureTls = false,
+  autoConsoleUrl?: string | null,
+): Promise<string> =>
+  invoke<string>("open_in_app_webview_window", {
+    title,
+    url,
+    allowInsecureTls,
+    ...(autoConsoleUrl != null && autoConsoleUrl !== "" ? { autoConsoleUrl } : {}),
+  });
+
+export const navigateInAppWebviewWindow = (label: string, url: string): Promise<void> =>
+  invoke("navigate_in_app_webview_window", { label, url });
+
+export const openVirtViewerFromSpicePayload = (spiceData: Record<string, unknown>): Promise<void> =>
+  invoke("open_virt_viewer_from_spice_payload", { spiceData });
+
 export const createLocalDir = (parentPathKey: string, dirName: string): Promise<void> =>
   invoke("create_local_dir", { parentPathKey, dirName });
 
@@ -293,6 +315,28 @@ export const pluginInvoke = (
   method: string,
   arg: Record<string, unknown>,
 ): Promise<unknown> => invoke("plugin_invoke", { pluginId, method, arg });
+
+export type ProxmuxWsProxyStartResult = {
+  proxyId: string;
+  localWsUrl: string;
+};
+
+/** Start `127.0.0.1` WebSocket bridge to a Proxmox `wss://` console URL (for self-signed clusters). */
+export const proxmuxWsProxyStart = (
+  upstreamWssUrl: string,
+  allowInsecureTls: boolean,
+  authHeader?: string,
+  authCookie?: string,
+): Promise<ProxmuxWsProxyStartResult> =>
+  invoke("proxmux_ws_proxy_start", {
+    upstreamWssUrl,
+    allowInsecureTls,
+    authHeader: authHeader ?? null,
+    authCookie: authCookie ?? null,
+  });
+
+export const proxmuxWsProxyStop = (proxyId: string): Promise<void> =>
+  invoke("proxmux_ws_proxy_stop", { proxyId });
 
 export const activateLicense = (token: string): Promise<LicensePayload> =>
   invoke("activate_license", { token });

@@ -53,12 +53,14 @@ const demoMetadata: HostMetadataStore = {
       tags: ["demo", "staging"],
       lastUsedAt: now(),
       trustHostDefault: true,
+      isJumpHost: false,
     },
     "lab-runner": {
       favorite: false,
       tags: ["ci"],
       lastUsedAt: now() - 3600,
       trustHostDefault: true,
+      isJumpHost: false,
     },
   },
 };
@@ -171,8 +173,13 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       }
       return undefined;
     }
+    case "open_in_app_webview_window":
+      return "e2e-webview-window";
     case "save_host_metadata":
     case "touch_host_last_used":
+    case "open_external_url":
+    case "navigate_in_app_webview_window":
+    case "open_virt_viewer_from_spice_payload":
     case "export_backup":
     case "import_backup":
     case "save_layout_profile":
@@ -320,13 +327,82 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
           enabled: true,
           entitlementOk: true,
         },
+        {
+          manifest: {
+            id: "dev.nosuckshell.plugin.proxmux",
+            version: "0.0.0-e2e",
+            displayName: "PROXMUX",
+            capabilities: ["settingsUi", "hostMetadataEnricher"],
+          },
+          enabled: true,
+          entitlementOk: true,
+        },
       ];
     case "set_plugin_enabled":
       return undefined;
     case "plugin_invoke": {
       const method = args?.method as string;
+      const pluginId = args?.pluginId as string;
       if (method === "ping") {
         return { ok: true, message: "pong", echo: args?.arg ?? {} };
+      }
+      if (pluginId === "dev.nosuckshell.plugin.proxmux") {
+        if (method === "listState") {
+          return {
+            activeClusterId: null,
+            clusters: [],
+            usesEncryptedSecrets: false,
+            usesPlainSecrets: false,
+            favoritesByCluster: {},
+            httpProxyUrl: "",
+            noProxy: "",
+            proxyProfiles: [],
+          };
+        }
+        if (
+          method === "saveCluster" ||
+          method === "removeCluster" ||
+          method === "setActiveCluster" ||
+          method === "saveProxySettings" ||
+          method === "saveProxyProfiles"
+        ) {
+          return { ok: true };
+        }
+        if (method === "testConnection" || method === "testConnectionDraft") {
+          return { ok: false, message: "e2e stub: no Proxmox server" };
+        }
+        if (method === "fetchResources") {
+          return { ok: true, resources: [] };
+        }
+        if (method === "guestStatus") {
+          return { ok: true, data: { status: "stopped" } };
+        }
+        if (method === "guestPower") {
+          return { ok: true };
+        }
+        if (method === "toggleProxmuxFavorite") {
+          return { ok: true, favorites: [] };
+        }
+        if (method === "fetchSpiceProxy") {
+          return {
+            ok: true,
+            data: {
+              type: "spice",
+              host: "127.0.0.1",
+              port: "5900",
+            },
+          };
+        }
+        if (method === "qemuSpiceCapable") {
+          return { ok: true, spiceCapable: true };
+        }
+        if (method === "fetchQemuVncProxy" || method === "fetchLxcTermProxy") {
+          return {
+            ok: true,
+            apiOrigin: "https://127.0.0.1:8006",
+            data: { port: 5900, ticket: "e2e-test-ticket" },
+          };
+        }
       }
       throw new Error(`e2e plugin_invoke: unknown method ${method}`);
     }
@@ -341,6 +417,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     case "license_status":
       return { active: false, licenseId: null, entitlements: [], exp: null };
     case "clear_license":
+      return undefined;
+    case "proxmux_ws_proxy_start":
+      return { proxyId: "e2e-ws-proxy", localWsUrl: "ws://127.0.0.1:59999/" };
+    case "proxmux_ws_proxy_stop":
       return undefined;
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);

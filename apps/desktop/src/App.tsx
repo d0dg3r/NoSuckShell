@@ -43,10 +43,15 @@ import {
   startSession,
   touchHostLastUsed,
   listPlugins,
+  navigateInAppWebviewWindow,
+  openExternalUrl,
+  openVirtViewerFromSpicePayload,
+  pluginInvoke,
 } from "./tauri-api";
 import { AddHostModal } from "./components/AddHostModal";
 import { HostContextMenu } from "./components/HostContextMenu";
 import { HostSidebar } from "./components/HostSidebar";
+import { ProxmuxSidebarPanel } from "./components/ProxmuxSidebarPanel";
 import { PaneContextMenu } from "./components/PaneContextMenu";
 import { QuickConnectModal } from "./components/QuickConnectModal";
 import { createSplitPaneRenderer } from "./components/SplitWorkspace";
@@ -80,7 +85,7 @@ const LayoutCommandCenter = lazy(async () => {
 });
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { FILE_WORKSPACE_PLUGIN_ID } from "./features/builtin-plugin-ids";
+import { FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./features/builtin-plugin-ids";
 import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
 import {
   FILE_DND_PAYLOAD_MIME,
@@ -93,6 +98,7 @@ import {
   parseHostPortInput,
   parseQuickConnectCommandInput,
 } from "./features/quick-connect";
+import { shortenPathForPaneTitle } from "./features/terminal-osc7-path";
 import {
   assignSessionToPane,
   clearPaneAtIndex,
@@ -148,11 +154,20 @@ import {
 } from "./features/app-bootstrap";
 import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
 import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
+import { hostMetadataIsJumpHost, JUMP_HOST_METADATA_TAG, withJumpHostTagSync } from "./features/jump-host";
 import {
   effectiveStrictHostKeyPolicy,
   metadataPatchForHostKeyPolicy,
 } from "./features/host-metadata-policy";
 import { createId } from "./features/app-id";
+import { validateExternalHttpUrl } from "./features/external-http-url";
+import { isProxmoxConsoleDeepLinkUrl } from "./features/proxmox-console-urls";
+import {
+  computeProxmuxWarmupDelayMs,
+  selectProxmuxWarmupClusterId,
+  shouldRunProxmuxStartupWarmup,
+} from "./features/proxmux-startup-warmup";
+import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window";
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
@@ -166,6 +181,7 @@ import {
   LAYOUT_MODE_STORAGE_KEY,
   LIST_TONE_PRESET_STORAGE_KEY,
   MOBILE_STACKED_MEDIA,
+  PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY,
   QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY,
   QUICK_CONNECT_MODE_STORAGE_KEY,
   SETTINGS_OPEN_MODE_STORAGE_KEY,
@@ -183,6 +199,7 @@ import {
   TERMINAL_FONT_OFFSET_MIN,
   TERMINAL_FONT_OFFSET_STORAGE_KEY,
   TERMINAL_FONT_PRESET_STORAGE_KEY,
+  UI_DENSITY_OFFSET_STORAGE_KEY,
   UI_FONT_PRESET_STORAGE_KEY,
   clampSidebarWidth,
   parseFileExportArchiveFormat,
@@ -221,6 +238,7 @@ import {
   type TrustPromptRequest,
   createQuickConnectDraft,
 } from "./features/session-model";
+import { sessionIsWebLike, sessionKindIsWebLike } from "./features/session-tab-helpers";
 import {
   cloneSplitTree,
   collectPaneOrder,
@@ -245,6 +263,7 @@ import {
   compactSplitSlotsByPaneOrder,
   createEmptyWorkspaceSnapshot,
   DEFAULT_WORKSPACE_ID,
+  findFirstFreePaneInOrder,
   type WorkspaceSnapshot,
 } from "./features/workspace-snapshot";
 
@@ -310,56 +329,59 @@ function syncSidebarHostWithStore(
   storeKeys: SshKeyObject[],
   storeUsers: UserObject[],
   allHosts: HostConfig[],
+  metadataHosts: HostMetadataStore["hosts"],
 ): { host: HostConfig; binding: HostBinding } {
   let r = normalizeHostIdentityWithBinding(host, draft, storeKeys);
   r = normalizeHostUserWithBinding(r.host, r.binding, storeUsers);
-  r = normalizeHostProxyJumpWithBinding(r.host, r.binding, jumpHostCandidates(allHosts, host.host));
+  r = normalizeHostProxyJumpWithBinding(
+    r.host,
+    r.binding,
+    jumpHostCandidates(allHosts, host.host, metadataHosts),
+  );
   return r;
 }
 
-/** Dirty check for the host whose inline sidebar settings row is open (`openHostMenuHostAlias`). */
-function isSidebarHostSettingsDirty(
-  menuAlias: string,
+function isHostSettingsDirty(
+  alias: string,
   hosts: HostConfig[],
   metadataHosts: HostMetadataStore["hosts"],
-  currentHost: HostConfig,
-  tagDraft: string,
-  hostKeyPolicyDraft: StrictHostKeyPolicy,
+  draftHost: HostConfig,
+  draftTagDraft: string,
+  draftKeyPolicy: StrictHostKeyPolicy,
   entityStore: EntityStore,
-  sidebarHostBindingDraft: HostBinding,
+  draftBinding: HostBinding,
 ): boolean {
-  if (!menuAlias.trim()) {
+  if (!alias.trim()) {
     return false;
   }
-  const saved = hosts.find((h) => h.host === menuAlias);
+  const saved = hosts.find((h) => h.host === alias);
   if (!saved) {
     return false;
   }
-  if (currentHost.host !== menuAlias) {
+  if (draftHost.host !== alias) {
     return true;
   }
-  if (!hostConfigsEqual(currentHost, saved)) {
+  if (!hostConfigsEqual(draftHost, saved)) {
     return true;
   }
-  const savedBinding = sidebarSavedHostBinding(menuAlias, hosts, entityStore, metadataHosts);
-  if (sidebarBindingPickerDirty(sidebarHostBindingDraft, savedBinding)) {
+  const savedBinding = sidebarSavedHostBinding(alias, hosts, entityStore, metadataHosts);
+  if (sidebarBindingPickerDirty(draftBinding, savedBinding)) {
     return true;
   }
-  const savedTags = [...(metadataHosts[menuAlias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
-  const draftTags = parseHostTagDraftToSortedTags(tagDraft);
+  const savedTags = [...(metadataHosts[alias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
+  const draftTags = parseHostTagDraftToSortedTags(draftTagDraft);
   if (savedTags.length !== draftTags.length) {
     return true;
   }
   if (savedTags.some((t, i) => t !== draftTags[i])) {
     return true;
   }
-  const savedMeta = metadataHosts[menuAlias] ?? createDefaultHostMetadata();
-  return hostKeyPolicyDraft !== effectiveStrictHostKeyPolicy(savedMeta);
+  const savedMeta = metadataHosts[alias] ?? createDefaultHostMetadata();
+  return draftKeyPolicy !== effectiveStrictHostKeyPolicy(savedMeta);
 }
 
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
-  const [currentHost, setCurrentHost] = useState<HostConfig>(emptyHost());
   const [activeHost, setActiveHost] = useState<string>("");
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
@@ -374,20 +396,11 @@ export function App() {
   const [storeEncryptedKeyNameDraft, setStoreEncryptedKeyNameDraft] = useState<string>("");
   const [storeEncryptedPrivateKeyDraft, setStoreEncryptedPrivateKeyDraft] = useState<string>("");
   const [storeEncryptedPublicKeyDraft, setStoreEncryptedPublicKeyDraft] = useState<string>("");
-  const [storeSelectedHostForBinding, setStoreSelectedHostForBinding] = useState<string>("");
-  const [storeBindingDraft, setStoreBindingDraft] = useState<HostBinding>({
-    userId: undefined,
-    groupIds: [],
-    tagIds: [],
-    keyRefs: [],
-    proxyJump: "",
-    legacyUser: "",
-    legacyTags: [],
-    legacyIdentityFile: "",
-    legacyProxyJump: "",
-    legacyProxyCommand: "",
-  });
   const [error, setError] = useState<string>("");
+  /** After opening Proxmox login in an external webview, user continues to the console URL here. */
+  const [proxmoxWebLoginAssist, setProxmoxWebLoginAssist] = useState<{ label: string; consoleUrl: string } | null>(
+    null,
+  );
   const [isAppSettingsOpen, setIsAppSettingsOpen] = useState<boolean>(false);
   const [settingsOpenMode, setSettingsOpenMode] = useState<SettingsOpenMode>(() => {
     if (typeof window === "undefined") {
@@ -398,7 +411,7 @@ export function App() {
   });
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("hosts");
   const [keyboardShortcutChords, setKeyboardShortcutChords] = useState<Record<KeyboardShortcutCommandId, KeyChord>>(() =>
     mergeChordMap(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
   );
@@ -422,9 +435,6 @@ export function App() {
   const [quickConnectDraft, setQuickConnectDraft] = useState<QuickConnectDraft>(() => createQuickConnectDraft());
   const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
   const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
-  const [tagDraft, setTagDraft] = useState<string>("");
-  const [hostKeyPolicyDraft, setHostKeyPolicyDraft] = useState<StrictHostKeyPolicy>("ask");
-  const [sidebarHostBindingDraft, setSidebarHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [addHostBindingDraft, setAddHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
@@ -438,6 +448,10 @@ export function App() {
   const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
   /** Gated by built-in plugin `dev.nosuckshell.plugin.file-workspace` (Settings → Plugins & license). */
   const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
+  const [proxmuxSidebarAvailable, setProxmuxSidebarAvailable] = useState(false);
+  const [proxmuxResourceCount, setProxmuxResourceCount] = useState(0);
+  const proxmuxWarmupTimerRef = useRef<number | null>(null);
+  const proxmuxWarmupDoneRef = useRef(false);
   const [paneLayouts, setPaneLayouts] = useState<PaneLayoutItem[]>(() => createPaneLayoutsFromSlots(createInitialPaneState()));
   const [splitTree, setSplitTree] = useState<SplitTreeNode>(() => createLeafNode(0));
   const [activePaneIndex, setActivePaneIndex] = useState<number>(0);
@@ -451,7 +465,12 @@ export function App() {
       return "builtin:all";
     }
     const persisted = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (persisted === "builtin:all" || persisted === "builtin:favorites" || persisted?.startsWith("custom:")) {
+    if (
+      persisted === "builtin:all" ||
+      persisted === "builtin:favorites" ||
+      persisted === "builtin:proxmux" ||
+      persisted?.startsWith("custom:")
+    ) {
       return persisted as SidebarViewId;
     }
     return "builtin:all";
@@ -467,7 +486,17 @@ export function App() {
   const [layoutSwitchToTargetAfterApply, setLayoutSwitchToTargetAfterApply] = useState<boolean>(false);
   const [layoutMirrorWorkspaceIdOnSave, setLayoutMirrorWorkspaceIdOnSave] = useState<string>("");
   const layoutCommandCenterWasOpenRef = useRef<boolean>(false);
-  const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
+  const [hostSettingsSelectedAlias, setHostSettingsSelectedAlias] = useState<string>("");
+  const [hostSettingsDraftHost, setHostSettingsDraftHost] = useState<HostConfig>(() => emptyHost());
+  const [hostSettingsDraftBinding, setHostSettingsDraftBinding] = useState<HostBinding>(() =>
+    createDefaultHostBinding(),
+  );
+  const [hostSettingsTagDraft, setHostSettingsTagDraft] = useState<string>("");
+  const [hostSettingsKeyPolicy, setHostSettingsKeyPolicy] = useState<StrictHostKeyPolicy>("ask");
+  const [pendingRemoveHostsTab, setPendingRemoveHostsTab] = useState<boolean>(false);
+  const removeHostsTabTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const proxmuxStartupWarmupTimerRef = useRef<number | null>(null);
+  const proxmuxStartupWarmupDoneRef = useRef<boolean>(false);
   const [draggingKind, setDraggingKind] = useState<DragPayload["type"] | null>(null);
   const [dragOverPaneIndex, setDragOverPaneIndex] = useState<number | null>(null);
   const [activeDropZonePaneIndex, setActiveDropZonePaneIndex] = useState<number | null>(null);
@@ -495,6 +524,16 @@ export function App() {
     }
     const persisted = window.localStorage.getItem(DENSITY_PROFILE_STORAGE_KEY);
     return persisted === "aggressive" || persisted === "safe" || persisted === "balanced" ? persisted : "balanced";
+  });
+  const [uiDensityOffset, setUiDensityOffset] = useState<number>(() => {
+    if (typeof window === "undefined") {
+      return 0;
+    }
+    const persisted = Number(window.localStorage.getItem(UI_DENSITY_OFFSET_STORAGE_KEY));
+    if (!Number.isFinite(persisted)) {
+      return 0;
+    }
+    return Math.min(2, Math.max(-2, Math.round(persisted)));
   });
   const [listTonePreset, setListTonePreset] = useState<ListTonePreset>(() => {
     if (typeof window === "undefined") {
@@ -585,6 +624,13 @@ export function App() {
     return parseStoredAutoArrangeMode(persisted);
   });
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readLayoutMode());
+  const [proxmuxOpenWebConsolesInPane, setProxmuxOpenWebConsolesInPane] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const raw = window.localStorage.getItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY);
+    return raw !== "false";
+  });
   const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<string, WorkspaceSnapshot>>({
     [DEFAULT_WORKSPACE_ID]: createEmptyWorkspaceSnapshot(DEFAULT_WORKSPACE_ID, "Main"),
@@ -610,6 +656,7 @@ export function App() {
   const sidebarDragStartXRef = useRef<number>(0);
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const paneScrollAnchorsRef = useRef<Record<number, HTMLElement | null>>({});
   const settingsModalRef = useRef<HTMLElement | null>(null);
   const settingsDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const mobilePagerRef = useRef<HTMLDivElement | null>(null);
@@ -633,13 +680,14 @@ export function App() {
   const localFilePanePathsRef = useRef<Record<number, string>>({});
   const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
   const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
+  const sessionTerminalCwdRef = useRef<Record<string, string>>({});
+  const [sessionTerminalCwdEpoch, setSessionTerminalCwdEpoch] = useState(0);
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
   const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const lastAutoArrangeBeforeFreeRef = useRef<AutoArrangeActiveMode>("c");
   const prevAppSettingsOpenRef = useRef(false);
-  const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
   const shouldSplitAsEmpty = (
     eventLike?:
@@ -669,14 +717,45 @@ export function App() {
     return Boolean(eventLike.altKey || eventLike.getModifierState?.("AltGraph"));
   };
 
-  const canSave = useMemo(
-    () => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0,
-    [currentHost],
-  );
   const canCreateHost = useMemo(
     () => newHostDraft.host.trim().length > 0 && newHostDraft.hostName.trim().length > 0,
     [newHostDraft],
   );
+  const hostSettingsMetadataForSelected = useMemo(
+    () => metadataStore.hosts[hostSettingsSelectedAlias] ?? createDefaultHostMetadata(),
+    [metadataStore.hosts, hostSettingsSelectedAlias],
+  );
+  const isHostsTabDirty = useMemo(() => {
+    if (!hostSettingsSelectedAlias.trim()) {
+      return false;
+    }
+    return isHostSettingsDirty(
+      hostSettingsSelectedAlias,
+      hosts,
+      metadataStore.hosts,
+      hostSettingsDraftHost,
+      hostSettingsTagDraft,
+      hostSettingsKeyPolicy,
+      entityStore,
+      hostSettingsDraftBinding,
+    );
+  }, [
+    hostSettingsSelectedAlias,
+    hosts,
+    metadataStore.hosts,
+    hostSettingsDraftHost,
+    hostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    entityStore,
+    hostSettingsDraftBinding,
+  ]);
+  const hostSettingsTabSaveDisabled = useMemo(() => {
+    return (
+      hostSettingsDraftHost.host.trim().length === 0 ||
+      hostSettingsDraftHost.hostName.trim().length === 0 ||
+      !isHostsTabDirty
+    );
+  }, [hostSettingsDraftHost.host, hostSettingsDraftHost.hostName, isHostsTabDirty]);
   const sessionIds = useMemo(() => sessions.map((session) => session.id), [sessions]);
   const sessionById = useMemo(() => {
     return new Map(sessions.map((session) => [session.id, session]));
@@ -686,6 +765,12 @@ export function App() {
     () => splitSlots.filter((slot): slot is string => Boolean(slot)),
     [splitSlots],
   );
+  const broadcastEligibleVisiblePaneSessionIds = useMemo(() => {
+    return visiblePaneSessionIds.filter((id) => {
+      const s = sessionById.get(id);
+      return Boolean(s && !sessionKindIsWebLike(s.kind));
+    });
+  }, [visiblePaneSessionIds, sessionById]);
   const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
   const selectedLayoutProfile = useMemo(
     () => layoutProfiles.find((profile) => profile.id === selectedLayoutProfileId) ?? null,
@@ -738,26 +823,118 @@ export function App() {
     layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
 
-  const refreshFileWorkspacePlugin = useCallback(async () => {
+  const refreshLicensedPlugins = useCallback(async () => {
     try {
       const rows = await listPlugins();
-      const row = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
-      setFileWorkspacePluginEnabled(row ? row.enabled && row.entitlementOk : true);
+      const fw = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
+      setFileWorkspacePluginEnabled(fw ? fw.enabled && fw.entitlementOk : true);
+      const px = rows.find((r) => r.manifest.id === PROXMUX_PLUGIN_ID);
+      setProxmuxSidebarAvailable(Boolean(px && px.enabled && px.entitlementOk));
     } catch {
       setFileWorkspacePluginEnabled(true);
+      setProxmuxSidebarAvailable(false);
     }
   }, []);
 
   useEffect(() => {
-    void refreshFileWorkspacePlugin();
-  }, [refreshFileWorkspacePlugin]);
+    void refreshLicensedPlugins();
+  }, [refreshLicensedPlugins]);
 
   useEffect(() => {
     if (prevAppSettingsOpenRef.current && !isAppSettingsOpen) {
-      void refreshFileWorkspacePlugin();
+      void refreshLicensedPlugins();
     }
     prevAppSettingsOpenRef.current = isAppSettingsOpen;
-  }, [isAppSettingsOpen, refreshFileWorkspacePlugin]);
+  }, [isAppSettingsOpen, refreshLicensedPlugins]);
+
+  useEffect(() => {
+    if (!proxmuxSidebarAvailable) {
+      proxmuxWarmupDoneRef.current = false;
+      if (proxmuxWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxWarmupTimerRef.current);
+        proxmuxWarmupTimerRef.current = null;
+      }
+      return;
+    }
+    if (proxmuxWarmupDoneRef.current) {
+      return;
+    }
+    proxmuxWarmupDoneRef.current = true;
+    const delayMs = 1_000 + Math.round(Math.random() * 2_000);
+    proxmuxWarmupTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const raw = (await pluginInvoke(PROXMUX_PLUGIN_ID, "listState", {})) as {
+            activeClusterId?: string | null;
+            clusters?: Array<{ id: string }>;
+          };
+          const clusters = Array.isArray(raw.clusters) ? raw.clusters : [];
+          const selectedClusterId =
+            (raw.activeClusterId && clusters.some((cluster) => cluster.id === raw.activeClusterId)
+              ? raw.activeClusterId
+              : null) ?? clusters[0]?.id ?? null;
+          if (!selectedClusterId) {
+            return;
+          }
+          await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", { clusterId: selectedClusterId });
+        } catch {
+          // Warmup is best effort only; foreground fetch handles hard errors.
+        }
+      })();
+    }, delayMs);
+    return () => {
+      if (proxmuxWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxWarmupTimerRef.current);
+        proxmuxWarmupTimerRef.current = null;
+      }
+    };
+  }, [proxmuxSidebarAvailable]);
+
+  useEffect(() => {
+    if (!proxmuxSidebarAvailable) {
+      if (proxmuxStartupWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxStartupWarmupTimerRef.current);
+        proxmuxStartupWarmupTimerRef.current = null;
+      }
+      proxmuxStartupWarmupDoneRef.current = false;
+      return;
+    }
+    if (!shouldRunProxmuxStartupWarmup(proxmuxSidebarAvailable, proxmuxStartupWarmupDoneRef.current)) {
+      return;
+    }
+    const delayMs = computeProxmuxWarmupDelayMs(Math.random());
+    proxmuxStartupWarmupTimerRef.current = window.setTimeout(() => {
+      proxmuxStartupWarmupTimerRef.current = null;
+      void (async () => {
+        try {
+          const raw = (await pluginInvoke(PROXMUX_PLUGIN_ID, "listState", {})) as {
+            activeClusterId?: string | null;
+            clusters?: Array<{ id?: unknown }>;
+          };
+          const clusters = Array.isArray(raw.clusters)
+            ? raw.clusters
+                .map((entry) => ({ id: typeof entry?.id === "string" ? entry.id : "" }))
+                .filter((entry) => entry.id.length > 0)
+            : [];
+          const clusterId = selectProxmuxWarmupClusterId(raw.activeClusterId ?? null, clusters);
+          if (!clusterId) {
+            return;
+          }
+          await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchResources", { clusterId });
+        } catch {
+          // Best-effort warmup only; the sidebar performs explicit loads.
+        } finally {
+          proxmuxStartupWarmupDoneRef.current = true;
+        }
+      })();
+    }, delayMs);
+    return () => {
+      if (proxmuxStartupWarmupTimerRef.current != null) {
+        window.clearTimeout(proxmuxStartupWarmupTimerRef.current);
+        proxmuxStartupWarmupTimerRef.current = null;
+      }
+    };
+  }, [proxmuxSidebarAvailable]);
 
   useEffect(() => {
     if (!fileWorkspacePluginEnabled) {
@@ -766,6 +943,13 @@ export function App() {
   }, [fileWorkspacePluginEnabled]);
 
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
+
+  const verticalStackScrollEnabled = useMemo(
+    () =>
+      Boolean(workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes) &&
+      !(isStackedShell && mobileShellTab === "terminal"),
+    [activeWorkspaceId, isStackedShell, mobileShellTab, workspaceSnapshots],
+  );
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -884,17 +1068,20 @@ export function App() {
     () => sortRowsByFavoriteThenAlias(filteredHostRows.filter((row) => !row.connected)),
     [filteredHostRows],
   );
-  const sidebarViews = useMemo(
-    () => [
-      { id: "builtin:all" as SidebarViewId, label: "All" },
-      { id: "builtin:favorites" as SidebarViewId, label: "Favorites" },
+  const sidebarViews = useMemo(() => {
+    const views: Array<{ id: SidebarViewId; label: string }> = [
+      { id: "builtin:all", label: "All" },
+      { id: "builtin:favorites", label: "Favorites" },
       ...sortedViewProfiles.map((profile) => ({
         id: `custom:${profile.id}` as SidebarViewId,
         label: profile.name,
       })),
-    ],
-    [sortedViewProfiles],
-  );
+    ];
+    if (proxmuxSidebarAvailable) {
+      views.push({ id: "builtin:proxmux", label: "PROXMUX" });
+    }
+    return views;
+  }, [sortedViewProfiles, proxmuxSidebarAvailable]);
   const highlightedHostAlias = useMemo(() => {
     if (hoveredHostAlias) {
       return hoveredHostAlias;
@@ -927,6 +1114,9 @@ export function App() {
         return "Drop it on me";
       }
       if (session.kind === "local") {
+        return session.label;
+      }
+      if (sessionIsWebLike(session)) {
         return session.label;
       }
       if (session.kind === "sshQuick") {
@@ -962,6 +1152,14 @@ export function App() {
     setFilePaneTitleEpoch((n) => n + 1);
   }, []);
 
+  const handleSessionWorkingDirectoryChange = useCallback((sid: string, path: string) => {
+    if (sessionTerminalCwdRef.current[sid] === path) {
+      return;
+    }
+    sessionTerminalCwdRef.current[sid] = path;
+    setSessionTerminalCwdEpoch((n) => n + 1);
+  }, []);
+
   const resolvePaneLabel = useCallback(
     (paneIndex: number): { display: string; title: string } => {
       const paneSessionId = splitSlots[paneIndex] ?? null;
@@ -980,8 +1178,16 @@ export function App() {
         }
       }
       const paneSession = sessionById.get(paneSessionId) ?? null;
-      const label = resolveSessionTitle(paneSession);
-      return { display: label, title: label };
+      const identity = resolveSessionTitle(paneSession);
+      const cwd = sessionTerminalCwdRef.current[paneSessionId];
+      if (cwd) {
+        const shortCwd = shortenPathForPaneTitle(cwd, 44);
+        return {
+          display: `${identity} · ${shortCwd}`,
+          title: `${identity} — ${cwd}`,
+        };
+      }
+      return { display: identity, title: identity };
     },
     [
       resolveSessionTitle,
@@ -991,6 +1197,7 @@ export function App() {
       showFullPathInFilePaneTitle,
       filePaneTitleEpoch,
       fileWorkspacePluginEnabled,
+      sessionTerminalCwdEpoch,
     ],
   );
   const load = async () => {
@@ -1014,9 +1221,6 @@ export function App() {
     });
     if (loadedHosts.length > 0) {
       setActiveHost(loadedHosts[0].host);
-      setCurrentHost(loadedHosts[0]);
-      setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
-      setStoreSelectedHostForBinding((prev) => prev || loadedHosts[0].host);
     }
     setSelectedViewProfileIdInSettings((prev) => {
       if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
@@ -1109,30 +1313,6 @@ export function App() {
     () => buildQuickConnectUserCandidates(metadataStore.defaultUser, storeUsers.map((entry) => entry.username || entry.name)),
     [metadataStore.defaultUser, storeUsers],
   );
-  useEffect(() => {
-    if (!storeSelectedHostForBinding) {
-      return;
-    }
-    const existing = entityStore.hostBindings[storeSelectedHostForBinding];
-    if (existing) {
-      setStoreBindingDraft(existing);
-      return;
-    }
-    const host = hosts.find((entry) => entry.host === storeSelectedHostForBinding);
-    setStoreBindingDraft({
-      userId: undefined,
-      groupIds: [],
-      tagIds: [],
-      keyRefs: [],
-      proxyJump: host?.proxyJump ?? "",
-      legacyUser: host?.user ?? "",
-      legacyTags: metadataStore.hosts[storeSelectedHostForBinding]?.tags ?? [],
-      legacyIdentityFile: host?.identityFile ?? "",
-      legacyProxyJump: host?.proxyJump ?? "",
-      legacyProxyCommand: host?.proxyCommand ?? "",
-    });
-  }, [entityStore.hostBindings, hosts, metadataStore.hosts, storeSelectedHostForBinding]);
-
   const persistEntityStore = useCallback(async (next: EntityStore) => {
     setEntityStore(next);
     await saveStoreObjects(next);
@@ -1563,23 +1743,74 @@ export function App() {
     [storePassphrase],
   );
 
-  const saveHostBindingDraft = useCallback(async () => {
-    const hostAlias = storeSelectedHostForBinding.trim();
-    if (!hostAlias) {
+  const clearPendingRemoveHostsTab = useCallback(() => {
+    if (removeHostsTabTimerRef.current) {
+      clearTimeout(removeHostsTabTimerRef.current);
+      removeHostsTabTimerRef.current = null;
+    }
+    setPendingRemoveHostsTab(false);
+  }, []);
+
+  const loadHostIntoSettingsEditor = useCallback(
+    (alias: string) => {
+      const trimmed = alias.trim();
+      const h = hosts.find((x) => x.host === trimmed);
+      if (!h) {
+        return;
+      }
+      const draft = sidebarSavedHostBinding(trimmed, hosts, entityStore, metadataStore.hosts);
+      const synced = syncSidebarHostWithStore(h, draft, storeKeys, storeUsers, hosts, metadataStore.hosts);
+      clearPendingRemoveHostsTab();
+      setHostSettingsSelectedAlias(trimmed);
+      setHostSettingsDraftHost(synced.host);
+      setHostSettingsDraftBinding(synced.binding);
+      setHostSettingsTagDraft((metadataStore.hosts[trimmed]?.tags ?? []).join(", "));
+      setHostSettingsKeyPolicy(
+        effectiveStrictHostKeyPolicy(metadataStore.hosts[trimmed] ?? createDefaultHostMetadata()),
+      );
+    },
+    [hosts, entityStore, metadataStore.hosts, storeKeys, storeUsers, clearPendingRemoveHostsTab],
+  );
+
+  const onHostSettingsSelectAlias = useCallback(
+    (alias: string) => {
+      const trimmed = alias.trim();
+      if (!trimmed || trimmed === hostSettingsSelectedAlias) {
+        return;
+      }
+      loadHostIntoSettingsEditor(trimmed);
+    },
+    [hostSettingsSelectedAlias, loadHostIntoSettingsEditor],
+  );
+
+  const openHostSettingsForHost = useCallback(
+    (alias: string) => {
+      loadHostIntoSettingsEditor(alias);
+      setActiveAppSettingsTab("hosts");
+      setIsAppSettingsOpen(true);
+    },
+    [loadHostIntoSettingsEditor],
+  );
+
+  useEffect(() => {
+    if (activeAppSettingsTab !== "hosts") {
       return;
     }
-    const nextBindings = {
-      ...entityStore.hostBindings,
-      [hostAlias]: storeBindingDraft,
-    };
-    const next: EntityStore = {
-      ...entityStore,
-      hostBindings: nextBindings,
-      updatedAt: Date.now(),
-    };
-    await persistEntityStore(next);
-  }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
+    if (hosts.length === 0) {
+      setHostSettingsSelectedAlias("");
+      return;
+    }
+    const valid = Boolean(hostSettingsSelectedAlias && hosts.some((x) => x.host === hostSettingsSelectedAlias));
+    if (!valid) {
+      loadHostIntoSettingsEditor(hosts[0].host);
+    }
+  }, [activeAppSettingsTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
 
+  useEffect(() => {
+    if (activeAppSettingsTab !== "hosts") {
+      clearPendingRemoveHostsTab();
+    }
+  }, [activeAppSettingsTab, clearPendingRemoveHostsTab]);
 
   useSessionOutputTrustListener({
     sessionsRef,
@@ -1596,6 +1827,32 @@ export function App() {
     let unlisten: (() => void) | undefined;
     void listen<FileDragPayload>("nossuck-file-clipboard", (ev) => {
       setFileTransferClipboardFromEvent(ev.payload as FileDragPayload);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        /* plain Vite preview without Tauri */
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (import.meta.env.VITE_E2E === "true") {
+      return;
+    }
+    type ProxmoxAssistAutoPayload = { webviewLabel: string; consoleUrl: string };
+    let unlisten: (() => void) | undefined;
+    void listen<ProxmoxAssistAutoPayload>("proxmox-web-assist-auto-console", (ev) => {
+      const { webviewLabel } = ev.payload;
+      setProxmoxWebLoginAssist((prev) => {
+        if (prev?.label !== webviewLabel) {
+          return prev;
+        }
+        return null;
+      });
     })
       .then((fn) => {
         unlisten = fn;
@@ -1705,6 +1962,8 @@ export function App() {
             return nextSet;
           });
           setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+          delete sessionTerminalCwdRef.current[sessionId];
+          setSessionTerminalCwdEpoch((n) => n + 1);
           orphanSeenSessionIdsRef.current.delete(sessionId);
           orphanClosingSessionIdsRef.current.delete(sessionId);
         });
@@ -1889,6 +2148,9 @@ export function App() {
     window.localStorage.setItem(DENSITY_PROFILE_STORAGE_KEY, densityProfile);
   }, [densityProfile]);
   useEffect(() => {
+    window.localStorage.setItem(UI_DENSITY_OFFSET_STORAGE_KEY, String(uiDensityOffset));
+  }, [uiDensityOffset]);
+  useEffect(() => {
     window.localStorage.setItem(LIST_TONE_PRESET_STORAGE_KEY, listTonePreset);
   }, [listTonePreset]);
   useEffect(() => {
@@ -1942,6 +2204,9 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_MODE_STORAGE_KEY, layoutMode);
   }, [layoutMode]);
+  useEffect(() => {
+    window.localStorage.setItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY, String(proxmuxOpenWebConsolesInPane));
+  }, [proxmuxOpenWebConsolesInPane]);
   useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
     if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
@@ -2020,6 +2285,16 @@ export function App() {
       setSelectedSidebarViewId("builtin:all");
     }
   }, [selectedSidebarViewId, viewProfiles]);
+  useEffect(() => {
+    if (selectedSidebarViewId === "builtin:proxmux" && !proxmuxSidebarAvailable) {
+      setSelectedSidebarViewId("builtin:all");
+    }
+  }, [selectedSidebarViewId, proxmuxSidebarAvailable]);
+  useEffect(() => {
+    if (selectedSidebarViewId === "builtin:proxmux") {
+      setShowAdvancedFilters(false);
+    }
+  }, [selectedSidebarViewId]);
   useEffect(() => {
     if (!selectedViewProfileIdInSettings) {
       return;
@@ -2138,158 +2413,7 @@ export function App() {
     }
   }, []);
 
-  const toggleHostMenu = (host: HostConfig) => {
-    if (openHostMenuHostAlias === host.host) {
-      setOpenHostMenuHostAlias("");
-      return;
-    }
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (
-        !window.confirm(
-          "You have unsaved changes for this host. Discard them and open another host's settings?",
-        )
-      ) {
-        return;
-      }
-    }
-    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-      host,
-      draft,
-      storeKeys,
-      storeUsers,
-      hosts,
-    );
-    setOpenHostMenuHostAlias(host.host);
-    setActiveHost(host.host);
-    setCurrentHost(syncedHost);
-    setSidebarHostBindingDraft(syncedBinding);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-  };
 
-  const openHostMenuForHost = (host: HostConfig) => {
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (
-        !window.confirm(
-          "You have unsaved changes for this host. Discard them and open another host's settings?",
-        )
-      ) {
-        return;
-      }
-    }
-    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-      host,
-      draft,
-      storeKeys,
-      storeUsers,
-      hosts,
-    );
-    setActiveHost(host.host);
-    setCurrentHost(syncedHost);
-    setSidebarHostBindingDraft(syncedBinding);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-    setOpenHostMenuHostAlias(host.host);
-  };
-
-  const toggleHostSelection = (host: HostConfig) => {
-    if (activeHost === host.host) {
-      setActiveHost("");
-      if (openHostMenuHostAlias === host.host) {
-        setOpenHostMenuHostAlias("");
-      }
-      return;
-    }
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (!window.confirm("You have unsaved changes for this host. Discard them and switch?")) {
-        return;
-      }
-    }
-    setActiveHost(host.host);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-    if (openHostMenuHostAlias) {
-      const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-      const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-        host,
-        draft,
-        storeKeys,
-        storeUsers,
-        hosts,
-      );
-      setCurrentHost(syncedHost);
-      setSidebarHostBindingDraft(syncedBinding);
-      setOpenHostMenuHostAlias(host.host);
-    } else {
-      setCurrentHost(host);
-    }
-  };
-
-  const clearPendingRemoveConfirm = useCallback(() => {
-    if (removeConfirmResetTimerRef.current) {
-      clearTimeout(removeConfirmResetTimerRef.current);
-      removeConfirmResetTimerRef.current = null;
-    }
-    setPendingRemoveConfirm(null);
-  }, []);
-
-  const armPendingRemoveConfirm = useCallback((hostAlias: string, scope: "settings") => {
-    if (removeConfirmResetTimerRef.current) {
-      clearTimeout(removeConfirmResetTimerRef.current);
-    }
-    setPendingRemoveConfirm({ hostAlias, scope });
-    removeConfirmResetTimerRef.current = setTimeout(() => {
-      setPendingRemoveConfirm(null);
-      removeConfirmResetTimerRef.current = null;
-    }, 2200);
-  }, []);
   const clearPendingCloseAllIntent = useCallback(() => {
     if (closeAllConfirmResetTimerRef.current) {
       clearTimeout(closeAllConfirmResetTimerRef.current);
@@ -2334,30 +2458,29 @@ export function App() {
     await persistMetadataStore(nextStore);
   };
 
-  const saveTagsForHost = async (hostAlias: string) => {
+  const saveHostTagsAndKeyPolicy = async (
+    hostAlias: string,
+    tagsCommaSeparated: string,
+    policy: StrictHostKeyPolicy,
+  ) => {
     if (!hostAlias.trim()) {
       return;
     }
     const normalizedTags = Array.from(
       new Set(
-        tagDraft
+        tagsCommaSeparated
           .split(",")
           .map((tag) => tag.trim())
           .filter((tag) => tag.length > 0),
       ),
-    );
+    ).sort((a, b) => a.localeCompare(b));
+    const isJumpHost = normalizedTags.includes(JUMP_HOST_METADATA_TAG);
     await upsertHostMetadata(hostAlias, (current) => ({
       ...current,
       tags: normalizedTags,
-      ...metadataPatchForHostKeyPolicy(hostKeyPolicyDraft),
+      isJumpHost,
+      ...metadataPatchForHostKeyPolicy(policy),
     }));
-  };
-
-  const saveTagsForActiveHost = async () => {
-    if (!activeHost.trim()) {
-      return;
-    }
-    await saveTagsForHost(activeHost);
   };
 
   const toggleFavoriteForHost = async (hostAlias: string) => {
@@ -2366,6 +2489,26 @@ export function App() {
         ...current,
         favorite: !current.favorite,
       }));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const toggleJumpHostForHost = async (hostAlias: string) => {
+    try {
+      let nextTags: string[] = [];
+      await upsertHostMetadata(hostAlias, (current) => {
+        const nextJump = !hostMetadataIsJumpHost(current);
+        nextTags = withJumpHostTagSync(current.tags, nextJump);
+        return {
+          ...current,
+          isJumpHost: nextJump,
+          tags: nextTags,
+        };
+      });
+      if (hostSettingsSelectedAlias === hostAlias) {
+        setHostSettingsTagDraft(nextTags.join(", "));
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -2512,23 +2655,6 @@ export function App() {
     }
   };
 
-  const onSave = async () => {
-    setError("");
-    try {
-      const normalizedAlias = currentHost.host.trim();
-      await saveHost(currentHost);
-      await persistEntityStore({
-        ...entityStore,
-        hostBindings: { ...entityStore.hostBindings, [normalizedAlias]: sidebarHostBindingDraft },
-        updatedAt: Date.now(),
-      });
-      await saveTagsForHost(normalizedAlias);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
   const onDelete = async (hostAlias: string) => {
     const normalizedAlias = hostAlias.trim();
     if (!normalizedAlias) {
@@ -2547,43 +2673,68 @@ export function App() {
         ...metadataStore,
         hosts: nextHosts,
       });
-      setOpenHostMenuHostAlias((prev) => (prev === normalizedAlias ? "" : prev));
-      if (currentHost.host === normalizedAlias) {
-        const cleared = emptyHost();
-        setCurrentHost(cleared);
-        setTagDraft("");
-        setHostKeyPolicyDraft("ask");
-        setSidebarHostBindingDraft(createDefaultHostBinding());
-      }
       if (activeHost === normalizedAlias) {
         setActiveHost("");
       }
-      clearPendingRemoveConfirm();
+      clearPendingRemoveHostsTab();
       await load();
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const handleRemoveHostIntent = (hostAlias: string, scope: "settings") => {
-    const normalizedAlias = hostAlias.trim();
-    if (!normalizedAlias || !hosts.some((host) => host.host === normalizedAlias)) {
-      setError("Select an existing host before removing.");
+  const saveHostFromSettingsTab = useCallback(async () => {
+    const alias = hostSettingsDraftHost.host.trim();
+    if (!alias) {
       return;
     }
-    if (pendingRemoveConfirm?.hostAlias === normalizedAlias && pendingRemoveConfirm.scope === scope) {
-      clearPendingRemoveConfirm();
-      void onDelete(normalizedAlias);
+    setError("");
+    try {
+      await saveHost(hostSettingsDraftHost);
+      await persistEntityStore({
+        ...entityStore,
+        hostBindings: { ...entityStore.hostBindings, [alias]: hostSettingsDraftBinding },
+        updatedAt: Date.now(),
+      });
+      await saveHostTagsAndKeyPolicy(alias, hostSettingsTagDraft, hostSettingsKeyPolicy);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [
+    hostSettingsDraftHost,
+    entityStore,
+    hostSettingsDraftBinding,
+    hostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    persistEntityStore,
+  ]);
+
+  const onRemoveHostSettingsTabIntent = useCallback(() => {
+    const alias = hostSettingsSelectedAlias.trim();
+    if (!alias || !hosts.some((h) => h.host === alias)) {
       return;
     }
-    armPendingRemoveConfirm(normalizedAlias, scope);
-  };
+    if (pendingRemoveHostsTab) {
+      clearPendingRemoveHostsTab();
+      void onDelete(alias);
+      return;
+    }
+    setPendingRemoveHostsTab(true);
+    if (removeHostsTabTimerRef.current) {
+      clearTimeout(removeHostsTabTimerRef.current);
+    }
+    removeHostsTabTimerRef.current = setTimeout(() => {
+      setPendingRemoveHostsTab(false);
+      removeHostsTabTimerRef.current = null;
+    }, 2200);
+  }, [hostSettingsSelectedAlias, hosts, pendingRemoveHostsTab, clearPendingRemoveHostsTab, onDelete]);
+
 
   const openAddHostModal = () => {
     setNewHostDraft(emptyHost());
     setAddHostBindingDraft(createDefaultHostBinding());
     setIsQuickAddMenuOpen(false);
-    setOpenHostMenuHostAlias("");
     setIsAddHostModalOpen(true);
   };
 
@@ -2604,7 +2755,6 @@ export function App() {
     setQuickConnectCommandInput(defaultUser ? `${defaultUser}@` : "");
     setQuickConnectWizardStep(1);
     setIsQuickAddMenuOpen(false);
-    setOpenHostMenuHostAlias("");
     setPendingQuickConnectPaneIndex(paneIndex);
     setIsQuickConnectModalOpen(true);
   };
@@ -2680,7 +2830,6 @@ export function App() {
       });
       setActiveSession(started.session_id);
       setActiveHost(host.host);
-      setCurrentHost(host);
       const lastUsedAt = Math.floor(Date.now() / 1000);
       setMetadataStore((prev) => ({
         ...prev,
@@ -2701,9 +2850,13 @@ export function App() {
   };
 
   const placeSessionIntoNewOrFreePane = (sessionId: string, splitFromPaneIndex: number) => {
-    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
-    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right", splitFromPaneIndex, "empty");
+    const firstFreePaneIndex = findFirstFreePaneInOrder(paneOrder, splitSlots);
+    const usedExistingEmptyPane = firstFreePaneIndex !== null;
+    const autoSplitDirection: "right" | "bottom" =
+      workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+    const targetPaneIndex = usedExistingEmptyPane
+      ? firstFreePaneIndex
+      : splitFocusedPane(autoSplitDirection, splitFromPaneIndex, "empty");
     setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
     setActivePaneIndex(targetPaneIndex);
     setActiveSession(sessionId);
@@ -2717,6 +2870,115 @@ export function App() {
     }
     placeSessionIntoNewOrFreePane(startedSessionId, splitFromPaneIndex);
   };
+
+  const handleProxmuxSshNode = useCallback(
+    async (ctx: { clusterId: string; node: string }) => {
+      const normalizedNode = ctx.node.trim();
+      if (!normalizedNode) return;
+      const match = hosts.find((h) => h.hostName.trim().toLowerCase() === normalizedNode.toLowerCase());
+      const user = match?.user.trim() || metadataStore.defaultUser.trim() || "root";
+      const slug = `${ctx.clusterId}-${normalizedNode}`.replace(/[^a-zA-Z0-9_.-]/g, "-");
+      const safeAlias = `proxmox-${slug}`.slice(0, 120) || "proxmox-node";
+      const host: HostConfig =
+        match ??
+        ({
+          host: safeAlias,
+          hostName: normalizedNode,
+          user,
+          port: 22,
+          identityFile: "",
+          proxyJump: "",
+          proxyCommand: "",
+        } satisfies HostConfig);
+      await connectToHostInNewPane(host);
+    },
+    [hosts, metadataStore.defaultUser, connectToHostInNewPane],
+  );
+
+  const handleProxmuxOpenExternalUrl = useCallback(
+    async (url: string, label?: string, options?: { allowInsecureTls?: boolean }) => {
+      setError("");
+      const allowInsecureTls = options?.allowInsecureTls === true;
+      if (proxmuxOpenWebConsolesInPane) {
+        const err = validateExternalHttpUrl(url);
+        if (err) {
+          setError(err);
+          return;
+        }
+        const trimmed = url.trim();
+        const title = (label ?? "").trim() || "Proxmox console";
+        if (isProxmoxConsoleDeepLinkUrl(trimmed)) {
+          try {
+            const result = await openProxmoxInAppWebviewWindow({
+              title,
+              consoleUrl: trimmed,
+              allowInsecureTls,
+            });
+            if (result.loginFirst && !result.reused) {
+              setProxmoxWebLoginAssist({ label: result.label, consoleUrl: trimmed });
+            }
+          } catch (e) {
+            setError(String(e));
+          }
+          return;
+        }
+        const id = `web-${createId()}`;
+        setSessions((prev) => [
+          ...prev,
+          { id, kind: "web", label: title, url: trimmed, ...(allowInsecureTls ? { allowInsecureTls: true } : {}) },
+        ]);
+        const autoSplitDirection: "right" | "bottom" =
+          workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+        const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+        const targetPaneIndex =
+          firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
+        setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+        setActivePaneIndex(targetPaneIndex);
+        setActiveSession(id);
+        return;
+      }
+      try {
+        await openExternalUrl(url);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [activePaneIndex, activeWorkspaceId, paneOrder, proxmuxOpenWebConsolesInPane, splitSlots, workspaceSnapshots],
+  );
+
+  const handleProxmoxContinueToConsole = useCallback(async () => {
+    if (!proxmoxWebLoginAssist) return;
+    setError("");
+    try {
+      await navigateInAppWebviewWindow(proxmoxWebLoginAssist.label, proxmoxWebLoginAssist.consoleUrl);
+      setProxmoxWebLoginAssist(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [proxmoxWebLoginAssist]);
+
+  const onWebPaneLoginFirstWebviewOpen = useCallback((payload: { label: string; consoleUrl: string }) => {
+    setProxmoxWebLoginAssist(payload);
+  }, []);
+
+  const handleProxmuxSpice = useCallback(async (ctx: { clusterId: string; node: string; vmid: string }) => {
+    setError("");
+    try {
+      const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "fetchSpiceProxy", {
+        clusterId: ctx.clusterId,
+        node: ctx.node,
+        guestType: "qemu",
+        vmid: ctx.vmid,
+      })) as { ok?: boolean; data?: Record<string, unknown> };
+      if (!out?.ok || out.data == null || typeof out.data !== "object" || Array.isArray(out.data)) {
+        setError("SPICE proxy response was invalid.");
+        return;
+      }
+      await openVirtViewerFromSpicePayload(out.data as Record<string, unknown>);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
 
   const connectLocalShellInNewPane = async (splitFromPaneIndex: number): Promise<void> => {
     setError("");
@@ -2944,6 +3206,58 @@ export function App() {
   const spawnSessionFromExistingSession = async (sourceSession: SessionTab): Promise<string | null> => {
     if (sourceSession.kind === "sshSaved") {
       return spawnSessionFromHostAlias(sourceSession.hostAlias);
+    }
+    if (sourceSession.kind === "web") {
+      const err = validateExternalHttpUrl(sourceSession.url);
+      if (err) {
+        setError(err);
+        return null;
+      }
+      const id = `web-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "web",
+          label: sourceSession.label,
+          url: sourceSession.url.trim(),
+          ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+        },
+      ]);
+      return id;
+    }
+    if (sourceSession.kind === "proxmoxQemuVnc" || sourceSession.kind === "proxmoxLxcTerm") {
+      const id = sourceSession.kind === "proxmoxQemuVnc" ? `pxvnc-${createId()}` : `pxlxc-${createId()}`;
+      if (sourceSession.kind === "proxmoxQemuVnc") {
+        setSessions((prev) => [
+          ...prev,
+          {
+            id,
+            kind: "proxmoxQemuVnc",
+            label: sourceSession.label,
+            clusterId: sourceSession.clusterId,
+            node: sourceSession.node,
+            vmid: sourceSession.vmid,
+            proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
+            ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+          },
+        ]);
+      } else {
+        setSessions((prev) => [
+          ...prev,
+          {
+            id,
+            kind: "proxmoxLxcTerm",
+            label: sourceSession.label,
+            clusterId: sourceSession.clusterId,
+            node: sourceSession.node,
+            vmid: sourceSession.vmid,
+            proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
+            ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+          },
+        ]);
+      }
+      return id;
     }
     if (sourceSession.kind === "local") {
       try {
@@ -3213,6 +3527,14 @@ export function App() {
     window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
   }, []);
 
+  const registerPaneScrollAnchor = useCallback((paneIndex: number, element: HTMLElement | null) => {
+    if (element) {
+      paneScrollAnchorsRef.current[paneIndex] = element;
+    } else {
+      delete paneScrollAnchorsRef.current[paneIndex];
+    }
+  }, []);
+
   const handleMobilePagerScroll = useCallback(() => {
     if (skipMobilePagerScrollRef.current) {
       return;
@@ -3246,6 +3568,33 @@ export function App() {
     el.scrollBy({ left: delta * el.clientWidth, behavior: "smooth" });
   }, []);
 
+  const onQuickNavPane = useCallback(
+    (paneIndex: number) => {
+      if (paneIndex === activePaneIndex) {
+        queueMicrotask(() => {
+          paneScrollAnchorsRef.current[paneIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+        return;
+      }
+      setActivePaneIndex(paneIndex);
+      const sid = splitSlots[paneIndex];
+      if (sid) {
+        setActiveSession(sid);
+        requestTerminalFocus(sid);
+      }
+    },
+    [activePaneIndex, requestTerminalFocus, splitSlots],
+  );
+
+  useEffect(() => {
+    if (!verticalStackScrollEnabled) {
+      return;
+    }
+    queueMicrotask(() => {
+      paneScrollAnchorsRef.current[activePaneIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [activePaneIndex, verticalStackScrollEnabled]);
+
   useLayoutEffect(() => {
     if (!isStackedShell || mobileShellTab !== "terminal") {
       return;
@@ -3274,7 +3623,10 @@ export function App() {
   }, [activePaneIndex, isStackedShell, mobileShellTab, paneOrder]);
 
   const closeSessionById = async (sessionId: string) => {
-    await closeSession(sessionId);
+    const tab = sessions.find((s) => s.id === sessionId);
+    if (!tab || !sessionKindIsWebLike(tab.kind)) {
+      await closeSession(sessionId);
+    }
     setSessionFileViews((prev) => {
       if (!(sessionId in prev)) {
         return prev;
@@ -3304,6 +3656,8 @@ export function App() {
       return nextSet;
     });
     setTrustPromptQueue((prev) => prev.filter((entry) => entry.sessionId !== sessionId));
+    delete sessionTerminalCwdRef.current[sessionId];
+    setSessionTerminalCwdEpoch((n) => n + 1);
   };
   const closeSessionInPane = async (paneIndex: number) => {
     const paneSessionId = splitSlots[paneIndex] ?? null;
@@ -3320,7 +3674,15 @@ export function App() {
       }
       return;
     }
-    const results = await Promise.allSettled(sessionIds.map((sessionId) => closeSession(sessionId)));
+    const results = await Promise.allSettled(
+      sessionIds.map((sessionId) => {
+        const tab = sessions.find((s) => s.id === sessionId);
+        if (tab && sessionKindIsWebLike(tab.kind)) {
+          return Promise.resolve();
+        }
+        return closeSession(sessionId);
+      }),
+    );
     const failedCount = results.filter((result) => result.status === "rejected").length;
     setSessions([]);
     setActiveSession("");
@@ -3340,6 +3702,8 @@ export function App() {
     setBroadcastTargets(new Set());
     setTrustPromptQueue([]);
     setSessionFileViews({});
+    sessionTerminalCwdRef.current = {};
+    setSessionTerminalCwdEpoch((n) => n + 1);
     if (withLayoutReset) {
       resetPaneLayout();
     }
@@ -3433,6 +3797,10 @@ export function App() {
     if (!sessionId) {
       return;
     }
+    const tab = sessions.find((s) => s.id === sessionId);
+    if (tab && sessionKindIsWebLike(tab.kind)) {
+      return;
+    }
     toggleBroadcastTarget(sessionId);
   };
 
@@ -3440,16 +3808,17 @@ export function App() {
     if (!isBroadcastModeEnabled) {
       return;
     }
-    if (visiblePaneSessionIds.length === 0) {
+    const eligible = broadcastEligibleVisiblePaneSessionIds;
+    if (eligible.length === 0) {
       return;
     }
     setBroadcastTargets((prev) => {
       const next = new Set(prev);
-      const allVisibleAlreadyTargeted = visiblePaneSessionIds.every((sessionId) => next.has(sessionId));
+      const allVisibleAlreadyTargeted = eligible.every((sessionId) => next.has(sessionId));
       if (allVisibleAlreadyTargeted) {
-        visiblePaneSessionIds.forEach((sessionId) => next.delete(sessionId));
+        eligible.forEach((sessionId) => next.delete(sessionId));
       } else {
-        visiblePaneSessionIds.forEach((sessionId) => next.add(sessionId));
+        eligible.forEach((sessionId) => next.add(sessionId));
       }
       return next;
     });
@@ -3481,6 +3850,7 @@ export function App() {
       const currentSnapshot: WorkspaceSnapshot = {
         id: activeWorkspaceId,
         name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        preferVerticalNewPanes: workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true,
         splitSlots: [...splitSlots],
         paneLayouts: clonePaneLayouts(paneLayouts),
         splitTree: cloneSplitTree(splitTree),
@@ -3548,6 +3918,40 @@ export function App() {
     },
     [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
   );
+  const renameWorkspace = useCallback((workspaceId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) {
+      return;
+    }
+    setWorkspaceSnapshots((prev) => {
+      const snapshot = prev[workspaceId];
+      if (!snapshot || snapshot.name === trimmed) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [workspaceId]: {
+          ...snapshot,
+          name: trimmed,
+        },
+      };
+    });
+  }, []);
+  const setWorkspaceVerticalStacking = useCallback((workspaceId: string, enabled: boolean) => {
+    setWorkspaceSnapshots((prev) => {
+      const snapshot = prev[workspaceId];
+      if (!snapshot || snapshot.preferVerticalNewPanes === enabled) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [workspaceId]: {
+          ...snapshot,
+          preferVerticalNewPanes: enabled,
+        },
+      };
+    });
+  }, []);
 
   const applyRuntimeSplitTreeToWorkspace = useCallback(
     (workspaceId: string, tree: SplitTreeNode) => {
@@ -3737,6 +4141,7 @@ export function App() {
       const persistedCurrentSnapshot: WorkspaceSnapshot = {
         id: activeWorkspaceId,
         name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        preferVerticalNewPanes: workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true,
         splitSlots: [...splitSlots],
         paneLayouts: clonePaneLayouts(paneLayouts),
         splitTree: cloneSplitTree(splitTree),
@@ -3790,6 +4195,8 @@ export function App() {
         break;
       case "pane.toggleRemoteFiles": {
         if (!fileWorkspacePluginEnabled) {
+          setActiveAppSettingsTab("plugins");
+          setIsAppSettingsOpen(true);
           break;
         }
         const sid = splitSlots[paneIndex] ?? null;
@@ -3820,6 +4227,8 @@ export function App() {
       }
       case "pane.toggleLocalFiles": {
         if (!fileWorkspacePluginEnabled) {
+          setActiveAppSettingsTab("plugins");
+          setIsAppSettingsOpen(true);
           break;
         }
         const sidLocal = splitSlots[paneIndex] ?? null;
@@ -3891,14 +4300,26 @@ export function App() {
 
   const handleTerminalInput = useCallback(
     (originSessionId: string, data: string) => {
+      const origin = sessionById.get(originSessionId);
+      if (origin && sessionKindIsWebLike(origin.kind)) {
+        return;
+      }
+      const terminalSessionIds = sessionIds.filter((id) => {
+        const t = sessionById.get(id);
+        return t && !sessionKindIsWebLike(t.kind);
+      });
       const targets = isBroadcastModeEnabled
-        ? resolveInputTargets(originSessionId, broadcastTargets, sessionIds)
+        ? resolveInputTargets(originSessionId, broadcastTargets, terminalSessionIds)
         : [originSessionId];
       for (const target of targets) {
+        const t = sessionById.get(target);
+        if (t && sessionKindIsWebLike(t.kind)) {
+          continue;
+        }
         void sendInput(target, data);
       }
     },
-    [broadcastTargets, isBroadcastModeEnabled, sessionIds],
+    [broadcastTargets, isBroadcastModeEnabled, sessionById, sessionIds],
   );
 
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -4157,6 +4578,88 @@ export function App() {
     return newPaneIndex;
   };
 
+  const handleProxmoxQemuVncInPane = useCallback(
+    (ctx: {
+      clusterId: string;
+      node: string;
+      vmid: string;
+      label: string;
+      allowInsecureTls: boolean;
+      proxmoxBaseUrl: string;
+    }) => {
+      setError("");
+      const base = ctx.proxmoxBaseUrl.trim();
+      if (!base) {
+        setError("Proxmox base URL is missing for this cluster.");
+        return;
+      }
+      const id = `pxvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "proxmoxQemuVnc" as const,
+          label: ctx.label.trim() || `noVNC ${ctx.vmid}`,
+          clusterId: ctx.clusterId,
+          node: ctx.node,
+          vmid: ctx.vmid,
+          proxmoxBaseUrl: base,
+          ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        },
+      ]);
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
+  );
+
+  const handleProxmoxLxcConsoleInPane = useCallback(
+    (ctx: {
+      clusterId: string;
+      node: string;
+      vmid: string;
+      label: string;
+      allowInsecureTls: boolean;
+      proxmoxBaseUrl: string;
+    }) => {
+      setError("");
+      const base = ctx.proxmoxBaseUrl.trim();
+      if (!base) {
+        setError("Proxmox base URL is missing for this cluster.");
+        return;
+      }
+      const id = `pxlxc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "proxmoxLxcTerm" as const,
+          label: ctx.label.trim() || `LXC ${ctx.vmid}`,
+          clusterId: ctx.clusterId,
+          node: ctx.node,
+          vmid: ctx.vmid,
+          proxmoxBaseUrl: base,
+          ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        },
+      ]);
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
+  );
+
   const startSplitResize = (splitId: string, axis: SplitAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -4214,12 +4717,26 @@ export function App() {
             sessionKind: "local" as const,
           };
         }
+        if (sessionKindIsWebLike(paneSession.kind)) {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+          };
+        }
+        if (paneSession.kind === "sshQuick") {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+            sessionKind: "sshQuick" as const,
+            quickSsh: { ...paneSession.request },
+          };
+        }
         return {
           width: pane.width,
           height: pane.height,
           hostAlias: null,
-          sessionKind: "sshQuick" as const,
-          quickSsh: { ...paneSession.request },
         };
       }),
       splitTree: serializeSplitTree(splitTree),
@@ -4376,6 +4893,9 @@ export function App() {
       if (!session) {
         return "empty";
       }
+      if (sessionKindIsWebLike(session.kind)) {
+        return "web";
+      }
       return session.kind === "local" ? "local" : "ssh";
     },
     [splitSlots, sessions],
@@ -4388,7 +4908,7 @@ export function App() {
         return null;
       }
       const session = sessions.find((s) => s.id === sid);
-      if (!session || session.kind === "local") {
+      if (!session || session.kind === "local" || sessionKindIsWebLike(session.kind)) {
         return null;
       }
       if (session.kind === "sshSaved") {
@@ -4398,7 +4918,10 @@ export function App() {
         }
         return { kind: "saved", host: hostEntry };
       }
-      return { kind: "quick", request: session.request };
+      if (session.kind === "sshQuick") {
+        return { kind: "quick", request: session.request };
+      }
+      return null;
     },
     [splitSlots, sessions, hosts],
   );
@@ -4406,6 +4929,62 @@ export function App() {
   const onLocalFilePanePathChange = useCallback((paneIndex: number, pathKey: string) => {
     localFilePanePathsRef.current[paneIndex] = pathKey;
   }, []);
+
+  const webPanePayloadForPane = useCallback(
+    (paneIndex: number): { url: string; title: string; allowInsecureTls?: boolean } | null => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind !== "web") {
+        return null;
+      }
+      return {
+        url: session.url,
+        title: session.label,
+        ...(session.allowInsecureTls ? { allowInsecureTls: true } : {}),
+      };
+    },
+    [splitSlots, sessions],
+  );
+
+  const proxmoxNativeConsoleForPane = useCallback(
+    (paneIndex: number) => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session) {
+        return null;
+      }
+      if (session.kind === "proxmoxQemuVnc") {
+        return {
+          kind: "qemu-vnc" as const,
+          clusterId: session.clusterId,
+          node: session.node,
+          vmid: session.vmid,
+          paneTitle: session.label,
+          proxmoxBaseUrl: session.proxmoxBaseUrl,
+          ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        };
+      }
+      if (session.kind === "proxmoxLxcTerm") {
+        return {
+          kind: "lxc-term" as const,
+          clusterId: session.clusterId,
+          node: session.node,
+          vmid: session.vmid,
+          paneTitle: session.label,
+          proxmoxBaseUrl: session.proxmoxBaseUrl,
+          ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        };
+      }
+      return null;
+    },
+    [splitSlots, sessions],
+  );
 
   const getFileExportDestPath = useCallback(async () => {
     return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
@@ -4443,6 +5022,7 @@ export function App() {
     isBroadcastModeEnabled,
     setBroadcastMode,
     visiblePaneSessionIds,
+    broadcastEligibleVisiblePaneSessionIds,
     broadcastTargets,
     terminalFontSize,
     terminalFontFamily,
@@ -4463,6 +5043,13 @@ export function App() {
     onFilePaneTitleChange,
     semanticFileNameColors: filePaneSemanticNameColors.enabled,
     fileWorkspacePluginEnabled,
+    webPanePayloadForPane,
+    proxmoxNativeConsoleForPane,
+    onWebPaneOpenInAppWindowError: setError,
+    onWebPaneLoginFirstWebviewOpen,
+    onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
+    verticalStackScrollEnabled,
+    registerPaneScrollAnchor,
   });
 
   const appShellStyle = {
@@ -4480,6 +5067,9 @@ export function App() {
     const session = sessions.find((s) => s.id === contextMenuPaneSessionId);
     if (!session) {
       return "empty";
+    }
+    if (sessionKindIsWebLike(session.kind)) {
+      return "web";
     }
     return session.kind === "local" ? "local" : "ssh";
   })();
@@ -4506,6 +5096,7 @@ export function App() {
         isStackedShell && mobileShellTab === "terminal" ? " app-shell--mobile-panel-terminal" : ""
       }`}
       data-density={densityProfile}
+      data-density-offset={uiDensityOffset}
       data-list-tone={listTonePreset}
       data-frame-mode={frameModePreset}
       data-ui-font={uiFontPreset}
@@ -4517,6 +5108,22 @@ export function App() {
         event.preventDefault();
       }}
     >
+      {proxmoxWebLoginAssist ? (
+        <div className="proxmox-login-assist-banner" role="status">
+          <span className="proxmox-login-assist-banner-text">
+            Log in to Proxmox in the window that opened. The console opens automatically once the UI loads after
+            login, or use Continue below if it does not.
+          </span>
+          <div className="proxmox-login-assist-banner-actions">
+            <button type="button" className="btn btn-primary" onClick={() => void handleProxmoxContinueToConsole()}>
+              Continue to console
+            </button>
+            <button type="button" className="btn btn-settings-tool" onClick={() => setProxmoxWebLoginAssist(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div
         className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}
         onMouseEnter={() => {
@@ -4580,7 +5187,27 @@ export function App() {
         showAdvancedFilters={showAdvancedFilters}
         onToggleAdvancedFilters={() => setShowAdvancedFilters((prev) => !prev)}
         onCloseAdvancedFilters={closeAdvancedFilters}
-        filteredHostCount={filteredHostRows.length}
+        listFilterCount={selectedSidebarViewId === "builtin:proxmux" ? proxmuxResourceCount : filteredHostRows.length}
+        showHostAdvancedFilters={selectedSidebarViewId !== "builtin:proxmux"}
+        searchInputPlaceholder={
+          selectedSidebarViewId === "builtin:proxmux"
+            ? "Filter name, node, VMID, status, IPv4, IPv6…"
+            : undefined
+        }
+        proxmuxPanel={
+          proxmuxSidebarAvailable ? (
+            <ProxmuxSidebarPanel
+              searchQuery={searchQuery}
+              onResourceCountChange={setProxmuxResourceCount}
+              onSshToProxmoxNode={handleProxmuxSshNode}
+              onOpenProxmoxExternalUrl={handleProxmuxOpenExternalUrl}
+              onOpenProxmoxSpice={handleProxmuxSpice}
+              usePaneNativeProxmoxConsoles={proxmuxOpenWebConsolesInPane}
+              onOpenProxmoxQemuVncInPane={handleProxmoxQemuVncInPane}
+              onOpenProxmoxLxcConsoleInPane={handleProxmoxLxcConsoleInPane}
+            />
+          ) : null
+        }
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         portFilter={portFilter}
@@ -4595,38 +5222,18 @@ export function App() {
         otherHostRows={otherHostRows}
         hostListRowBridge={{
           activeHost,
-          openHostMenuHostAlias,
-          currentHost,
-          setCurrentHost,
-          hosts,
-          tagDraft,
-          setTagDraft,
-          hostKeyPolicyDraft,
-          setHostKeyPolicyDraft,
-          storeKeys,
-          storeUsers,
-          sidebarHostBindingDraft,
-          setSidebarHostBindingDraft,
-          error,
-          canSave,
-          pendingRemoveConfirm,
           suppressHostClickAliasRef,
           setContextMenu,
           setHostContextMenu,
           setHoveredHostAlias,
           setActiveHost,
           setDragOverPaneIndex,
-          setError,
           toggleFavoriteForHost,
-          toggleHostSelection,
           connectToHostInNewPane,
           setDragPayload,
           setDraggingKind,
           missingDragPayloadLoggedRef,
-          toggleHostMenu,
-          onSave,
-          saveTagsForActiveHost,
-          handleRemoveHostIntent,
+          onEditHost: (host: HostConfig) => openHostSettingsForHost(host.host),
         }}
       />
       <div className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}>
@@ -4671,7 +5278,12 @@ export function App() {
         sendSessionToWorkspace={sendSessionToWorkspace}
         createWorkspace={createWorkspace}
         removeWorkspace={removeWorkspace}
+        renameWorkspace={renameWorkspace}
+        setWorkspaceVerticalStacking={setWorkspaceVerticalStacking}
         splitResizeState={splitResizeState}
+        verticalStackScrollEnabled={verticalStackScrollEnabled}
+        resolvePaneQuickNavLabel={resolvePaneLabel}
+        onQuickNavPane={onQuickNavPane}
         isStackedShell={isStackedShell}
         mobileShellTab={mobileShellTab}
         paneOrder={paneOrder}
@@ -4705,6 +5317,8 @@ export function App() {
           setActiveAppSettingsTab={setActiveAppSettingsTab}
           densityProfile={densityProfile}
           setDensityProfile={setDensityProfile}
+          uiDensityOffset={uiDensityOffset}
+          setUiDensityOffset={setUiDensityOffset}
           uiFontPreset={uiFontPreset}
           setUiFontPreset={setUiFontPreset}
           terminalFontPreset={terminalFontPreset}
@@ -4740,6 +5354,7 @@ export function App() {
           setMetadataStore={setMetadataStore}
           applyDefaultUser={applyDefaultUser}
           setError={setError}
+          error={error}
           quickConnectMode={quickConnectMode}
           setQuickConnectMode={setQuickConnectMode}
           quickConnectAutoTrust={quickConnectAutoTrust}
@@ -4806,11 +5421,6 @@ export function App() {
           addStoreEncryptedKey={addStoreEncryptedKey}
           unlockStoreKey={unlockStoreKey}
           removeStoreKey={removeStoreKey}
-          storeSelectedHostForBinding={storeSelectedHostForBinding}
-          setStoreSelectedHostForBinding={setStoreSelectedHostForBinding}
-          storeBindingDraft={storeBindingDraft}
-          setStoreBindingDraft={setStoreBindingDraft}
-          saveHostBindingDraft={saveHostBindingDraft}
           sshConfigRaw={sshConfigRaw}
           setSshConfigRaw={setSshConfigRaw}
           onSaveSshConfig={handleSaveSshConfig}
@@ -4819,6 +5429,25 @@ export function App() {
           setSshDirOverrideDraft={setSshDirOverrideDraft}
           onApplySshDirOverride={handleApplySshDirOverride}
           onResetSshDirOverride={handleResetSshDirOverride}
+          hostSettingsSelectedAlias={hostSettingsSelectedAlias}
+          onHostSettingsSelectAlias={onHostSettingsSelectAlias}
+          hostSettingsDraftHost={hostSettingsDraftHost}
+          setHostSettingsDraftHost={setHostSettingsDraftHost}
+          hostSettingsDraftBinding={hostSettingsDraftBinding}
+          setHostSettingsDraftBinding={setHostSettingsDraftBinding}
+          hostSettingsTagDraft={hostSettingsTagDraft}
+          setHostSettingsTagDraft={setHostSettingsTagDraft}
+          hostSettingsKeyPolicy={hostSettingsKeyPolicy}
+          setHostSettingsKeyPolicy={setHostSettingsKeyPolicy}
+          hostSettingsMetadataForSelected={hostSettingsMetadataForSelected}
+          onSaveHostSettingsTab={saveHostFromSettingsTab}
+          hostSettingsTabSaveDisabled={hostSettingsTabSaveDisabled}
+          onRemoveHostSettingsTabIntent={onRemoveHostSettingsTabIntent}
+          hostSettingsTabRemoveConfirmActive={pendingRemoveHostsTab}
+          toggleFavoriteForHost={toggleFavoriteForHost}
+          toggleJumpHostForHost={toggleJumpHostForHost}
+          proxmuxOpenWebConsolesInPane={proxmuxOpenWebConsolesInPane}
+          setProxmuxOpenWebConsolesInPane={setProxmuxOpenWebConsolesInPane}
         />
       )}
       {isLayoutCommandCenterOpen && (
@@ -4873,6 +5502,7 @@ export function App() {
           storeKeys={storeKeys}
           storeUsers={storeUsers}
           sshHosts={hosts}
+          hostMetadataByHost={metadataStore.hosts}
           hostBindingDraft={addHostBindingDraft}
           onHostBindingDraftChange={setAddHostBindingDraft}
           onClose={closeAddHostModal}
@@ -4939,7 +5569,7 @@ export function App() {
           host={hostContextMenu.host}
           workspaces={workspaceTabs}
           onConnectInWorkspace={connectToHostInWorkspace}
-          onEditHost={openHostMenuForHost}
+          onEditHost={(host: HostConfig) => openHostSettingsForHost(host.host)}
           onClose={() => setHostContextMenu(null)}
         />
       )}

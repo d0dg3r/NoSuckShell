@@ -12,7 +12,9 @@ import { AppSettingsHelpTab } from "./settings/tabs/AppSettingsHelpTab";
 import { AppSettingsKeyboardTab } from "./settings/tabs/AppSettingsKeyboardTab";
 import { AppSettingsLayoutTab } from "./settings/tabs/AppSettingsLayoutTab";
 import { AppSettingsPluginsTab } from "./settings/tabs/AppSettingsPluginsTab";
+import { AppSettingsProxmuxTab } from "./settings/tabs/AppSettingsProxmuxTab";
 import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
+import { AppSettingsHostsTab } from "./settings/tabs/AppSettingsHostsTab";
 import { AppSettingsStoreTabContent } from "./settings/tabs/AppSettingsStoreTabContent";
 import { AppSettingsViewsTab } from "./settings/tabs/AppSettingsViewsTab";
 
@@ -55,6 +57,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setActiveAppSettingsTab,
     densityProfile,
     setDensityProfile,
+    uiDensityOffset,
+    setUiDensityOffset,
     uiFontPreset,
     setUiFontPreset,
     terminalFontPreset,
@@ -90,6 +94,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setMetadataStore,
     applyDefaultUser,
     setError,
+    error,
     quickConnectMode,
     setQuickConnectMode,
     quickConnectAutoTrust,
@@ -156,11 +161,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     addStoreEncryptedKey,
     unlockStoreKey,
     removeStoreKey,
-    storeSelectedHostForBinding,
-    setStoreSelectedHostForBinding,
-    storeBindingDraft,
-    setStoreBindingDraft,
-    saveHostBindingDraft,
     sshConfigRaw,
     setSshConfigRaw,
     onSaveSshConfig,
@@ -169,6 +169,25 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setSshDirOverrideDraft,
     onApplySshDirOverride,
     onResetSshDirOverride,
+    hostSettingsSelectedAlias,
+    onHostSettingsSelectAlias,
+    hostSettingsDraftHost,
+    setHostSettingsDraftHost,
+    hostSettingsDraftBinding,
+    setHostSettingsDraftBinding,
+    hostSettingsTagDraft,
+    setHostSettingsTagDraft,
+    hostSettingsKeyPolicy,
+    setHostSettingsKeyPolicy,
+    hostSettingsMetadataForSelected,
+    onSaveHostSettingsTab,
+    hostSettingsTabSaveDisabled,
+    onRemoveHostSettingsTabIntent,
+    hostSettingsTabRemoveConfirmActive,
+    toggleFavoriteForHost,
+    toggleJumpHostForHost,
+    proxmuxOpenWebConsolesInPane,
+    setProxmuxOpenWebConsolesInPane,
   } = props;
 
   const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
@@ -239,11 +258,13 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
         {activeAppSettingsTab === "store" && (
           <IdentityStoreSubtabs identityStoreSubTab={identityStoreSubTab} setIdentityStoreSubTab={setIdentityStoreSubTab} />
         )}
-        <div className="app-settings-content">
+        <div className="app-settings-content app-settings-panel-body">
           {activeAppSettingsTab === "appearance" && (
             <AppSettingsAppearanceTab
               densityProfile={densityProfile}
               setDensityProfile={setDensityProfile}
+              uiDensityOffset={uiDensityOffset}
+              setUiDensityOffset={setUiDensityOffset}
               uiFontPreset={uiFontPreset}
               setUiFontPreset={setUiFontPreset}
               terminalFontPreset={terminalFontPreset}
@@ -328,6 +349,34 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               backupMessage={backupMessage}
             />
           )}
+          {activeAppSettingsTab === "hosts" && (
+            <AppSettingsHostsTab
+              hosts={hosts}
+              selectedHostAlias={hostSettingsSelectedAlias}
+              onSelectHostAlias={onHostSettingsSelectAlias}
+              draftHost={hostSettingsDraftHost}
+              setDraftHost={setHostSettingsDraftHost}
+              draftBinding={hostSettingsDraftBinding}
+              setDraftBinding={setHostSettingsDraftBinding}
+              tagDraft={hostSettingsTagDraft}
+              setTagDraft={setHostSettingsTagDraft}
+              hostKeyPolicyDraft={hostSettingsKeyPolicy}
+              setHostKeyPolicyDraft={setHostSettingsKeyPolicy}
+              metadataForSelected={hostSettingsMetadataForSelected}
+              hostMetadataByHost={metadataStore.hosts}
+              storeKeys={storeKeys}
+              storeUsers={storeUsers}
+              storeGroups={storeGroups}
+              storeTags={storeTags}
+              toggleFavoriteForHost={toggleFavoriteForHost}
+              toggleJumpHostForHost={toggleJumpHostForHost}
+              onSaveHost={onSaveHostSettingsTab}
+              saveDisabled={hostSettingsTabSaveDisabled}
+              onRemoveHost={onRemoveHostSettingsTabIntent}
+              removeConfirmActive={hostSettingsTabRemoveConfirmActive}
+              error={error}
+            />
+          )}
           {activeAppSettingsTab === "ssh" && (
             <AppSettingsSshTab
               setError={setError}
@@ -388,14 +437,15 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               addStoreEncryptedKey={addStoreEncryptedKey}
               unlockStoreKey={unlockStoreKey}
               removeStoreKey={removeStoreKey}
-              storeSelectedHostForBinding={storeSelectedHostForBinding}
-              setStoreSelectedHostForBinding={setStoreSelectedHostForBinding}
-              storeBindingDraft={storeBindingDraft}
-              setStoreBindingDraft={setStoreBindingDraft}
-              saveHostBindingDraft={saveHostBindingDraft}
             />
           )}
           {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "proxmux" && (
+            <AppSettingsProxmuxTab
+              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
+              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
+            />
+          )}
           {activeAppSettingsTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}

@@ -54,6 +54,7 @@ export const createDefaultHostMetadata = (): HostMetadata => ({
   tags: [],
   lastUsedAt: null,
   trustHostDefault: false,
+  isJumpHost: false,
 });
 
 /** Block WebKit/Electron default context menu app-wide except in real text fields. */

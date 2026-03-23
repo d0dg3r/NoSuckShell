@@ -219,6 +219,12 @@ const sshSections: HelpSection[] = [
         keys: "-",
       },
       {
+        action: "Jump hosts (bastions)",
+        mouse:
+          "Host settings → check “Jump host (bastion)” to add the jumphost tag and include that alias in the shortcut list once at least one host is marked (until then, all aliases stay listed).",
+        keys: "-",
+      },
+      {
         action: "ProxyCommand presets",
         mouse:
           "Preset dropdown fills common patterns (e.g. ssh -W %h:%p bastion, SOCKS via nc). Edit the command line to match your environment.",

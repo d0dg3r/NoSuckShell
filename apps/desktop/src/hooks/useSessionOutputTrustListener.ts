@@ -44,7 +44,9 @@ export function useSessionOutputTrustListener(params: {
             ? session.label
             : session?.kind === "local"
               ? "local-shell"
-              : "unknown";
+              : session?.kind === "web"
+                ? session.label
+                : "unknown";
       setTrustPromptQueue((prev) => {
         if (prev.some((entry) => entry.sessionId === sessionId)) {
           return prev;

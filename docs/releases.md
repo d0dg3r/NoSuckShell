@@ -47,8 +47,24 @@ For each platform:
    - `apps/desktop/package.json`
    - `apps/desktop/src-tauri/tauri.conf.json`
    - `apps/desktop/src-tauri/Cargo.toml`
-6. Run `npm run tauri:build`.
+6. Run `npm run tauri:build` with optional **`NOSUCKSHELL_LICENSE_PUBKEY_HEX`** (64 hex chars) in the environment so the binary **embeds** your production Ed25519 verify key at compile time (`option_env!` in `apps/desktop/src-tauri/src/license.rs`).
 7. Upload generated bundles as build artifacts.
+
+### Production license public key (GitHub Actions)
+
+For **official** release binaries, configure a repository secret:
+
+- **Name:** `NOSUCKSHELL_LICENSE_PUBKEY_HEX`
+- **Value:** 64-character hex string (32-byte Ed25519 **public** key) matching your deployed `LICENSE_SIGNING_SEED_HEX`.
+
+The [release workflow](../.github/workflows/release.yml) passes this secret into the Tauri build step. If the secret is **missing** (for example on a fork), builds still succeed but use the **development** verify key—fine for experimentation, **not** for selling tokens to end users.
+
+Local release-style build:
+
+```bash
+export NOSUCKSHELL_LICENSE_PUBKEY_HEX="<your-64-hex-public-key>"
+cd apps/desktop && npm run tauri:build
+```
 
 Release job:
 

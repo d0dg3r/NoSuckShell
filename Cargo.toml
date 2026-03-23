@@ -1,0 +1,7 @@
+# Virtual workspace so `cargo run` from the repo root can start the license server
+# (see docs/license-server-runbook.md). Tauri remains buildable via `npm run tauri:*` or
+# `cargo build -p src-tauri` from this root.
+[workspace]
+resolver = "2"
+members = ["services/license-server", "apps/desktop/src-tauri"]
+default-members = ["services/license-server"]

@@ -12,6 +12,15 @@ Operator guide for pairing the desktop **Plugin store** tab with [`services/lice
 
 The app **does not** download plugin binaries from the store. Add-ons are **built into the release**; the store is a **catalog + purchase link + token activation** flow.
 
+## Development vs. production signing keys
+
+| Mode | Signing seed | Desktop trusts |
+| --- | --- | --- |
+| **Local dev** | Documented 32-byte dev seed in [`services/license-server/README.md`](../services/license-server/README.md) (public by design so contributors can reproduce tokens) | Built-in **dev** public key when no prod key is set |
+| **Production** | A **unique** 32-byte seed you generate and **never** commit | **Your** public key: set `NOSUCKSHELL_LICENSE_PUBKEY_HEX` at **compile time** for official releases (GitHub Actions secret `NOSUCKSHELL_LICENSE_PUBKEY_HEX`) or at **runtime** for custom installs — see [`docs/licensing.md`](licensing.md) and [`docs/releases.md`](releases.md) |
+
+**Security note:** The dev seed in the repository is **intentionally** shared so forks and CI can mint test tokens. **Never** use that seed or its keypair for real customer purchases. Customer tokens must be signed with your **production** seed only.
+
 ## Deploy the license server
 
 1. Generate a production **32-byte Ed25519 seed** (keep secret). Derive the public key and set:
@@ -52,6 +61,8 @@ Sellable rows and entitlement strings are defined in [`apps/desktop/src/features
 
 - `purchaseUrl` per item (your Ko-fi shop or tier link).
 - `requiredEntitlements` — must match both Rust `required_entitlement()` on the plugin and what the license server puts in `LicensePayload.entitlements`.
+
+Buyer-facing scope for paid add-ons: [terms-of-sale.md](terms-of-sale.md).
 
 ## Local development (contributors)
 

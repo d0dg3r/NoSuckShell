@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { HostStatusFilter, SidebarViewId } from "../features/session-model";
 import type { HostRowViewModel } from "../features/view-profile-filters";
 import { HostListRow, type HostListRowBridgeProps } from "./HostListRow";
@@ -27,7 +27,6 @@ export type HostSidebarProps = {
   showAdvancedFilters: boolean;
   onToggleAdvancedFilters: () => void;
   onCloseAdvancedFilters: () => void;
-  filteredHostCount: number;
   statusFilter: HostStatusFilter;
   onStatusFilterChange: (value: HostStatusFilter) => void;
   portFilter: string;
@@ -38,6 +37,14 @@ export type HostSidebarProps = {
   recentOnly: boolean;
   onToggleRecent: () => void;
   onClearFilters: () => void;
+  /** Shown in the filter row count pill (host rows or Proxmox resource count). */
+  listFilterCount: number;
+  /** When false, hides host-only advanced filters (Status / Port / Tag). */
+  showHostAdvancedFilters: boolean;
+  /** Optional search field placeholder (e.g. Proxmox filter hint). */
+  searchInputPlaceholder?: string;
+  /** When the PROXMUX sidebar tab is selected, render this instead of SSH host rows. */
+  proxmuxPanel: ReactNode | null;
   connectedHostRows: HostRowViewModel[];
   otherHostRows: HostRowViewModel[];
   hostListRowBridge: HostListRowBridgeProps;
@@ -65,7 +72,6 @@ export function HostSidebar({
   showAdvancedFilters,
   onToggleAdvancedFilters,
   onCloseAdvancedFilters,
-  filteredHostCount,
   statusFilter,
   onStatusFilterChange,
   portFilter,
@@ -76,11 +82,16 @@ export function HostSidebar({
   recentOnly,
   onToggleRecent,
   onClearFilters,
+  listFilterCount,
+  showHostAdvancedFilters,
+  searchInputPlaceholder,
+  proxmuxPanel,
   connectedHostRows,
   otherHostRows,
   hostListRowBridge,
 }: HostSidebarProps) {
   const hostFilterPopoverRef = useRef<HTMLDivElement>(null);
+  const isProxmuxView = selectedSidebarViewId === "builtin:proxmux" && proxmuxPanel != null;
 
   useEffect(() => {
     if (!showAdvancedFilters) {
@@ -163,12 +174,14 @@ export function HostSidebar({
               title="Add host, terminal, or connection"
               onClick={onToggleQuickAddMenu}
             >
-              <svg className="brand-quick-add-chevron" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
-              </svg>
-              <span className="brand-quick-add-trigger-label">ADD</span>
-              <svg className="brand-quick-add-chevron" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+              <svg className="brand-quick-add-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  d="M12 5.5v13M5.5 12h13"
+                />
               </svg>
             </button>
           </div>
@@ -218,24 +231,26 @@ export function HostSidebar({
               className="input host-search-input"
               value={searchQuery}
               onChange={(event) => onSearchQueryChange(event.target.value)}
-              placeholder="Search alias, hostname, user"
+              placeholder={searchInputPlaceholder ?? "Search alias, hostname, user"}
             />
-            <button
-              type="button"
-              className={`btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`}
-              onClick={onToggleAdvancedFilters}
-              aria-expanded={showAdvancedFilters}
-              aria-controls="advanced-host-filters"
-              aria-label="More filters"
-              title="More filters"
-            >
-              Filters {showAdvancedFilters ? "−" : "+"}
-            </button>
+            {showHostAdvancedFilters ? (
+              <button
+                type="button"
+                className={`btn filter-toggle-btn ${showAdvancedFilters ? "is-open" : ""}`}
+                onClick={onToggleAdvancedFilters}
+                aria-expanded={showAdvancedFilters}
+                aria-controls="advanced-host-filters"
+                aria-label="More filters"
+                title="More filters"
+              >
+                Filters {showAdvancedFilters ? "−" : "+"}
+              </button>
+            ) : null}
             <span className="host-filter-count pill-muted" aria-live="polite">
-              {filteredHostCount}
+              {listFilterCount}
             </span>
           </div>
-          {showAdvancedFilters ? (
+          {showHostAdvancedFilters && showAdvancedFilters ? (
             <div
               id="advanced-host-filters"
               className="host-filter-popover"
@@ -295,7 +310,9 @@ export function HostSidebar({
       </section>
 
       <div className="host-list">
-        {filteredHostCount === 0 ? (
+        {isProxmuxView ? (
+          proxmuxPanel
+        ) : listFilterCount === 0 ? (
           <div className="empty-pane">
             <p>No hosts match the active filters.</p>
             <span>Adjust or reset filters to show hosts.</span>
@@ -304,7 +321,6 @@ export function HostSidebar({
           <>
             {connectedHostRows.length > 0 && (
               <div className="host-list-top">
-                <p className="host-list-section-title">Connected</p>
                 {connectedHostRows.map((row, index) => (
                   <HostListRow
                     key={`connected-${row.host.host}-${row.host.port}-${index}`}
