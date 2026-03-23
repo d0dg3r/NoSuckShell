@@ -118,21 +118,21 @@ export function AppSettingsFilesTab({
           <p className="settings-card-lead">Optional tints for scanning the list.</p>
         </header>
         <div className="host-form-grid">
-          <label className="field field-span-2 checkbox-field">
-            <input
-              id="settings-file-pane-semantic-name-colors"
-              type="checkbox"
-              className="checkbox-input"
-              checked={filePaneSemanticNameColors.enabled}
-              onChange={(e) =>
-                setFilePaneSemanticNameColors((prev) => ({ ...prev, enabled: e.target.checked }))
-              }
-            />
-            <span className="field-label">Use semantic name colors</span>
-          </label>
-          {filePaneSemanticNameColors.enabled ? (
-            <>
-              <div className="field field-span-2 file-pane-semantic-colors-grid">
+          <div className="file-pane-semantic-name-colors-group field-span-2">
+            <label className="field checkbox-field">
+              <input
+                id="settings-file-pane-semantic-name-colors"
+                type="checkbox"
+                className="checkbox-input"
+                checked={filePaneSemanticNameColors.enabled}
+                onChange={(e) =>
+                  setFilePaneSemanticNameColors((prev) => ({ ...prev, enabled: e.target.checked }))
+                }
+              />
+              <span className="field-label">Use semantic name colors</span>
+            </label>
+            {filePaneSemanticNameColors.enabled ? (
+              <div className="file-pane-semantic-colors-grid">
                 {FILE_PANE_NAME_KINDS_WITH_COLOR.map((kind) => {
                   const value = resolveFilePaneSemanticNameColorHex(kind, filePaneSemanticNameColors.colors);
                   return (
@@ -149,6 +149,10 @@ export function AppSettingsFilesTab({
                   );
                 })}
               </div>
+            ) : null}
+          </div>
+          {filePaneSemanticNameColors.enabled ? (
+            <>
               <div className="field field-span-2">
                 <button
                   type="button"

@@ -171,6 +171,7 @@ import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
+  DEFAULT_VISUAL_STYLE,
   DENSITY_PROFILE_STORAGE_KEY,
   FILE_EXPORT_ARCHIVE_FORMAT_STORAGE_KEY,
   FILE_EXPORT_DEST_MODE_STORAGE_KEY,
@@ -822,6 +823,18 @@ export function App() {
     }
     layoutCommandCenterWasOpenRef.current = isLayoutCommandCenterOpen;
   }, [isLayoutCommandCenterOpen, activeWorkspaceId]);
+
+  const resetVisualStyle = useCallback(() => {
+    const d = DEFAULT_VISUAL_STYLE;
+    setDensityProfile(d.densityProfile);
+    setUiDensityOffset(d.uiDensityOffset);
+    setUiFontPreset(d.uiFontPreset);
+    setTerminalFontPreset(d.terminalFontPreset);
+    setTerminalFontOffset(d.terminalFontOffset);
+    setListTonePreset(d.listTonePreset);
+    setFrameModePreset(d.frameModePreset);
+    setShowFullPathInFilePaneTitle(d.showFullPathInFilePaneTitle);
+  }, []);
 
   const refreshLicensedPlugins = useCallback(async () => {
     try {
@@ -5332,6 +5345,7 @@ export function App() {
           setFrameModePreset={setFrameModePreset}
           showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
           setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+          onResetVisualStyle={resetVisualStyle}
           fileExportDestMode={fileExportDestMode}
           setFileExportDestMode={setFileExportDestMode}
           fileExportPathKey={fileExportPathKey}

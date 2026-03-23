@@ -66,6 +66,8 @@ export type AppSettingsPanelProps = {
   setFrameModePreset: (value: FrameModePreset) => void;
   showFullPathInFilePaneTitle: boolean;
   setShowFullPathInFilePaneTitle: (value: boolean) => void;
+  /** Restore Visual style settings to app defaults (density, fonts, list tone, frame mode, file pane title). */
+  onResetVisualStyle: () => void;
   fileExportDestMode: FileExportDestMode;
   setFileExportDestMode: (value: FileExportDestMode) => void;
   fileExportPathKey: string;

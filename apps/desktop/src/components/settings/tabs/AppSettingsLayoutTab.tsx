@@ -66,21 +66,23 @@ export function AppSettingsLayoutTab({
             </span>
           </label>
           <div className="field field-span-2">
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => {
-                void openAuxWindow().catch(() => {
-                  /* no-op outside desktop */
-                });
-              }}
-            >
-              Open additional app window
-            </button>
-            <SettingsHelpHint
-              topic="Additional app window"
-              description="A second window shares the same sessions and can receive file copy/paste from the main window via the in-app clipboard."
-            />
+            <div className="settings-action-with-hint">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  void openAuxWindow().catch(() => {
+                    /* no-op outside desktop */
+                  });
+                }}
+              >
+                Open additional app window
+              </button>
+              <SettingsHelpHint
+                topic="Additional app window"
+                description="A second window shares the same sessions and can receive file copy/paste from the main window via the in-app clipboard."
+              />
+            </div>
           </div>
           <div className="settings-form-row field-span-2">
             <label className="field">

@@ -72,6 +72,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setFrameModePreset,
     showFullPathInFilePaneTitle,
     setShowFullPathInFilePaneTitle,
+    onResetVisualStyle,
     fileExportDestMode,
     setFileExportDestMode,
     fileExportPathKey,
@@ -236,6 +237,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             </button>
           </div>
         </header>
+        <div className="app-settings-modal-body">
         <div className="app-settings-tabs" role="tablist" aria-label="Settings sections">
           {APP_SETTINGS_TABS.map((tab) => (
             <button
@@ -278,6 +280,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setFrameModePreset={setFrameModePreset}
               showFullPathInFilePaneTitle={showFullPathInFilePaneTitle}
               setShowFullPathInFilePaneTitle={setShowFullPathInFilePaneTitle}
+              onResetVisualStyle={onResetVisualStyle}
             />
           )}
           {activeAppSettingsTab === "keyboard" && (
@@ -453,6 +456,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             />
           )}
           {activeAppSettingsTab === "about" && <AppSettingsAboutTab />}
+        </div>
         </div>
       </section>
     </div>
