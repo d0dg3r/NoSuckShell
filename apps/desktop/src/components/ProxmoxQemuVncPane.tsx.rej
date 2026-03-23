@@ -1,0 +1,26 @@
+diff a/apps/desktop/src/components/ProxmoxQemuVncPane.tsx b/apps/desktop/src/components/ProxmoxQemuVncPane.tsx	(rejected hunks)
+@@ -119,22 +139,14 @@ export function ProxmoxQemuVncPane({
+         setStatusMessage("Establishing VNC session…");
+ 
+         const mod = await import("@novnc/novnc/lib/rfb.js");
+-        const rfbMaybeCtor =
+-          typeof mod.default === "function"
+-            ? mod.default
+-            : typeof (mod.default as { default?: unknown })?.default === "function"
+-              ? ((mod.default as { default: unknown }).default as typeof mod.default)
+-              : null;
+-        if (rfbMaybeCtor == null) {
+-          throw new Error("noVNC RFB constructor export not found.");
+-        }
++        const RfbCtor = resolveNovncRfbConstructor(mod);
+         if (cancelled || !screenRef.current) {
+           await teardown();
+           return;
+         }
+ 
+         screenRef.current.innerHTML = "";
+-        const rfb = new rfbMaybeCtor(screenRef.current, rfbUrl);
++        const rfb = new RfbCtor(screenRef.current, rfbUrl);
+         rfb.scaleViewport = true;
+         rfb.resizeSession = true;
+         rfbRef.current = rfb;

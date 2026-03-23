@@ -78,7 +78,8 @@ export function AppSettingsPluginsTab() {
       await refresh();
       setActionMessage("License activated.");
     } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setActionMessage(msg);
     } finally {
       setBusy(false);
     }

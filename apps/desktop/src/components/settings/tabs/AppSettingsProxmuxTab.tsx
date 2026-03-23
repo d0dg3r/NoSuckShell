@@ -17,6 +17,16 @@ type ProxmuxClusterRow = {
   failoverUrls: string[];
   isEnabled: boolean;
   allowInsecureTls: boolean;
+  /** `null`/missing = global default proxy; `"direct"` = none; else profile id. */
+  proxyId?: string | null;
+};
+
+type ProxyProfileRow = {
+  id: string;
+  name: string;
+  url: string;
+  noProxyExtra: string;
+  isEnabled: boolean;
 };
 
 type ListStateResponse = {
@@ -26,6 +36,11 @@ type ListStateResponse = {
   usesPlainSecrets?: boolean;
   legacyTokenClusters?: number;
   favoritesByCluster?: Record<string, string[]>;
+  /** Corporate HTTP(S) proxy for Proxmox API (optional). */
+  httpProxyUrl?: string;
+  /** Comma-separated bypass list (same idea as NO_PROXY). */
+  noProxy?: string;
+  proxyProfiles?: ProxyProfileRow[];
 };
 
 type ResourceRow = Record<string, unknown>;
@@ -86,6 +101,21 @@ function mapPluginError(error: unknown): string {
   return normalized || "Unexpected plugin error.";
 }
 
+function clusterProxyLabel(proxyId: string | null | undefined, profiles: ProxyProfileRow[]): string {
+  if (proxyId == null || proxyId === "") return "Global default";
+  if (proxyId === "direct") return "Direct (no proxy)";
+  const p = profiles.find((x) => x.id === proxyId);
+  return p ? `${p.name}` : proxyId;
+}
+
+type ProxmuxSettingsSubTab = "clusters" | "network" | "tools";
+
+const PROXMUX_SETTINGS_SUB_TABS: { id: ProxmuxSettingsSubTab; label: string }[] = [
+  { id: "clusters", label: "Clusters" },
+  { id: "network", label: "Network" },
+  { id: "tools", label: "Tools" },
+];
+
 export type AppSettingsProxmuxTabProps = {
   openWebConsolesInAppPane: boolean;
   setOpenWebConsolesInAppPane: (value: boolean) => void;
@@ -113,6 +143,11 @@ export function AppSettingsProxmuxTab({
   const [draftPassword, setDraftPassword] = useState("");
   const [draftFailoverText, setDraftFailoverText] = useState("");
   const [draftInsecure, setDraftInsecure] = useState(false);
+  const [draftHttpProxy, setDraftHttpProxy] = useState("");
+  const [draftNoProxy, setDraftNoProxy] = useState("");
+  const [draftProxyProfiles, setDraftProxyProfiles] = useState<ProxyProfileRow[]>([]);
+  const [draftClusterProxy, setDraftClusterProxy] = useState("");
+  const [proxmuxSubTab, setProxmuxSubTab] = useState<ProxmuxSettingsSubTab>("clusters");
 
   const catalogItem = useMemo(
     () => PLUGIN_STORE_CATALOG.find((i) => i.id === "proxmox-integration"),
@@ -143,6 +178,9 @@ export function AppSettingsProxmuxTab({
       const raw = await pluginInvoke(PROXMUX_PLUGIN_ID, "listState", {});
       const parsed = raw as ListStateResponse;
       setState(parsed);
+      setDraftHttpProxy(parsed.httpProxyUrl ?? "");
+      setDraftNoProxy(parsed.noProxy ?? "");
+      setDraftProxyProfiles(parsed.proxyProfiles ?? []);
       setResourceClusterId((prev) => prev ?? parsed.activeClusterId ?? null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -182,6 +220,7 @@ export function AppSettingsProxmuxTab({
     setDraftPassword("");
     setDraftFailoverText("");
     setDraftInsecure(false);
+    setDraftClusterProxy("");
   };
 
   const loadClusterIntoDraft = (c: ProxmuxClusterRow) => {
@@ -193,6 +232,12 @@ export function AppSettingsProxmuxTab({
     setDraftPassword("");
     setDraftFailoverText(c.failoverUrls.join("\n"));
     setDraftInsecure(c.allowInsecureTls);
+    const pid = c.proxyId;
+    if (pid == null || pid === "") {
+      setDraftClusterProxy("");
+    } else {
+      setDraftClusterProxy(pid);
+    }
   };
 
   const onSaveCluster = async () => {
@@ -224,6 +269,7 @@ export function AppSettingsProxmuxTab({
           failoverUrls: payload.failoverUrls,
           isEnabled: true,
           allowInsecureTls: payload.allowInsecureTls,
+          proxyId: draftClusterProxy.trim() || null,
         },
       });
       setMessage("Cluster saved.");
@@ -293,6 +339,7 @@ export function AppSettingsProxmuxTab({
         password: payload.password,
         failoverUrls: payload.failoverUrls,
         allowInsecureTls: payload.allowInsecureTls,
+        proxyId: draftClusterProxy.trim() || null,
       })) as { ok?: boolean; message?: string };
       if (out.ok) {
         setMessage("Connection OK (Proxmox API responded).");
@@ -325,6 +372,59 @@ export function AppSettingsProxmuxTab({
     } finally {
       setBusy(false);
     }
+  };
+
+  const onSaveProxySettings = async () => {
+    if (!pluginReady) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await pluginInvoke(PROXMUX_PLUGIN_ID, "saveProxySettings", {
+        httpProxyUrl: draftHttpProxy.trim(),
+        noProxy: draftNoProxy.trim(),
+      });
+      setMessage("Network settings saved.");
+      await refreshState();
+    } catch (e) {
+      setMessage(mapPluginError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSaveProxyProfiles = async () => {
+    if (!pluginReady) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await pluginInvoke(PROXMUX_PLUGIN_ID, "saveProxyProfiles", {
+        profiles: draftProxyProfiles.map((p) => ({
+          id: p.id.trim(),
+          name: p.name.trim(),
+          url: p.url.trim(),
+          noProxyExtra: p.noProxyExtra.trim(),
+          isEnabled: p.isEnabled,
+        })),
+      });
+      setMessage("Proxy profiles saved.");
+      await refreshState();
+    } catch (e) {
+      setMessage(mapPluginError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addProxyProfileRow = () => {
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `proxy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setDraftProxyProfiles((prev) => [...prev, { id, name: "New proxy", url: "", noProxyExtra: "", isEnabled: true }]);
+  };
+
+  const removeProxyProfileRow = (id: string) => {
+    setDraftProxyProfiles((prev) => prev.filter((p) => p.id !== id));
   };
 
   const onFetchResources = async () => {
@@ -395,232 +495,407 @@ export function AppSettingsProxmuxTab({
 
   return (
     <div className="settings-stack">
-      <section className="settings-card">
+      <section className="settings-card proxmux-settings-intro-card">
         <header className="settings-card-head">
           <h3>PROXMUX</h3>
           <p className="muted-copy">
-            Connect to <strong>Proxmox VE</strong> with username/password login (<code className="inline-code">user@realm</code>) and optional TOTP. Use{" "}
-            <strong>Allow insecure TLS</strong> only for homelab hosts with self-signed certificates.
+            Proxmox VE inventory and consoles. Use the tabs below to manage <strong>clusters</strong>, <strong>network / HTTP proxy</strong>, and{" "}
+            <strong>tools</strong>.
           </p>
-          {state?.usesPlainSecrets ? (
-            <p className="muted-copy">
-              Secrets are stored in <code className="inline-code">nosuckshell.proxmux.v1.json</code> under your SSH directory. Set{" "}
-              <code className="inline-code">NOSUCKSHELL_MASTER_KEY</code> or create <code className="inline-code">nosuckshell.master.key</code> there to
-              encrypt passwords like other app credentials.
-            </p>
-          ) : null}
-          {(state?.legacyTokenClusters ?? 0) > 0 ? (
-            <p className="muted-copy">
-              {state?.legacyTokenClusters} legacy token-based cluster{state?.legacyTokenClusters === 1 ? "" : "s"} detected. Edit and save each one with a
-              password to finish the direct-login migration.
-            </p>
-          ) : null}
         </header>
         {loadError ? <p className="error-text">{loadError}</p> : null}
       </section>
 
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <h4>Web consoles</h4>
-          <p className="muted-copy">
-            noVNC and Proxmox web shells open in a <strong>split pane</strong> by default (iframe with same-origin sandbox so WebSockets work).
-            If a site still blocks embedding (for example <code>X-Frame-Options</code>), use <strong>Open in app window</strong> on that pane’s
-            toolbar for a top-level in-app webview. Turn this off to
-            use your default system browser instead.
-          </p>
-        </header>
-        <label
-          className="settings-field settings-field-span-2"
-          style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}
-        >
-          <input
-            type="checkbox"
-            checked={openWebConsolesInAppPane}
-            onChange={(e) => setOpenWebConsolesInAppPane(e.target.checked)}
-          />
-          <span>Open web consoles in an app pane (instead of the system browser)</span>
-        </label>
-      </section>
-
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <h4>{draftId ? "Edit cluster" : "Add cluster"}</h4>
-        </header>
-        <div className="settings-form-grid">
-          <label className="settings-field">
-            <span>Name</span>
-            <input
-              className="input"
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              placeholder="Homelab"
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Proxmox URL</span>
-            <input
-              className="input"
-              value={draftUrl}
-              onChange={(e) => setDraftUrl(e.target.value)}
-              placeholder="https://pve.example.com:8006"
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Username</span>
-            <input
-              className="input"
-              value={draftUser}
-              onChange={(e) => setDraftUser(e.target.value)}
-              placeholder="root@pam"
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field">
-            <span>TOTP code (optional)</span>
-            <input
-              className="input"
-              value={draftTotpCode}
-              onChange={(e) => setDraftTotpCode(e.target.value)}
-              placeholder="123456"
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field settings-field-span-2">
-            <span>Password {draftId ? "(leave blank to keep)" : ""}</span>
-            <input
-              className="input"
-              type="password"
-              autoComplete="off"
-              value={draftPassword}
-              onChange={(e) => setDraftPassword(e.target.value)}
-              placeholder="••••••••"
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field settings-field-span-2">
-            <span>Failover URLs (one per line)</span>
-            <textarea
-              className="input ssh-config-textarea"
-              rows={3}
-              value={draftFailoverText}
-              onChange={(e) => setDraftFailoverText(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <label className="settings-field settings-field-span-2" style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
-            <input type="checkbox" checked={draftInsecure} onChange={(e) => setDraftInsecure(e.target.checked)} disabled={busy} />
-            <span>Allow insecure TLS (self-signed)</span>
-          </label>
-        </div>
-        <div className="settings-actions-row">
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSaveCluster()}>
-            Save cluster
-          </button>
-          <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onTestDraft()}>
-            Test connection
-          </button>
-          {draftId ? (
-            <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={clearDraft}>
-              Cancel edit
-            </button>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <h4>Clusters</h4>
-        </header>
-        {state?.clusters?.length ? (
-          <ul className="proxmux-cluster-list">
-            {state.clusters.map((c) => (
-              <li key={c.id} className="proxmux-cluster-row">
-                <div>
-                  <strong>{c.name}</strong>{" "}
-                  <span className="muted-copy">
-                    <code className="inline-code">{c.id}</code>
-                  </span>
-                  <div className="muted-copy">{c.proxmoxUrl}</div>
-                  {c.requiresReauth ? <span className="proxmux-badge-insecure">Re-auth required</span> : null}
-                  {c.allowInsecureTls ? <span className="proxmux-badge-insecure">Insecure TLS</span> : null}
-                </div>
-                <div className="proxmux-cluster-actions">
-                  <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => loadClusterIntoDraft(c)}>
-                    Edit
-                  </button>
-                  <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onTestSaved(c.id)}>
-                    Test
-                  </button>
-                  <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onSetActive(c.id)}>
-                    {state.activeClusterId === c.id ? "Active" : "Set active"}
-                  </button>
-                  <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onRemoveCluster(c.id)}>
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted-copy">No clusters yet. Add one above.</p>
-        )}
-      </section>
-
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <h4>Inventory</h4>
-          <p className="muted-copy">Fetches <code className="inline-code">/cluster/resources</code> (nodes, QEMU, LXC).</p>
-        </header>
-        <label className="settings-field">
-          <span>Cluster</span>
-          <select
-            className="input"
-            value={resourceClusterId ?? ""}
-            onChange={(e) => setResourceClusterId(e.target.value || null)}
-            disabled={busy || !state?.clusters?.length}
+      <div className="app-settings-subtabs" role="tablist" aria-label="PROXMUX sections">
+        {PROXMUX_SETTINGS_SUB_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={proxmuxSubTab === tab.id}
+            className={`settings-tab settings-subtab ${proxmuxSubTab === tab.id ? "is-active" : ""}`}
+            onClick={() => setProxmuxSubTab(tab.id)}
           >
-            <option value="">Select cluster</option>
-            {state?.clusters?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.id})
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="settings-actions-row">
-          <button type="button" className="btn btn-primary" disabled={busy || !resourceClusterId} onClick={() => void onFetchResources()}>
-            Refresh inventory
+            {tab.label}
           </button>
-        </div>
-        {resources.length > 0 ? (
-          <div className="proxmux-table-wrap">
-            <table className="proxmux-resource-table">
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>VMID</th>
-                  <th>Name</th>
-                  <th>Node</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resources.map((row, idx) => (
-                  <tr key={`${resourceString(row, "id")}-${idx}`}>
-                    <td>{resourceString(row, "type")}</td>
-                    <td>{resourceString(row, "vmid")}</td>
-                    <td>{resourceString(row, "name")}</td>
-                    <td>{resourceString(row, "node")}</td>
-                    <td>{resourceString(row, "status")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        ))}
+      </div>
+
+      <div className="proxmux-settings-tab-panel">
+        {proxmuxSubTab === "clusters" ? (
+          <>
+            <section className="settings-card">
+              <header className="settings-card-head">
+                <h4>Connections</h4>
+                <p className="muted-copy">
+                  Sign in with username/password (<code className="inline-code">user@realm</code>) and optional TOTP. Use <strong>Allow insecure TLS</strong>{" "}
+                  only for homelab hosts with self-signed certificates.
+                </p>
+                {state?.usesPlainSecrets ? (
+                  <p className="muted-copy">
+                    Secrets are stored in <code className="inline-code">nosuckshell.proxmux.v1.json</code> under your SSH directory. Set{" "}
+                    <code className="inline-code">NOSUCKSHELL_MASTER_KEY</code> or create <code className="inline-code">nosuckshell.master.key</code> there to
+                    encrypt passwords like other app credentials.
+                  </p>
+                ) : null}
+                {(state?.legacyTokenClusters ?? 0) > 0 ? (
+                  <p className="muted-copy">
+                    {state?.legacyTokenClusters} legacy token-based cluster{state?.legacyTokenClusters === 1 ? "" : "s"} detected. Edit and save each one with a
+                    password to finish the direct-login migration.
+                  </p>
+                ) : null}
+              </header>
+            </section>
+
+            <section className="settings-card">
+              <header className="settings-card-head">
+                <h4>Saved clusters</h4>
+                <p className="muted-copy">Set a cluster active for the sidebar; edit to change credentials or proxy.</p>
+              </header>
+              {state?.clusters?.length ? (
+                <ul className="proxmux-cluster-list">
+                  {state.clusters.map((c) => (
+                    <li key={c.id} className="proxmux-cluster-row">
+                      <div>
+                        <strong>{c.name}</strong>{" "}
+                        <span className="muted-copy">
+                          <code className="inline-code">{c.id}</code>
+                        </span>
+                        <div className="muted-copy">{c.proxmoxUrl}</div>
+                        <div className="muted-copy">Proxy: {clusterProxyLabel(c.proxyId, state?.proxyProfiles ?? [])}</div>
+                        {c.requiresReauth ? <span className="proxmux-badge-insecure">Re-auth required</span> : null}
+                        {c.allowInsecureTls ? <span className="proxmux-badge-insecure">Insecure TLS</span> : null}
+                      </div>
+                      <div className="proxmux-cluster-actions">
+                        <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => loadClusterIntoDraft(c)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onTestSaved(c.id)}>
+                          Test
+                        </button>
+                        <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onSetActive(c.id)}>
+                          {state.activeClusterId === c.id ? "Active" : "Set active"}
+                        </button>
+                        <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onRemoveCluster(c.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted-copy">No clusters yet. Add your first cluster in the form below.</p>
+              )}
+            </section>
+
+            <section className="settings-card">
+              <header className="settings-card-head">
+                <h4>{draftId ? "Edit cluster" : "Add cluster"}</h4>
+              </header>
+              <div className="settings-form-grid">
+                <label className="settings-field">
+                  <span>Name</span>
+                  <input
+                    className="input"
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    placeholder="Homelab"
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Proxmox URL</span>
+                  <input
+                    className="input"
+                    value={draftUrl}
+                    onChange={(e) => setDraftUrl(e.target.value)}
+                    placeholder="https://pve.example.com:8006"
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Username</span>
+                  <input
+                    className="input"
+                    value={draftUser}
+                    onChange={(e) => setDraftUser(e.target.value)}
+                    placeholder="root@pam"
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>TOTP code (optional)</span>
+                  <input
+                    className="input"
+                    value={draftTotpCode}
+                    onChange={(e) => setDraftTotpCode(e.target.value)}
+                    placeholder="123456"
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field settings-field-span-2">
+                  <span>Password {draftId ? "(leave blank to keep)" : ""}</span>
+                  <input
+                    className="input"
+                    type="password"
+                    autoComplete="off"
+                    value={draftPassword}
+                    onChange={(e) => setDraftPassword(e.target.value)}
+                    placeholder="••••••••"
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field settings-field-span-2">
+                  <span>Failover URLs (one per line)</span>
+                  <textarea
+                    className="input ssh-config-textarea"
+                    rows={3}
+                    value={draftFailoverText}
+                    onChange={(e) => setDraftFailoverText(e.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <label className="settings-field settings-field-span-2 settings-field--inline">
+                  <input type="checkbox" checked={draftInsecure} onChange={(e) => setDraftInsecure(e.target.checked)} disabled={busy} />
+                  <span>Allow insecure TLS (self-signed)</span>
+                </label>
+                <label className="settings-field settings-field-span-2">
+                  <span>HTTP proxy for this cluster</span>
+                  <select className="input" value={draftClusterProxy} onChange={(e) => setDraftClusterProxy(e.target.value)} disabled={busy}>
+                    <option value="">Global default</option>
+                    <option value="direct">Direct (no proxy)</option>
+                    {draftProxyProfiles.map((p) => (
+                      <option key={p.id} value={p.id} disabled={!p.isEnabled}>
+                        {p.name || p.id}
+                        {!p.isEnabled ? " (disabled)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-help">Named profiles are configured on the Network tab. Global default uses the default proxy URL there.</span>
+                </label>
+              </div>
+              <div className="settings-actions-row">
+                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSaveCluster()}>
+                  Save cluster
+                </button>
+                <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => void onTestDraft()}>
+                  Test connection
+                </button>
+                {draftId ? (
+                  <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={clearDraft}>
+                    Cancel edit
+                  </button>
+                ) : null}
+              </div>
+            </section>
+          </>
         ) : null}
-      </section>
+
+        {proxmuxSubTab === "network" ? (
+          <section className="settings-card">
+            <header className="settings-card-head">
+              <h4>Network &amp; proxy</h4>
+              <p className="muted-copy">
+                Corporate HTTPS may require a proxy. <strong>Saved Proxmox cluster URLs are merged into the bypass list</strong> so internal hosts (for example{" "}
+                <code className="inline-code">https://px01.lan:8006</code>) are not sent through the proxy. Add extra patterns under No proxy if needed (for example{" "}
+                <code className="inline-code">.lan</code>).
+              </p>
+            </header>
+
+            <h5 className="proxmux-settings-subheading">Default proxy</h5>
+            <div className="settings-form-grid">
+              <label className="settings-field settings-field-span-2">
+                <span>HTTP(S) proxy URL</span>
+                <input
+                  className="input"
+                  type="url"
+                  autoComplete="off"
+                  placeholder="http://proxy.company.example:8080"
+                  value={draftHttpProxy}
+                  onChange={(e) => setDraftHttpProxy(e.target.value)}
+                  disabled={busy}
+                />
+                <span className="field-help">Leave empty for a direct connection. Authentication: include user and password in the URL if required.</span>
+              </label>
+              <label className="settings-field settings-field-span-2">
+                <span>No proxy (bypass)</span>
+                <input
+                  className="input"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="localhost, 127.0.0.1, .lan, *.internal"
+                  value={draftNoProxy}
+                  onChange={(e) => setDraftNoProxy(e.target.value)}
+                  disabled={busy}
+                />
+                <span className="field-help">
+                  Optional extra bypass list (comma-separated). Cluster hosts from saved URLs are merged in automatically when a proxy is set.
+                </span>
+              </label>
+            </div>
+            <div className="settings-actions-row">
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSaveProxySettings()}>
+                Save network settings
+              </button>
+            </div>
+
+            <hr className="proxmux-settings-section-divider" />
+
+            <h5 className="proxmux-settings-subheading">Named proxy profiles</h5>
+            <p className="muted-copy">
+              Add corporate proxies and toggle them without deleting. Assign a profile per cluster on the <strong>Clusters</strong> tab, or use{" "}
+              <strong>Global default</strong> (URL above) / <strong>Direct</strong> (no HTTP proxy).
+            </p>
+            <div className="proxmux-settings-proxy-profiles-stack">
+              {draftProxyProfiles.map((row, idx) => (
+                <div key={row.id} className="settings-form-grid proxmux-proxy-profile-card">
+                  <label className="settings-field">
+                    <span>Name</span>
+                    <input
+                      className="input"
+                      value={row.name}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraftProxyProfiles((prev) => prev.map((p, i) => (i === idx ? { ...p, name: v } : p)));
+                      }}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="settings-field settings-field-span-2">
+                    <span>HTTP(S) URL</span>
+                    <input
+                      className="input"
+                      type="url"
+                      placeholder="http://proxy.example:8080"
+                      value={row.url}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraftProxyProfiles((prev) => prev.map((p, i) => (i === idx ? { ...p, url: v } : p)));
+                      }}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="settings-field settings-field-span-2">
+                    <span>Extra no-proxy (optional)</span>
+                    <input
+                      className="input"
+                      placeholder="Comma-separated; merged with global bypass + cluster hosts"
+                      value={row.noProxyExtra}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDraftProxyProfiles((prev) => prev.map((p, i) => (i === idx ? { ...p, noProxyExtra: v } : p)));
+                      }}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="settings-field settings-field--inline">
+                    <input
+                      type="checkbox"
+                      checked={row.isEnabled}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        setDraftProxyProfiles((prev) => prev.map((p, i) => (i === idx ? { ...p, isEnabled: v } : p)));
+                      }}
+                      disabled={busy}
+                    />
+                    <span>Enabled</span>
+                  </label>
+                  <div className="settings-field proxmux-proxy-profile-card__actions">
+                    <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={() => removeProxyProfileRow(row.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="settings-actions-row">
+              <button type="button" className="btn btn-settings-tool" disabled={busy} onClick={addProxyProfileRow}>
+                Add proxy profile
+              </button>
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onSaveProxyProfiles()}>
+                Save proxy profiles
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {proxmuxSubTab === "tools" ? (
+          <>
+            <section className="settings-card">
+              <header className="settings-card-head">
+                <h4>Web consoles</h4>
+                <p className="muted-copy">
+                  noVNC and Proxmox web shells open in a <strong>split pane</strong> by default (iframe with same-origin sandbox so WebSockets work). If a site
+                  still blocks embedding (for example <code>X-Frame-Options</code>), use <strong>Open in app window</strong> on that pane’s toolbar for a top-level
+                  in-app webview. Turn this off to use your default system browser instead.
+                </p>
+              </header>
+              <label className="settings-field settings-field-span-2 settings-field--inline">
+                <input
+                  type="checkbox"
+                  checked={openWebConsolesInAppPane}
+                  onChange={(e) => setOpenWebConsolesInAppPane(e.target.checked)}
+                />
+                <span>Open web consoles in an app pane (instead of the system browser)</span>
+              </label>
+            </section>
+
+            <section className="settings-card">
+              <header className="settings-card-head">
+                <h4>Inventory</h4>
+                <p className="muted-copy">Fetches <code className="inline-code">/cluster/resources</code> (nodes, QEMU, LXC).</p>
+              </header>
+              <label className="settings-field">
+                <span>Cluster</span>
+                <select
+                  className="input"
+                  value={resourceClusterId ?? ""}
+                  onChange={(e) => setResourceClusterId(e.target.value || null)}
+                  disabled={busy || !state?.clusters?.length}
+                >
+                  <option value="">Select cluster</option>
+                  {state?.clusters?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.id})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="settings-actions-row">
+                <button type="button" className="btn btn-primary" disabled={busy || !resourceClusterId} onClick={() => void onFetchResources()}>
+                  Refresh inventory
+                </button>
+              </div>
+              {resources.length > 0 ? (
+                <div className="proxmux-table-wrap">
+                  <table className="proxmux-resource-table">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>VMID</th>
+                        <th>Name</th>
+                        <th>Node</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resources.map((row, idx) => (
+                        <tr key={`${resourceString(row, "id")}-${idx}`}>
+                          <td>{resourceString(row, "type")}</td>
+                          <td>{resourceString(row, "vmid")}</td>
+                          <td>{resourceString(row, "name")}</td>
+                          <td>{resourceString(row, "node")}</td>
+                          <td>{resourceString(row, "status")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
+          </>
+        ) : null}
+      </div>
 
       {message ? (
         <p className="muted-copy">

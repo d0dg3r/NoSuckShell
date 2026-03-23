@@ -18,6 +18,7 @@ export const DEFAULT_WORKSPACE_ID = "workspace-main";
 export type WorkspaceSnapshot = {
   id: string;
   name: string;
+  preferVerticalNewPanes: boolean;
   splitSlots: Array<string | null>;
   paneLayouts: PaneLayoutItem[];
   splitTree: SplitTreeNode;
@@ -26,6 +27,15 @@ export type WorkspaceSnapshot = {
 };
 
 export const clonePaneLayouts = (layouts: PaneLayoutItem[]): PaneLayoutItem[] => layouts.map((entry) => ({ ...entry }));
+
+export const findFirstFreePaneInOrder = (paneOrder: number[], splitSlots: Array<string | null>): number | null => {
+  for (const paneIndex of paneOrder) {
+    if (splitSlots[paneIndex] === null) {
+      return paneIndex;
+    }
+  }
+  return null;
+};
 
 export const cloneWorkspaceSnapshot = (snapshot: WorkspaceSnapshot): WorkspaceSnapshot => ({
   ...snapshot,
@@ -39,6 +49,7 @@ export const createEmptyWorkspaceSnapshot = (id: string, name: string): Workspac
   return {
     id,
     name,
+    preferVerticalNewPanes: false,
     splitSlots,
     paneLayouts: createPaneLayoutsFromSlots(splitSlots),
     splitTree: createLeafNode(0),
@@ -54,7 +65,7 @@ export const appendSessionToWorkspaceSnapshot = (
   splitRatioDefaultValue: number,
 ): WorkspaceSnapshot => {
   const targetPaneOrder = collectPaneOrder(targetSnapshot.splitTree);
-  const firstFreePaneIndex = targetPaneOrder.find((paneIndex) => targetSnapshot.splitSlots[paneIndex] === null);
+  const firstFreePaneIndex = findFirstFreePaneInOrder(targetPaneOrder, targetSnapshot.splitSlots);
   const nextTargetPaneIndex =
     typeof firstFreePaneIndex === "number" ? firstFreePaneIndex : Math.max(-1, ...targetPaneOrder) + 1;
   const nextTargetSlots = assignSessionToPane(targetSnapshot.splitSlots, nextTargetPaneIndex, sessionId);
@@ -106,6 +117,7 @@ export const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOr
 type LooseSnapshot = {
   id?: string;
   name?: string;
+  preferVerticalNewPanes?: unknown;
   splitSlots?: unknown;
   paneLayouts?: unknown;
   splitTree?: LayoutSplitTreeNode;
@@ -152,6 +164,7 @@ export const normalizePersistedWorkspacesPayload = (
       ...snapshot,
       id: snapshot.id || workspaceId,
       name: snapshot.name || workspaceId,
+      preferVerticalNewPanes: snapshot.preferVerticalNewPanes === true,
       splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
       paneLayouts: Array.isArray(snapshot.paneLayouts)
         ? (snapshot.paneLayouts as PaneLayoutItem[]).map((entry) => ({ ...entry }))

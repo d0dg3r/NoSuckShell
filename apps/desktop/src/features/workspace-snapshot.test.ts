@@ -3,7 +3,9 @@ import { createLeafNode, serializeSplitTree } from "./split-tree";
 import {
   DEFAULT_WORKSPACE_ID,
   appendSessionToWorkspaceSnapshot,
+  cloneWorkspaceSnapshot,
   createEmptyWorkspaceSnapshot,
+  findFirstFreePaneInOrder,
   normalizePersistedWorkspacesPayload,
 } from "./workspace-snapshot";
 
@@ -30,6 +32,29 @@ describe("workspace-snapshot", () => {
     expect(norm!.nextActiveWorkspaceId).toBe("ws-1");
     expect(norm!.normalizedOrder).toEqual(["ws-1"]);
     expect(norm!.nextActiveSnapshot.name).toBe("Main");
+    expect(norm!.nextActiveSnapshot.preferVerticalNewPanes).toBe(false);
+  });
+
+  it("normalizePersistedWorkspacesPayload defaults preferVerticalNewPanes when missing", () => {
+    const snap = createEmptyWorkspaceSnapshot("ws-legacy", "Legacy");
+    const payload = {
+      order: ["ws-legacy"],
+      activeWorkspaceId: "ws-legacy",
+      snapshots: {
+        "ws-legacy": {
+          id: snap.id,
+          name: snap.name,
+          splitSlots: snap.splitSlots,
+          paneLayouts: snap.paneLayouts,
+          splitTree: serializeSplitTree(snap.splitTree),
+          activePaneIndex: snap.activePaneIndex,
+          activeSessionId: snap.activeSessionId,
+        },
+      },
+    };
+    const norm = normalizePersistedWorkspacesPayload(payload);
+    expect(norm).not.toBeNull();
+    expect(norm!.nextActiveSnapshot.preferVerticalNewPanes).toBe(false);
   });
 
   it("normalizePersistedWorkspacesPayload picks fallback active id", () => {
@@ -59,8 +84,21 @@ describe("workspace-snapshot", () => {
     expect(next.activeSessionId).toBe("s2");
   });
 
+  it("findFirstFreePaneInOrder prefers first free pane in visible order", () => {
+    expect(findFirstFreePaneInOrder([2, 0, 1], ["s0", null, null])).toBe(2);
+    expect(findFirstFreePaneInOrder([1, 0], ["s0", "s1"])).toBeNull();
+  });
+
   it("createEmptyWorkspaceSnapshot starts with one leaf", () => {
     const s = createEmptyWorkspaceSnapshot("x", "X");
     expect(s.splitTree).toEqual(createLeafNode(0));
+    expect(s.preferVerticalNewPanes).toBe(false);
+  });
+
+  it("cloneWorkspaceSnapshot retains preferVerticalNewPanes", () => {
+    const source = createEmptyWorkspaceSnapshot("x", "X");
+    source.preferVerticalNewPanes = true;
+    const cloned = cloneWorkspaceSnapshot(source);
+    expect(cloned.preferVerticalNewPanes).toBe(true);
   });
 });

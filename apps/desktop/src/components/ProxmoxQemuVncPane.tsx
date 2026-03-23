@@ -17,6 +17,26 @@ type Props = {
   onLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
 };
 
+/** noVNC ESM interop: default export may be RFB or a nested `{ default: RFB }`. */
+type NovncRfbInstance = {
+  scaleViewport: boolean;
+  resizeSession: boolean;
+  addEventListener(type: string, listener: (ev: Event) => void): void;
+  disconnect(): void;
+};
+
+function resolveNovncRfbConstructor(mod: unknown): new (target: HTMLElement, url: string | WebSocket) => NovncRfbInstance {
+  const root = mod as { default?: unknown };
+  let candidate: unknown = root.default;
+  if (typeof candidate !== "function" && candidate != null && typeof candidate === "object" && "default" in candidate) {
+    candidate = (candidate as { default: unknown }).default;
+  }
+  if (typeof candidate !== "function") {
+    throw new Error("noVNC RFB constructor export not found.");
+  }
+  return candidate as new (target: HTMLElement, url: string | WebSocket) => NovncRfbInstance;
+}
+
 export function ProxmoxQemuVncPane({
   clusterId,
   node,
@@ -119,22 +139,14 @@ export function ProxmoxQemuVncPane({
         setStatusMessage("Establishing VNC session…");
 
         const mod = await import("@novnc/novnc/lib/rfb.js");
-        const rfbMaybeCtor =
-          typeof mod.default === "function"
-            ? mod.default
-            : typeof (mod.default as { default?: unknown })?.default === "function"
-              ? ((mod.default as { default: unknown }).default as typeof mod.default)
-              : null;
-        if (rfbMaybeCtor == null) {
-          throw new Error("noVNC RFB constructor export not found.");
-        }
+        const RfbCtor = resolveNovncRfbConstructor(mod);
         if (cancelled || !screenRef.current) {
           await teardown();
           return;
         }
 
         screenRef.current.innerHTML = "";
-        const rfb = new rfbMaybeCtor(screenRef.current, rfbUrl);
+        const rfb = new RfbCtor(screenRef.current, rfbUrl);
         rfb.scaleViewport = true;
         rfb.resizeSession = true;
         rfbRef.current = rfb;

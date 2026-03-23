@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use reqwest::Proxy;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -18,6 +19,9 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 pub const PROXMUX_PLUGIN_ID: &str = "dev.nosuckshell.plugin.proxmux";
+
+/// Stored in `proxy_id` to force a direct HTTPS connection (no proxy).
+const PROXY_DIRECT_ID: &str = "direct";
 
 pub struct ProxmuxPlugin;
 
@@ -55,6 +59,8 @@ impl NssPlugin for ProxmuxPlugin {
             "fetchQemuVncProxy" => Ok(fetch_qemu_vnc_proxy(arg)?),
             "fetchLxcTermProxy" => Ok(fetch_lxc_term_proxy(arg)?),
             "qemuSpiceCapable" => Ok(qemu_spice_capable(arg)?),
+            "saveProxySettings" => Ok(save_proxy_settings(arg)?),
+            "saveProxyProfiles" => Ok(save_proxy_profiles(arg)?),
             _ => anyhow::bail!("unknown method: {method}"),
         }
     }
@@ -93,6 +99,24 @@ struct StoredCluster {
     is_enabled: bool,
     #[serde(default)]
     allow_insecure_tls: bool,
+    /// `None`/empty = use global default proxy (`ProxmuxState.http_proxy_url`); `Some("direct")` = no proxy; `Some(profile id)` = named profile.
+    #[serde(default)]
+    proxy_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxyProfile {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    url: String,
+    /// Extra comma-separated bypass hosts for this profile (merged with global + cluster hosts).
+    #[serde(default)]
+    no_proxy_extra: String,
+    #[serde(default = "default_true")]
+    is_enabled: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -105,6 +129,14 @@ struct ProxmuxState {
     /// Per cluster: stable resource keys (`node:{name}` or `qemu|lxc:{node}:{vmid}`).
     #[serde(default)]
     favorites: HashMap<String, Vec<String>>,
+    /// Corporate HTTP(S) proxy for Proxmox API traffic, e.g. `http://proxy.example:8080` (optional).
+    #[serde(default)]
+    http_proxy_url: String,
+    /// Comma-separated bypass list (same idea as `NO_PROXY`), e.g. `localhost,127.0.0.1,.lan,*.internal`.
+    #[serde(default)]
+    no_proxy: String,
+    #[serde(default)]
+    proxy_profiles: Vec<ProxyProfile>,
 }
 
 fn state_path() -> Result<std::path::PathBuf> {
@@ -624,12 +656,127 @@ fn build_cluster_slug(name: &str, used: &HashSet<String>) -> String {
     }
 }
 
-fn http_client(allow_insecure_tls: bool) -> Result<reqwest::blocking::Client> {
+/// Host part of a Proxmox base URL (`https://px01.lan:8006` → `px01.lan`).
+fn host_from_proxmox_base(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let with_scheme = if t.contains("://") {
+        t.to_string()
+    } else {
+        format!("https://{t}")
+    };
+    let u = url::Url::parse(&with_scheme).ok()?;
+    u.host_str().map(|h| h.to_string())
+}
+
+/// User-configured `no_proxy` plus every Proxmox cluster host (and optional `cluster` for draft tests).
+/// When a corporate HTTP proxy is set, internal hostnames like `px01.lan` must bypass the proxy or
+/// connections time out.
+fn effective_no_proxy(
+    state: &ProxmuxState,
+    cluster: Option<&StoredCluster>,
+    profile_no_proxy_extra: Option<&str>,
+) -> String {
+    let mut seen = HashSet::<String>::new();
+    let mut out: Vec<String> = Vec::new();
+    let mut push_host = |h: String| {
+        let key = h.to_lowercase();
+        if seen.insert(key) {
+            out.push(h);
+        }
+    };
+    for part in state.no_proxy.split(',') {
+        let p = part.trim();
+        if !p.is_empty() {
+            push_host(p.to_string());
+        }
+    }
+    if let Some(extra) = profile_no_proxy_extra {
+        for part in extra.split(',') {
+            let p = part.trim();
+            if !p.is_empty() {
+                push_host(p.to_string());
+            }
+        }
+    }
+    for c in state.clusters.values() {
+        for url in std::iter::once(c.proxmox_url.as_str()).chain(c.failover_urls.iter().map(|s| s.as_str())) {
+            if let Some(h) = host_from_proxmox_base(url) {
+                push_host(h);
+            }
+        }
+    }
+    if let Some(c) = cluster {
+        for url in std::iter::once(c.proxmox_url.as_str()).chain(c.failover_urls.iter().map(|s| s.as_str())) {
+            if let Some(h) = host_from_proxmox_base(url) {
+                push_host(h);
+            }
+        }
+    }
+    out.join(",")
+}
+
+fn resolve_proxy_http_url(state: &ProxmuxState, cluster: &StoredCluster) -> Option<String> {
+    let raw = cluster.proxy_id.as_deref().map(str::trim).unwrap_or("");
+    if raw.is_empty() {
+        let u = state.http_proxy_url.trim();
+        return if u.is_empty() {
+            None
+        } else {
+            Some(u.to_string())
+        };
+    }
+    if raw.eq_ignore_ascii_case(PROXY_DIRECT_ID) {
+        return None;
+    }
+    state
+        .proxy_profiles
+        .iter()
+        .find(|p| p.id == raw && p.is_enabled)
+        .and_then(|p| {
+            let u = p.url.trim();
+            if u.is_empty() {
+                None
+            } else {
+                Some(u.to_string())
+            }
+        })
+}
+
+fn profile_no_proxy_extra_line(state: &ProxmuxState, cluster: &StoredCluster) -> Option<String> {
+    let raw = cluster.proxy_id.as_deref().map(str::trim).unwrap_or("");
+    if raw.is_empty() || raw.eq_ignore_ascii_case(PROXY_DIRECT_ID) {
+        return None;
+    }
+    state
+        .proxy_profiles
+        .iter()
+        .find(|p| p.id == raw && p.is_enabled)
+        .map(|p| p.no_proxy_extra.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn http_client(allow_insecure_tls: bool, state: &ProxmuxState, cluster: Option<&StoredCluster>) -> Result<reqwest::blocking::Client> {
     let mut b = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("NoSuckShell-PROXMUX/", env!("CARGO_PKG_VERSION")));
     if allow_insecure_tls {
         b = b.danger_accept_invalid_certs(true);
+    }
+    let proxy_url = cluster
+        .and_then(|c| resolve_proxy_http_url(state, c))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(ref url) = proxy_url {
+        let prof_extra_owned = cluster.and_then(|c| profile_no_proxy_extra_line(state, c));
+        let no_proxy_eff = effective_no_proxy(state, cluster, prof_extra_owned.as_deref());
+        let mut p = Proxy::all(url).context("parse HTTP proxy URL")?;
+        if !no_proxy_eff.is_empty() {
+            p = p.no_proxy(reqwest::NoProxy::from_string(&no_proxy_eff));
+        }
+        b = b.proxy(p);
     }
     b.build().context("build HTTP client")
 }
@@ -946,6 +1093,7 @@ fn cluster_to_public(c: &StoredCluster) -> Value {
         "failoverUrls": c.failover_urls.iter().map(|u| normalize_base_url(u)).collect::<Vec<_>>(),
         "isEnabled": c.is_enabled,
         "allowInsecureTls": c.allow_insecure_tls,
+        "proxyId": c.proxy_id,
     })
 }
 
@@ -968,7 +1116,114 @@ fn list_state() -> Result<Value> {
         "usesPlainSecrets": s.clusters.values().any(|c| c.api_secret_plain.as_ref().is_some_and(|p| !p.is_empty())),
         "legacyTokenClusters": s.clusters.values().filter(|c| !c.api_token_id.trim().is_empty()).count(),
         "favoritesByCluster": favorites_by_cluster,
+        "httpProxyUrl": s.http_proxy_url,
+        "noProxy": s.no_proxy,
+        "proxyProfiles": s.proxy_profiles.iter().map(|p| json!({
+            "id": p.id,
+            "name": p.name,
+            "url": p.url,
+            "noProxyExtra": p.no_proxy_extra,
+            "isEnabled": p.is_enabled,
+        })).collect::<Vec<_>>(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveProxySettingsPayload {
+    #[serde(default)]
+    http_proxy_url: String,
+    #[serde(default)]
+    no_proxy: String,
+}
+
+fn save_proxy_settings(arg: &Value) -> Result<Value> {
+    let p: SaveProxySettingsPayload = serde_json::from_value(arg.clone()).context("parse saveProxySettings")?;
+    let mut state = load_state()?;
+    state.http_proxy_url = p.http_proxy_url.trim().to_string();
+    state.no_proxy = p.no_proxy.trim().to_string();
+    if !state.http_proxy_url.is_empty() {
+        Proxy::all(&state.http_proxy_url).context("invalid HTTP proxy URL")?;
+    }
+    save_state(&state)?;
+    Ok(json!({ "ok": true }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxyProfileWire {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    no_proxy_extra: String,
+    #[serde(default = "default_true")]
+    is_enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveProxyProfilesPayload {
+    profiles: Vec<ProxyProfileWire>,
+}
+
+fn save_proxy_profiles(arg: &Value) -> Result<Value> {
+    let p: SaveProxyProfilesPayload = serde_json::from_value(arg.clone()).context("parse saveProxyProfiles")?;
+    let mut state = load_state()?;
+    let mut out: Vec<ProxyProfile> = Vec::new();
+    let mut seen_ids = HashSet::<String>::new();
+    for w in p.profiles {
+        let id = w.id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if id.eq_ignore_ascii_case(PROXY_DIRECT_ID) {
+            anyhow::bail!("proxy profile id \"{PROXY_DIRECT_ID}\" is reserved");
+        }
+        if !seen_ids.insert(id.to_string()) {
+            anyhow::bail!("duplicate proxy profile id: {id}");
+        }
+        let url = w.url.trim();
+        if !url.is_empty() {
+            Proxy::all(url).context("invalid proxy profile URL")?;
+        }
+        out.push(ProxyProfile {
+            id: id.to_string(),
+            name: w.name.trim().to_string(),
+            url: url.to_string(),
+            no_proxy_extra: w.no_proxy_extra.trim().to_string(),
+            is_enabled: w.is_enabled,
+        });
+    }
+    let valid: HashSet<String> = out.iter().map(|p| p.id.clone()).collect();
+    for c in state.clusters.values_mut() {
+        if let Some(pid) = c.proxy_id.clone() {
+            let t = pid.trim();
+            if t.is_empty() || t.eq_ignore_ascii_case(PROXY_DIRECT_ID) {
+                continue;
+            }
+            if !valid.contains(t) {
+                c.proxy_id = None;
+            }
+        }
+    }
+    state.proxy_profiles = out;
+    save_state(&state)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn normalize_cluster_proxy_id(raw: Option<String>) -> Option<String> {
+    let s = raw?.trim().to_string();
+    if s.is_empty() {
+        None
+    } else if s.eq_ignore_ascii_case(PROXY_DIRECT_ID) {
+        Some(PROXY_DIRECT_ID.to_string())
+    } else {
+        Some(s)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -990,6 +1245,8 @@ struct SaveClusterPayload {
     is_enabled: bool,
     #[serde(default)]
     allow_insecure_tls: bool,
+    #[serde(default)]
+    proxy_id: Option<String>,
 }
 
 fn save_cluster(arg: &Value) -> Result<Value> {
@@ -1052,6 +1309,7 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         failover_urls,
         is_enabled: payload.is_enabled,
         allow_insecure_tls: payload.allow_insecure_tls,
+        proxy_id: normalize_cluster_proxy_id(payload.proxy_id),
     };
 
     state.clusters.insert(id.clone(), cluster);
@@ -1101,7 +1359,7 @@ fn test_connection(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    test_cluster_core(c)
+    test_cluster_core(c, &state)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1119,6 +1377,8 @@ struct DraftClusterArg {
     failover_urls: Vec<String>,
     #[serde(default)]
     allow_insecure_tls: bool,
+    #[serde(default)]
+    proxy_id: Option<String>,
 }
 
 fn test_connection_draft(arg: &Value) -> Result<Value> {
@@ -1155,12 +1415,14 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
         failover_urls: d.failover_urls,
         is_enabled: true,
         allow_insecure_tls: d.allow_insecure_tls,
+        proxy_id: normalize_cluster_proxy_id(d.proxy_id),
     };
-    test_cluster_core(&c)
+    let state = load_state()?;
+    test_cluster_core(&c, &state)
 }
 
-fn test_cluster_core(c: &StoredCluster) -> Result<Value> {
-    let client = http_client(c.allow_insecure_tls)?;
+fn test_cluster_core(c: &StoredCluster, state: &ProxmuxState) -> Result<Value> {
+    let client = http_client(c.allow_insecure_tls, state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
     if primary.is_empty() {
         return Ok(json!({ "ok": false, "message": "Proxmox URL is empty." }));
@@ -1187,7 +1449,7 @@ fn fetch_resources(arg: &Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
     let cache_key = proxmux_cache_key_for_fetch_resources(&cluster_id);
     proxmux_cached_json(cache_key, ProxmuxCacheBucket::FetchResources, || {
-        let client = http_client(c.allow_insecure_tls)?;
+        let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
         let primary = normalize_base_url(&c.proxmox_url);
 
         let data = with_failover(&primary, &c.failover_urls, |base| {
@@ -1399,7 +1661,7 @@ fn guest_status(arg: &Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
     let cache_key = proxmux_cache_key_for_guest_status(&cluster_id, &node, typ, &vmid);
     proxmux_cached_json(cache_key, ProxmuxCacheBucket::GuestStatus, || {
-        let client = http_client(c.allow_insecure_tls)?;
+        let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
         let primary = normalize_base_url(&c.proxmox_url);
 
         let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/status/current");
@@ -1431,7 +1693,7 @@ fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls)?;
+    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/spiceproxy");
@@ -1462,7 +1724,7 @@ fn fetch_qemu_vnc_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls)?;
+    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/vncproxy");
@@ -1496,7 +1758,7 @@ fn fetch_lxc_term_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls)?;
+    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let api_user = c.api_user.clone();
@@ -1541,7 +1803,7 @@ fn qemu_spice_capable(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls)?;
+    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/config");
@@ -1585,7 +1847,7 @@ fn guest_power(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls)?;
+    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!(
@@ -1751,6 +2013,7 @@ mod tests {
                 failover_urls: vec!["https://pve2.example.com:8006".to_string()],
                 is_enabled: true,
                 allow_insecure_tls: true,
+                proxy_id: None,
             },
         );
         state.favorites.insert(
@@ -1792,6 +2055,7 @@ mod tests {
                 failover_urls: vec![],
                 is_enabled: true,
                 allow_insecure_tls: false,
+                proxy_id: None,
             },
         );
 

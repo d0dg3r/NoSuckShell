@@ -127,6 +127,9 @@ export type SplitPaneRendererBridge = {
   onWebPaneOpenInAppWindowError?: (message: string) => void;
   /** Proxmox console deep links need login first; same payload as the main-window assist banner. */
   onWebPaneLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
+  /** When true, leaf pane roots register for scroll-into-view (vertical stack workspace). */
+  verticalStackScrollEnabled: boolean;
+  registerPaneScrollAnchor: (paneIndex: number, element: HTMLElement | null) => void;
 };
 
 export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: SplitTreeNode) => ReactNode {
@@ -171,6 +174,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
         <div
           key={`pane-${paneIndex}`}
           data-pane-index={paneIndex}
+          ref={(element) => {
+            b.registerPaneScrollAnchor(paneIndex, b.verticalStackScrollEnabled ? element : null);
+          }}
           className={`split-pane ${b.activePaneIndex === paneIndex ? "is-focused" : ""} ${
             b.dragOverPaneIndex === paneIndex ? "is-drag-over" : ""
           } ${paneSessionId ? "is-connected" : "is-empty"} ${isHoverTarget ? "is-host-hover-target" : ""} ${

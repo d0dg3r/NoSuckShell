@@ -2788,6 +2788,10 @@ body,
   position: relative;
 }
 
+.session-pane-canvas--vertical-stack-quick-nav {
+  padding-inline-end: 36px;
+}
+
 .terminal-grid {
   display: flex;
   flex-direction: column;
@@ -2801,6 +2805,70 @@ body,
   border: 0;
   background: var(--right-terminal-grid-bg);
   padding: 0;
+}
+
+.terminal-grid.terminal-grid--vertical-stack-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.terminal-grid.terminal-grid--vertical-stack-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.terminal-grid.terminal-grid--vertical-stack-scroll > .split-node {
+  flex: 0 0 auto;
+  min-height: min-content;
+}
+
+.terminal-grid.terminal-grid--vertical-stack-scroll .split-node-vertical > .split-node-child {
+  flex: 0 0 auto !important;
+  flex-basis: auto !important;
+  min-height: 0;
+}
+
+.terminal-grid.terminal-grid--vertical-stack-scroll .split-pane {
+  min-height: min(50vh, 420px);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
+.vertical-stack-quick-nav {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.vertical-stack-quick-nav-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: var(--radius-control);
+  opacity: 0.85;
+}
+
+.vertical-stack-quick-nav-btn:hover {
+  opacity: 1;
+}
+
+.vertical-stack-quick-nav-btn.is-active {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1px rgba(130, 184, 152, 0.45);
 }
 
 .terminal-grid.is-pane-resizing,
@@ -4247,20 +4315,26 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 0;
+  gap: 2px 0;
   margin-bottom: var(--space-3);
   border-bottom: 1px solid rgba(150, 170, 161, 0.22);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .app-settings-subtabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0;
+  gap: 2px 0;
   margin: calc(var(--space-2) * -1) 0 var(--space-4);
   padding-left: 2px;
   border-bottom: 1px solid rgba(150, 170, 161, 0.16);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .settings-tab {
@@ -4537,6 +4611,55 @@ body,
   font-size: var(--font-md);
   font-weight: 650;
   color: rgba(220, 235, 226, 0.95);
+}
+
+/* PROXMUX settings tab: sub-panels + network proxy profile cards */
+.proxmux-settings-tab-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.proxmux-settings-subheading {
+  margin: var(--space-2) 0 var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: rgba(220, 235, 226, 0.92);
+}
+
+.proxmux-settings-tab-panel .settings-card > .proxmux-settings-subheading:first-of-type {
+  margin-top: var(--space-2);
+}
+
+.proxmux-settings-section-divider {
+  border: 0;
+  border-top: 1px solid rgba(150, 170, 161, 0.12);
+  margin: var(--space-4) 0;
+}
+
+.proxmux-settings-proxy-profiles-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.proxmux-proxy-profile-card {
+  border: 1px solid rgba(150, 170, 161, 0.18);
+  border-radius: 10px;
+  padding: var(--space-3);
+  margin: 0;
+  background: rgba(12, 16, 20, 0.2);
+}
+
+.proxmux-proxy-profile-card__actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.proxmux-settings-tab-panel .settings-field--inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .proxmux-cluster-list {

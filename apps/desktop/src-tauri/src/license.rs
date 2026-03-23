@@ -147,8 +147,37 @@ pub fn has_entitlement(entitlement: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Repair common paste mistakes:
+/// - **Fused duplicates:** `payload.sig` twice becomes `payload.(sig+payload).sig` → 3+ segments when split on `.`;
+///   keep first segment + last segment (valid `payload.sig` when both tokens were the same).
+/// - **Exact duplicate:** the whole string is `token+token` with identical halves → keep first half.
+fn normalize_license_token_input(input: &str) -> (String, &'static str) {
+    let t = input.trim();
+    if t.is_empty() {
+        return (String::new(), "none");
+    }
+    let bytes = t.as_bytes();
+    if bytes.len() % 2 == 0 && !bytes.is_empty() {
+        let mid = bytes.len() / 2;
+        if bytes[..mid] == bytes[mid..] {
+            return (t[..mid].to_string(), "identical_halves");
+        }
+    }
+    let parts: Vec<&str> = t.split('.').collect();
+    if parts.len() >= 3 {
+        let fused = format!("{}.{}", parts[0], parts[parts.len() - 1]);
+        if fused != t {
+            return (fused, "fused_first_last");
+        }
+    }
+    (t.to_string(), "none")
+}
+
 pub fn activate_license_token(token: String) -> Result<LicensePayload> {
-    let trimmed = token.trim();
+    let (trimmed, _) = normalize_license_token_input(&token);
+    if trimmed.is_empty() {
+        anyhow::bail!("license token is empty");
+    }
     let (payload_part, sig_part) = trimmed
         .split_once('.')
         .context("license token must be `base64url(payload).base64url(signature)` or use import_license_json")?;
@@ -242,5 +271,23 @@ mod tests {
         let msg = license_message(&payload).unwrap();
         let sig = sk.sign(msg.as_bytes());
         verify_payload(&payload, &hex::encode(sig.to_bytes())).unwrap();
+    }
+
+    #[test]
+    fn normalize_strips_accidental_duplicate_token_paste() {
+        let once = "a.b";
+        let doubled = format!("{once}{once}");
+        let (n, mode) = normalize_license_token_input(&doubled);
+        assert_eq!(mode, "identical_halves");
+        assert_eq!(n, once);
+    }
+
+    #[test]
+    fn normalize_fuses_concatenated_same_token_two_dots() {
+        // Two toy tokens back-to-back: "aaaa.bbbb" + "cccc.dddd" => two dots, unequal halves, fuse first+last.
+        let fused_input = "aaaa.bbbbcccc.dddd";
+        let (n, mode) = normalize_license_token_input(fused_input);
+        assert_eq!(mode, "fused_first_last");
+        assert_eq!(n, "aaaa.dddd");
     }
 }

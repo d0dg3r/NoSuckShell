@@ -14,6 +14,11 @@ export default defineConfig(({ mode }) => {
         }
       : undefined,
     plugins: [react()],
+    server: {
+      // Must match tauri.conf.json build.devUrl — avoid silent fallback to 5174 while Tauri still loads 5173 (white window).
+      port: 5173,
+      strictPort: true,
+    },
     resolve: {
       extensions: [".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"],
       ...(e2e

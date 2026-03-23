@@ -354,9 +354,18 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
             usesEncryptedSecrets: false,
             usesPlainSecrets: false,
             favoritesByCluster: {},
+            httpProxyUrl: "",
+            noProxy: "",
+            proxyProfiles: [],
           };
         }
-        if (method === "saveCluster" || method === "removeCluster" || method === "setActiveCluster") {
+        if (
+          method === "saveCluster" ||
+          method === "removeCluster" ||
+          method === "setActiveCluster" ||
+          method === "saveProxySettings" ||
+          method === "saveProxyProfiles"
+        ) {
           return { ok: true };
         }
         if (method === "testConnection" || method === "testConnectionDraft") {

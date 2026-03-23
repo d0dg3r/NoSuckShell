@@ -263,6 +263,7 @@ import {
   compactSplitSlotsByPaneOrder,
   createEmptyWorkspaceSnapshot,
   DEFAULT_WORKSPACE_ID,
+  findFirstFreePaneInOrder,
   type WorkspaceSnapshot,
 } from "./features/workspace-snapshot";
 
@@ -655,6 +656,7 @@ export function App() {
   const sidebarDragStartXRef = useRef<number>(0);
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const paneScrollAnchorsRef = useRef<Record<number, HTMLElement | null>>({});
   const settingsModalRef = useRef<HTMLElement | null>(null);
   const settingsDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const mobilePagerRef = useRef<HTMLDivElement | null>(null);
@@ -941,6 +943,13 @@ export function App() {
   }, [fileWorkspacePluginEnabled]);
 
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
+
+  const verticalStackScrollEnabled = useMemo(
+    () =>
+      Boolean(workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes) &&
+      !(isStackedShell && mobileShellTab === "terminal"),
+    [activeWorkspaceId, isStackedShell, mobileShellTab, workspaceSnapshots],
+  );
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -2841,9 +2850,13 @@ export function App() {
   };
 
   const placeSessionIntoNewOrFreePane = (sessionId: string, splitFromPaneIndex: number) => {
-    const firstFreePaneIndex = paneOrder.find((paneIndex) => splitSlots[paneIndex] === null);
-    const usedExistingEmptyPane = typeof firstFreePaneIndex === "number" && firstFreePaneIndex >= 0;
-    const targetPaneIndex = usedExistingEmptyPane ? firstFreePaneIndex : splitFocusedPane("right", splitFromPaneIndex, "empty");
+    const firstFreePaneIndex = findFirstFreePaneInOrder(paneOrder, splitSlots);
+    const usedExistingEmptyPane = firstFreePaneIndex !== null;
+    const autoSplitDirection: "right" | "bottom" =
+      workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+    const targetPaneIndex = usedExistingEmptyPane
+      ? firstFreePaneIndex
+      : splitFocusedPane(autoSplitDirection, splitFromPaneIndex, "empty");
     setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, sessionId));
     setActivePaneIndex(targetPaneIndex);
     setActiveSession(sessionId);
@@ -2914,7 +2927,11 @@ export function App() {
           ...prev,
           { id, kind: "web", label: title, url: trimmed, ...(allowInsecureTls ? { allowInsecureTls: true } : {}) },
         ]);
-        const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+        const autoSplitDirection: "right" | "bottom" =
+          workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+        const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+        const targetPaneIndex =
+          firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
         setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
         setActivePaneIndex(targetPaneIndex);
         setActiveSession(id);
@@ -2926,7 +2943,7 @@ export function App() {
         setError(String(e));
       }
     },
-    [proxmuxOpenWebConsolesInPane, activePaneIndex],
+    [activePaneIndex, activeWorkspaceId, paneOrder, proxmuxOpenWebConsolesInPane, splitSlots, workspaceSnapshots],
   );
 
   const handleProxmoxContinueToConsole = useCallback(async () => {
@@ -3510,6 +3527,14 @@ export function App() {
     window.dispatchEvent(new CustomEvent("nosuckshell:terminal-focus-request", { detail: { sessionId } }));
   }, []);
 
+  const registerPaneScrollAnchor = useCallback((paneIndex: number, element: HTMLElement | null) => {
+    if (element) {
+      paneScrollAnchorsRef.current[paneIndex] = element;
+    } else {
+      delete paneScrollAnchorsRef.current[paneIndex];
+    }
+  }, []);
+
   const handleMobilePagerScroll = useCallback(() => {
     if (skipMobilePagerScrollRef.current) {
       return;
@@ -3542,6 +3567,33 @@ export function App() {
     }
     el.scrollBy({ left: delta * el.clientWidth, behavior: "smooth" });
   }, []);
+
+  const onQuickNavPane = useCallback(
+    (paneIndex: number) => {
+      if (paneIndex === activePaneIndex) {
+        queueMicrotask(() => {
+          paneScrollAnchorsRef.current[paneIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+        return;
+      }
+      setActivePaneIndex(paneIndex);
+      const sid = splitSlots[paneIndex];
+      if (sid) {
+        setActiveSession(sid);
+        requestTerminalFocus(sid);
+      }
+    },
+    [activePaneIndex, requestTerminalFocus, splitSlots],
+  );
+
+  useEffect(() => {
+    if (!verticalStackScrollEnabled) {
+      return;
+    }
+    queueMicrotask(() => {
+      paneScrollAnchorsRef.current[activePaneIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [activePaneIndex, verticalStackScrollEnabled]);
 
   useLayoutEffect(() => {
     if (!isStackedShell || mobileShellTab !== "terminal") {
@@ -3798,6 +3850,7 @@ export function App() {
       const currentSnapshot: WorkspaceSnapshot = {
         id: activeWorkspaceId,
         name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        preferVerticalNewPanes: workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true,
         splitSlots: [...splitSlots],
         paneLayouts: clonePaneLayouts(paneLayouts),
         splitTree: cloneSplitTree(splitTree),
@@ -3865,6 +3918,40 @@ export function App() {
     },
     [activeWorkspaceId, applyWorkspaceSnapshot, workspaceOrder, workspaceSnapshots],
   );
+  const renameWorkspace = useCallback((workspaceId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) {
+      return;
+    }
+    setWorkspaceSnapshots((prev) => {
+      const snapshot = prev[workspaceId];
+      if (!snapshot || snapshot.name === trimmed) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [workspaceId]: {
+          ...snapshot,
+          name: trimmed,
+        },
+      };
+    });
+  }, []);
+  const setWorkspaceVerticalStacking = useCallback((workspaceId: string, enabled: boolean) => {
+    setWorkspaceSnapshots((prev) => {
+      const snapshot = prev[workspaceId];
+      if (!snapshot || snapshot.preferVerticalNewPanes === enabled) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [workspaceId]: {
+          ...snapshot,
+          preferVerticalNewPanes: enabled,
+        },
+      };
+    });
+  }, []);
 
   const applyRuntimeSplitTreeToWorkspace = useCallback(
     (workspaceId: string, tree: SplitTreeNode) => {
@@ -4054,6 +4141,7 @@ export function App() {
       const persistedCurrentSnapshot: WorkspaceSnapshot = {
         id: activeWorkspaceId,
         name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        preferVerticalNewPanes: workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true,
         splitSlots: [...splitSlots],
         paneLayouts: clonePaneLayouts(paneLayouts),
         splitTree: cloneSplitTree(splitTree),
@@ -4519,12 +4607,16 @@ export function App() {
           ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
         },
       ]);
-      const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
       setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
       setActivePaneIndex(targetPaneIndex);
       setActiveSession(id);
     },
-    [activePaneIndex],
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
   );
 
   const handleProxmoxLxcConsoleInPane = useCallback(
@@ -4556,12 +4648,16 @@ export function App() {
           ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
         },
       ]);
-      const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
       setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
       setActivePaneIndex(targetPaneIndex);
       setActiveSession(id);
     },
-    [activePaneIndex],
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
   );
 
   const startSplitResize = (splitId: string, axis: SplitAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -4952,6 +5048,8 @@ export function App() {
     onWebPaneOpenInAppWindowError: setError,
     onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
+    verticalStackScrollEnabled,
+    registerPaneScrollAnchor,
   });
 
   const appShellStyle = {
@@ -5180,7 +5278,12 @@ export function App() {
         sendSessionToWorkspace={sendSessionToWorkspace}
         createWorkspace={createWorkspace}
         removeWorkspace={removeWorkspace}
+        renameWorkspace={renameWorkspace}
+        setWorkspaceVerticalStacking={setWorkspaceVerticalStacking}
         splitResizeState={splitResizeState}
+        verticalStackScrollEnabled={verticalStackScrollEnabled}
+        resolvePaneQuickNavLabel={resolvePaneLabel}
+        onQuickNavPane={onQuickNavPane}
         isStackedShell={isStackedShell}
         mobileShellTab={mobileShellTab}
         paneOrder={paneOrder}

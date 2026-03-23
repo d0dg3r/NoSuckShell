@@ -1,8 +1,9 @@
-import type { DragEvent as ReactDragEvent, ReactNode, RefObject, UIEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type ReactNode, type RefObject, type UIEvent } from "react";
 import type { DragPayload } from "../features/pane-dnd";
 import { createLeafNode, type SplitResizeState, type SplitTreeNode } from "../features/split-tree";
+import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPosition";
 
-export type WorkspaceTabInfo = { id: string; name: string };
+export type WorkspaceTabInfo = { id: string; name: string; preferVerticalNewPanes: boolean };
 
 export type TerminalWorkspaceDockProps = {
   workspaceTabs: WorkspaceTabInfo[];
@@ -12,7 +13,12 @@ export type TerminalWorkspaceDockProps = {
   sendSessionToWorkspace: (sessionId: string, workspaceId: string) => void;
   createWorkspace: () => void;
   removeWorkspace: (workspaceId: string) => void;
+  renameWorkspace: (workspaceId: string, nextName: string) => void;
+  setWorkspaceVerticalStacking: (workspaceId: string, enabled: boolean) => void;
   splitResizeState: SplitResizeState | null;
+  verticalStackScrollEnabled: boolean;
+  resolvePaneQuickNavLabel: (paneIndex: number) => { display: string; title: string };
+  onQuickNavPane: (paneIndex: number) => void;
   isStackedShell: boolean;
   mobileShellTab: "hosts" | "terminal";
   paneOrder: number[];
@@ -35,7 +41,12 @@ export function TerminalWorkspaceDock({
   sendSessionToWorkspace,
   createWorkspace,
   removeWorkspace,
+  renameWorkspace,
+  setWorkspaceVerticalStacking,
   splitResizeState,
+  verticalStackScrollEnabled,
+  resolvePaneQuickNavLabel,
+  onQuickNavPane,
   isStackedShell,
   mobileShellTab,
   paneOrder,
@@ -49,6 +60,46 @@ export function TerminalWorkspaceDock({
   isBroadcastModeEnabled,
   broadcastTargetCount,
 }: TerminalWorkspaceDockProps) {
+  const [workspaceMenu, setWorkspaceMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
+  const targetWorkspace = useMemo(
+    () => workspaceTabs.find((workspace) => workspace.id === workspaceMenu?.workspaceId) ?? null,
+    [workspaceMenu?.workspaceId, workspaceTabs],
+  );
+  const { menuRef, style: menuStyle } = useClampedContextMenuPosition(
+    workspaceMenu != null,
+    workspaceMenu?.x ?? 0,
+    workspaceMenu?.y ?? 0,
+    [workspaceMenu?.workspaceId, targetWorkspace?.preferVerticalNewPanes === true],
+  );
+
+  useEffect(() => {
+    if (!workspaceMenu) {
+      return;
+    }
+    const dismiss = () => setWorkspaceMenu(null);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (menuRef.current && target instanceof Node && menuRef.current.contains(target)) {
+        return;
+      }
+      dismiss();
+    };
+    const onWindowBlur = () => dismiss();
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        dismiss();
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("blur", onWindowBlur);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("blur", onWindowBlur);
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [menuRef, workspaceMenu]);
+
   return (
     <section className="right-dock panel">
       <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
@@ -60,6 +111,10 @@ export function TerminalWorkspaceDock({
             aria-selected={workspace.id === activeWorkspaceId}
             className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
             onClick={() => switchWorkspace(workspace.id)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setWorkspaceMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
+            }}
             onDragOver={(event) => {
               const payload = parseDragPayload(event);
               const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
@@ -90,14 +145,63 @@ export function TerminalWorkspaceDock({
             Remove current
           </button>
         )}
+        {workspaceMenu && targetWorkspace && (
+          <div
+            ref={menuRef}
+            className="context-menu"
+            style={menuStyle}
+            role="menu"
+            onContextMenuCapture={(event) => {
+              event.preventDefault();
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="context-menu-item"
+              onClick={() => {
+                const nextName = window.prompt("Workspace name", targetWorkspace.name);
+                if (nextName == null) {
+                  setWorkspaceMenu(null);
+                  return;
+                }
+                const trimmed = nextName.trim();
+                if (!trimmed) {
+                  setWorkspaceMenu(null);
+                  return;
+                }
+                renameWorkspace(targetWorkspace.id, trimmed);
+                setWorkspaceMenu(null);
+              }}
+            >
+              Rename workspace
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={targetWorkspace.preferVerticalNewPanes}
+              className="context-menu-item separator-above"
+              onClick={() => {
+                setWorkspaceVerticalStacking(targetWorkspace.id, !targetWorkspace.preferVerticalNewPanes);
+                setWorkspaceMenu(null);
+              }}
+            >
+              {targetWorkspace.preferVerticalNewPanes ? "✓ " : ""}Stack new panes vertically
+            </button>
+          </div>
+        )}
       </div>
       <div className="sessions-workspace">
         <div className="sessions-zone">
-          <div className="session-pane-canvas">
+          <div
+            className={`session-pane-canvas${
+              verticalStackScrollEnabled && paneOrder.length > 1 ? " session-pane-canvas--vertical-stack-quick-nav" : ""
+            }`}
+          >
             <div
               className={`terminal-grid ${splitResizeState ? `is-pane-resizing is-pane-resizing-${splitResizeState.axis}` : ""}${
                 isStackedShell && mobileShellTab === "terminal" ? " is-mobile-terminal-pager" : ""
-              }`}
+              }${verticalStackScrollEnabled ? " terminal-grid--vertical-stack-scroll" : ""}`}
             >
               {isStackedShell && mobileShellTab === "terminal" ? (
                 <div className="mobile-terminal-pager">
@@ -139,6 +243,27 @@ export function TerminalWorkspaceDock({
                 renderSplitNode(splitTree)
               )}
             </div>
+            {verticalStackScrollEnabled && paneOrder.length > 1 ? (
+              <nav className="vertical-stack-quick-nav" aria-label="Pane quick navigation">
+                {paneOrder.map((paneIndex, orderPos) => {
+                  const label = resolvePaneQuickNavLabel(paneIndex);
+                  const n = orderPos + 1;
+                  return (
+                    <button
+                      key={paneIndex}
+                      type="button"
+                      className={`btn vertical-stack-quick-nav-btn ${activePaneIndex === paneIndex ? "is-active" : ""}`}
+                      aria-label={`Pane ${n}: ${label.title}`}
+                      title={label.title}
+                      aria-current={activePaneIndex === paneIndex ? "true" : undefined}
+                      onClick={() => onQuickNavPane(paneIndex)}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : null}
           </div>
           <div className="sessions-footer" role="status">
             <div className="sessions-footer-meta">
