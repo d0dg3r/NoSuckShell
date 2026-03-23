@@ -29,6 +29,7 @@ export type AppSettingsAppearanceTabProps = {
   setFrameModePreset: (value: FrameModePreset) => void;
   showFullPathInFilePaneTitle: boolean;
   setShowFullPathInFilePaneTitle: (value: boolean) => void;
+  onResetVisualStyle: () => void;
 };
 
 export function AppSettingsAppearanceTab({
@@ -49,6 +50,7 @@ export function AppSettingsAppearanceTab({
   setFrameModePreset,
   showFullPathInFilePaneTitle,
   setShowFullPathInFilePaneTitle,
+  onResetVisualStyle,
 }: AppSettingsAppearanceTabProps) {
   return (
     <div className="settings-stack">
@@ -60,6 +62,13 @@ export function AppSettingsAppearanceTab({
               topic="Visual style"
               description="Typography, density, list contrast, and frame emphasis for the whole app (not connection-specific)."
             />
+            <button type="button" className="btn btn-settings-tool" onClick={onResetVisualStyle}>
+              Reset view
+            </button>
+            <SettingsHelpHint
+              topic="Reset view"
+              description="Restores density profile, density fine-tune (spacing, controls, and UI font size), GUI and terminal fonts, terminal density fine-tune, list tone, frame mode, and the file pane full-path title option to their defaults. Layout and window settings are not changed."
+            />
           </div>
           <p className="settings-card-lead">Typography, density, and contrast.</p>
         </header>
@@ -69,7 +78,7 @@ export function AppSettingsAppearanceTab({
               Density profile
               <SettingsHelpHint
                 topic="Density profile"
-                description={`Preset baseline for spacing and typography. Fine tune with the slider: ${uiDensityOffset > 0 ? "+" : ""}${uiDensityOffset}.`}
+                description={`Preset baseline for spacing and typography. The fine-tune slider adjusts padding, control sizes, and UI font size together. Current offset: ${uiDensityOffset > 0 ? "+" : ""}${uiDensityOffset}.`}
               />
             </span>
             <select

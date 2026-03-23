@@ -9,10 +9,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
 
 type ConnHandles = Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>;
 
+/// Tracks the accept-loop task handle and all per-connection task handles for a running proxy.
 struct ProxyEntry {
     accept_loop: tokio::task::JoinHandle<()>,
     conn_handles: ConnHandles,
@@ -88,18 +90,17 @@ async fn proxy_one_browser_connection(
     auth_header: Option<String>,
     auth_cookie: Option<String>,
 ) {
-    let browser_ws = match accept_hdr_async(browser_tcp, move |req: &http::Request<()>, resp| {
-        if req.uri().path() == expected_path {
-            Ok(resp)
-        } else {
-            let mut err: http::Response<Option<String>> =
-                http::Response::new(Some("Forbidden: invalid proxy token".to_string()));
-            *err.status_mut() = http::StatusCode::FORBIDDEN;
-            Err(err)
+    let callback = move |req: &Request, response: Response| -> Result<Response, http::Response<Option<String>>> {
+        if req.uri().path() != expected_path.as_str() {
+            let err = http::Response::builder()
+                .status(http::StatusCode::FORBIDDEN)
+                .body(Some("Forbidden: invalid proxy token".to_string()))
+                .expect("response");
+            return Err(err);
         }
-    })
-    .await
-    {
+        Ok(response)
+    };
+    let browser_ws = match accept_hdr_async(browser_tcp, callback).await {
         Ok(ws) => ws,
         Err(e) => {
             eprintln!("proxmux ws proxy: accept browser ws: {e}");
@@ -187,15 +188,14 @@ pub async fn proxmux_ws_proxy_start(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let proxy_id = uuid::Uuid::new_v4().to_string();
-    let local_ws_url = format!("ws://127.0.0.1:{port}/{proxy_id}");
     let expected_path = format!("/{proxy_id}");
+    let local_ws_url = format!("ws://127.0.0.1:{port}{expected_path}");
 
     let upstream = upstream_wss_url.clone();
-
     let conn_handles: ConnHandles = Arc::new(Mutex::new(Vec::new()));
     let conn_handles_for_loop = conn_handles.clone();
 
-    let handle = tokio::spawn(async move {
+    let accept_loop = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
@@ -203,7 +203,7 @@ pub async fn proxmux_ws_proxy_start(
                     let auth = auth_header.clone();
                     let cookie = auth_cookie.clone();
                     let path = expected_path.clone();
-                    let h = tokio::spawn(proxy_one_browser_connection(
+                    let conn_handle = tokio::spawn(proxy_one_browser_connection(
                         stream,
                         path,
                         upstream,
@@ -211,10 +211,9 @@ pub async fn proxmux_ws_proxy_start(
                         auth,
                         cookie,
                     ));
-                    conn_handles_for_loop
-                        .lock()
-                        .expect("conn handles lock")
-                        .push(h);
+                    let mut guard = conn_handles_for_loop.lock().expect("conn handles lock");
+                    guard.retain(|h| !h.is_finished());
+                    guard.push(conn_handle);
                 }
                 Err(e) => {
                     eprintln!("proxmux ws proxy: accept: {e}");
@@ -227,7 +226,7 @@ pub async fn proxmux_ws_proxy_start(
     proxy_tasks()
         .lock()
         .expect("proxy map lock")
-        .insert(proxy_id.clone(), ProxyEntry { accept_loop: handle, conn_handles });
+        .insert(proxy_id.clone(), ProxyEntry { accept_loop, conn_handles });
 
     Ok(ProxmuxWsProxyStartResult {
         proxy_id,

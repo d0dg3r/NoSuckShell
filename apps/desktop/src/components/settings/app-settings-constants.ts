@@ -1,18 +1,46 @@
-import type { AppSettingsTab, IdentityStoreSubTab } from "./app-settings-types";
+import type {
+  AppSettingsTab,
+  ConnectionSubTab,
+  HelpAboutSubTab,
+  IdentityStoreSubTab,
+  IntegrationsSubTab,
+  InterfaceSubTab,
+  WorkspaceSubTab,
+} from "./app-settings-types";
 
-/** Order: work-first (hosts, identity, integrations) → data safety → layout/input → look & feel → meta. */
+/** Order: work-first (connection, identity, workspace, integrations) → interface → data → meta. */
 export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
-  { id: "hosts", label: "Hosts" },
+  { id: "connection", label: "Connection" },
   { id: "store", label: "Identity Store" },
-  { id: "views", label: "Views" },
+  { id: "workspace", label: "Workspace" },
+  { id: "integrations", label: "Integrations" },
+  { id: "interface", label: "Interface" },
+  { id: "data", label: "Data & Backup" },
+  { id: "help", label: "Help & info" },
+];
+
+export const CONNECTION_SUBTABS: Array<{ id: ConnectionSubTab; label: string }> = [
+  { id: "hosts", label: "Hosts" },
   { id: "ssh", label: "SSH" },
+];
+
+export const WORKSPACE_SUBTABS: Array<{ id: WorkspaceSubTab; label: string }> = [
+  { id: "views", label: "Views" },
+  { id: "layout", label: "Layout & navigation" },
+  { id: "files", label: "Files & export" },
+];
+
+export const INTEGRATIONS_SUBTABS: Array<{ id: IntegrationsSubTab; label: string }> = [
   { id: "proxmux", label: "PROXMUX" },
   { id: "plugins", label: "Plugins & license" },
-  { id: "data", label: "Data & Backup" },
-  { id: "layout", label: "Layout & Navigation" },
-  { id: "keyboard", label: "Keyboard" },
-  { id: "files", label: "Files & export" },
+];
+
+export const INTERFACE_SUBTABS: Array<{ id: InterfaceSubTab; label: string }> = [
   { id: "appearance", label: "Appearance" },
+  { id: "keyboard", label: "Keyboard" },
+];
+
+export const HELP_ABOUT_SUBTABS: Array<{ id: HelpAboutSubTab; label: string }> = [
   { id: "help", label: "Help" },
   { id: "about", label: "About" },
 ];

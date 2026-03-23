@@ -16,6 +16,11 @@ import {
 } from "../../../features/plugin-store-catalog";
 import { SettingsHelpHint } from "../SettingsHelpHint";
 
+function formatLicenseExpShort(expSec: number): string {
+  const d = new Date(expSec * 1000);
+  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
 export function AppSettingsPluginsTab() {
   const [plugins, setPlugins] = useState<PluginListEntry[]>([]);
   const [status, setStatus] = useState<LicenseStatus | null>(null);
@@ -104,8 +109,8 @@ export function AppSettingsPluginsTab() {
   const licenseExpLabel = formatLicenseExpSummary(status?.exp ?? null);
 
   return (
-    <div className="settings-stack">
-      <section className="settings-card">
+    <div className="settings-stack settings-stack--equal-cols settings-stack--plugins-tab">
+      <section className="settings-card plugins-tab-store">
         <header className="settings-card-head">
           <div className="settings-card-head-row">
             <h3>Plugin store</h3>
@@ -129,7 +134,7 @@ export function AppSettingsPluginsTab() {
                 <div className="plugin-store-card-head">
                   <div className="plugin-store-card-title-row">
                     {item.logoSrc ? (
-                      <img src={item.logoSrc} alt="" className="plugin-store-logo" width={40} height={40} />
+                      <img src={item.logoSrc} alt="" className="plugin-store-logo" width={32} height={32} />
                     ) : null}
                     <strong>{item.title}</strong>
                     <SettingsHelpHint
@@ -172,111 +177,117 @@ export function AppSettingsPluginsTab() {
         </ul>
       </section>
 
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <div className="settings-card-head-row">
-            <h3>License</h3>
-            <SettingsHelpHint
-              topic="License token"
-              description="Optional paid add-ons use an offline-signed token (separate from the MIT license on the source). After a purchase or donation, paste the token issued by the project (for example via a Ko-fi webhook service you operate). See Ko-fi, docs/licensing.md, docs/terms-of-sale.md, and docs/license-server-runbook.md."
-            />
+      <section className="settings-card plugins-tab-license-installed">
+        <div className="plugins-tab-license-installed-grid">
+          <div className="plugins-tab-license-col">
+            <header className="settings-card-head plugins-tab-column-head">
+              <div className="settings-card-head-row">
+                <h3>License</h3>
+                <SettingsHelpHint
+                  topic="License token"
+                  description="Optional paid add-ons use an offline-signed token (separate from the MIT license on the source). After a purchase or donation, paste the token issued by the project (for example via a Ko-fi webhook service you operate). See Ko-fi, docs/licensing.md, docs/terms-of-sale.md, and docs/license-server-runbook.md."
+                />
+              </div>
+              <p className="settings-card-lead">Paste an offline-signed token for paid add-ons.</p>
+            </header>
+            {loadError ? <p className="error-text">{loadError}</p> : null}
+            {status && (
+              <div className="settings-license-status-block plugins-tab-license-status">
+                <dl className="plugins-tab-license-dl">
+                  <dt>Status</dt>
+                  <dd>{status.active ? "Active" : "None"}</dd>
+                  {status.active ? (
+                    <>
+                      <dt>License ID</dt>
+                      <dd>
+                        <code className="inline-code">{status.licenseId}</code>
+                      </dd>
+                      <dt>Entitlements</dt>
+                      <dd>{status.entitlements.length ? status.entitlements.join(", ") : "(none)"}</dd>
+                      {status.exp != null ? (
+                        <>
+                          <dt>Expires</dt>
+                          <dd>
+                            {formatLicenseExpShort(status.exp)} — time-limited (trial or subscription)
+                          </dd>
+                        </>
+                      ) : null}
+                    </>
+                  ) : null}
+                </dl>
+              </div>
+            )}
+            <label className="settings-card-title license-token-field">
+              <span>License token</span>
+              <input
+                type="text"
+                className="input license-token-input"
+                value={tokenDraft}
+                onChange={(e) => setTokenDraft(e.target.value)}
+                placeholder="base64url(payload).base64url(signature)"
+                spellCheck={false}
+                autoComplete="off"
+                disabled={busy}
+              />
+            </label>
+            <div className="settings-actions-row">
+              <button type="button" className="btn btn-primary" onClick={() => void onActivate()} disabled={busy}>
+                Activate
+              </button>
+              <button type="button" className="btn btn-settings-tool" onClick={() => void onClearLicense()} disabled={busy}>
+                Clear license
+              </button>
+            </div>
           </div>
-          <p className="settings-card-lead">Paste an offline-signed token for paid add-ons.</p>
-        </header>
-        {loadError ? <p className="error-text">{loadError}</p> : null}
-        {status && (
-          <div className="settings-license-status-block">
-            <p className="settings-card-lead">
-              <strong>Status:</strong> {status.active ? "Active" : "None"}
-            </p>
-            {status.active ? (
-              <>
-                <p className="settings-card-lead">
-                  <strong>License ID:</strong> <code className="inline-code">{status.licenseId}</code>
-                </p>
-                <p className="settings-card-lead">
-                  <strong>Entitlements:</strong>{" "}
-                  {status.entitlements.length ? status.entitlements.join(", ") : "(none)"}
-                </p>
-                {status.exp != null ? (
-                  <p className="settings-card-lead">
-                    <strong>Expires:</strong> {new Date(status.exp * 1000).toISOString()}
-                    <span> — time-limited (trial or subscription)</span>
-                  </p>
-                ) : null}
-              </>
+
+          <div className="plugins-tab-installed-col">
+            <header className="settings-card-head plugins-tab-column-head">
+              <div className="settings-card-head-row">
+                <h3>Installed plugins</h3>
+                <SettingsHelpHint
+                  topic="Installed plugins"
+                  description="Built-in plugins register hooks in the desktop core. Future secret backends (for example Vault or Bitwarden) can ship as additional modules using the same interface."
+                />
+              </div>
+              <p className="settings-card-lead">Enable or disable bundled integrations.</p>
+            </header>
+            <ul className="plugin-installed-list">
+              {plugins.map((row) => (
+                <li key={row.manifest.id} className="plugin-installed-row">
+                  <div className="plugin-installed-row-meta">
+                    <strong>{row.manifest.displayName}</strong>{" "}
+                    <span className="settings-card-lead">
+                      <code className="inline-code">{row.manifest.id}</code> v{row.manifest.version}
+                    </span>
+                    {!row.entitlementOk ? (
+                      <p className="settings-card-lead">Waiting on license entitlement for this plugin.</p>
+                    ) : null}
+                    <p className="settings-card-lead">Capabilities: {row.manifest.capabilities.join(", ") || "(none)"}</p>
+                  </div>
+                  <label className="plugin-installed-enable-label">
+                    <input
+                      type="checkbox"
+                      checked={row.enabled}
+                      disabled={busy}
+                      onChange={(e) => void onTogglePlugin(row.manifest.id, e.target.checked)}
+                    />
+                    <span>Enabled</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="settings-actions-row">
+              <button type="button" className="btn btn-settings-tool" onClick={() => void onPingDemo()} disabled={busy}>
+                Ping demo plugin
+              </button>
+            </div>
+            {actionMessage ? (
+              <p className="settings-card-lead plugins-tab-last-result">
+                <strong>Last result:</strong> {actionMessage}
+              </p>
             ) : null}
           </div>
-        )}
-        <label className="settings-card-title license-token-field">
-          <span>License token</span>
-          <input
-            type="text"
-            className="input license-token-input"
-            value={tokenDraft}
-            onChange={(e) => setTokenDraft(e.target.value)}
-            placeholder="base64url(payload).base64url(signature)"
-            spellCheck={false}
-            autoComplete="off"
-            disabled={busy}
-          />
-        </label>
-        <div className="settings-actions-row">
-          <button type="button" className="btn btn-primary" onClick={() => void onActivate()} disabled={busy}>
-            Activate
-          </button>
-          <button type="button" className="btn btn-settings-tool" onClick={() => void onClearLicense()} disabled={busy}>
-            Clear license
-          </button>
         </div>
-      </section>
-
-      <section className="settings-card">
-        <header className="settings-card-head">
-          <div className="settings-card-head-row">
-            <h3>Installed plugins</h3>
-            <SettingsHelpHint
-              topic="Installed plugins"
-              description="Built-in plugins register hooks in the desktop core. Future secret backends (for example Vault or Bitwarden) can ship as additional modules using the same interface."
-            />
-          </div>
-          <p className="settings-card-lead">Enable or disable bundled integrations.</p>
-        </header>
-        <ul className="plugin-installed-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {plugins.map((row) => (
-            <li key={row.manifest.id} className="plugin-installed-row">
-              <div className="plugin-installed-row-meta">
-                <strong>{row.manifest.displayName}</strong>{" "}
-                <span className="settings-card-lead">
-                  <code className="inline-code">{row.manifest.id}</code> v{row.manifest.version}
-                </span>
-                {!row.entitlementOk ? (
-                  <p className="settings-card-lead">Waiting on license entitlement for this plugin.</p>
-                ) : null}
-                <p className="settings-card-lead">Capabilities: {row.manifest.capabilities.join(", ") || "(none)"}</p>
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", whiteSpace: "nowrap" }}>
-                <input
-                  type="checkbox"
-                  checked={row.enabled}
-                  disabled={busy}
-                  onChange={(e) => void onTogglePlugin(row.manifest.id, e.target.checked)}
-                />
-                <span>Enabled</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-        <div className="settings-actions-row">
-          <button type="button" className="btn btn-settings-tool" onClick={() => void onPingDemo()} disabled={busy}>
-            Ping demo plugin
-          </button>
-        </div>
-        {actionMessage ? (
-          <p className="settings-card-lead">
-            <strong>Last result:</strong> {actionMessage}
-          </p>
-        ) : null}
       </section>
     </div>
   );
