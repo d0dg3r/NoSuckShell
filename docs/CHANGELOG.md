@@ -2,6 +2,25 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.1.0-beta.7] - 2026-03-23
+
+**Pre-release.** Binaries are published after you push tag [`v0.1.0-beta.7`][v0.1.0-beta.7] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Added
+
+- **PROXMUX integration** — Built-in plugin `dev.nosuckshell.plugin.proxmux`: Proxmox cluster configuration, guest/resource browsing in the sidebar when entitled, **Integrations** → **PROXMUX** for credentials and options (including opening Proxmox web consoles in an embedded pane vs the system browser), adaptive polling and startup warmup behavior.
+- **App settings** — Restructured **Settings** with clearer sub-tabs; **Integrations** groups PROXMUX and **Plugins & license**; **Visual style** reset for appearance.
+- **Contributor documentation** — [STYLE_GUIDE.md](STYLE_GUIDE.md), [CODE_GUIDE.md](CODE_GUIDE.md), and [AGENTS.md](../AGENTS.md); linked from [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### Changed
+
+- **Tests / DOM** — E2E selectors updated for the sidebar host row (`.proxmux-sidebar-row-main`).
+
+### Notes
+
+- Installers remain **unsigned**; see [releases.md](releases.md) for signing / notarization follow-up.
+- In-app **Help** should stay aligned with Settings and PROXMUX behavior; update [`HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) when UX changes.
+
 ## [0.1.0-beta.6] - 2026-03-22
 
 **Pre-release.** Binaries are published after you push tag [`v0.1.0-beta.6`][v0.1.0-beta.6] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -86,3 +105,4 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.1.0-beta.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.4
 [v0.1.0-beta.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.5
 [v0.1.0-beta.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.6
+[v0.1.0-beta.7]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.7

@@ -89,6 +89,14 @@ Future **Phase 2** (not implemented): load third-party code via WASM or signed b
 
 Planned plugin-shaped features (GitHub settings sync, Bitwarden, HashiCorp Vault, NSS-Commander) are listed with proposed IDs in [roadmap.md](roadmap.md).
 
+## PROXMUX (Proxmox) integration
+
+**Built-in plugin** `dev.nosuckshell.plugin.proxmux` ([`plugins/proxmux.rs`](../apps/desktop/src-tauri/src/plugins/proxmux.rs) and UI under [`ProxmuxSidebarPanel.tsx`](../apps/desktop/src/components/ProxmuxSidebarPanel.tsx), [`AppSettingsProxmuxTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsProxmuxTab.tsx)):
+
+- **Settings → Integrations → PROXMUX:** cluster URLs, credentials, TLS options, and whether Proxmox web consoles open in an embedded webview pane or the system browser.
+- **Sidebar:** when the plugin is enabled and entitled, lists clusters and guests; uses `plugin_invoke` for RPC-style calls (resource lists, guest status, console URLs).
+- **Startup:** optional warmup delays reduce duplicate work when the sidebar becomes visible (see [`proxmux-startup-warmup.ts`](../apps/desktop/src/features/proxmux-startup-warmup.ts)).
+
 ## SSH session path (terminal)
 
 1. UI calls `start_session` with a `HostConfig` (alias, HostName, user, port, identity file, `proxyJump`, `proxyCommand`).

@@ -4,7 +4,7 @@ Index of maintained documentation for NoSuckShell.
 
 ## In the app
 
-- **Help** (Settings → Help, or the Help tab in app settings): chaptered in-app reference—interactions, SSH/host keys, Identity Store, settings tabs, **keyboard shortcuts**, data locations, and known limitations. Source: [`apps/desktop/src/components/HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) (keep in sync when behavior changes).
+- **Help** (Settings → Help & info → Help, or the Help tab in app settings): chaptered in-app reference—interactions, SSH/host keys, Identity Store, **PROXMUX**, settings tabs, **keyboard shortcuts**, data locations, and known limitations. Source: [`apps/desktop/src/components/HelpPanel.tsx`](../apps/desktop/src/components/HelpPanel.tsx) (keep in sync when behavior changes).
 
 ## In this folder
 
@@ -17,6 +17,9 @@ Index of maintained documentation for NoSuckShell.
 | [roadmap.md](roadmap.md) | Planned plugin-shaped work (GitHub sync, Bitwarden, Vault, NSS-Commander). |
 | [releases.md](releases.md) | Release tagging and GitHub releases. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing release notes per version. |
+| [STYLE_GUIDE.md](STYLE_GUIDE.md) | English UI copy and documentation tone (contributors and agents). |
+| [CODE_GUIDE.md](CODE_GUIDE.md) | Implementation conventions, tests, and validation. |
+| [AGENTS.md](../AGENTS.md) | Short index for IDE assistants (links to the guides above). |
 | [backup-security.md](backup-security.md) | Encrypted backup format and security notes. |
 | [plans/2026-03-17-ssh-manager-design.md](plans/2026-03-17-ssh-manager-design.md) | Historical MVP / design notes (SSH manager). |
 | [refactoring-app-roadmap.md](refactoring-app-roadmap.md) | Notes on splitting or hardening `App.tsx`. |

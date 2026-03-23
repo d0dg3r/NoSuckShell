@@ -93,13 +93,13 @@ Details: [docs/backup-security.md](docs/backup-security.md)
 GitHub releases are created by pushing a SemVer tag:
 
 - Final: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v0.1.0-beta.6`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v0.1.0-beta.7`)
 
-**Current pre-release line:** `v0.1.0-beta.6` (push the tag when you want CI to publish binaries). Changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+**Current pre-release line:** `v0.1.0-beta.7` (push the tag when you want CI to publish binaries). Changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ```bash
-git tag v0.1.0-beta.6
-git push origin v0.1.0-beta.6
+git tag v0.1.0-beta.7
+git push origin v0.1.0-beta.7
 ```
 
 Full checklist: [docs/releases.md](docs/releases.md)
@@ -113,6 +113,8 @@ If the workflow rejects the tag, use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Release notes |
 | [docs/architecture.md](docs/architecture.md) | App architecture (Tauri, React, Rust, IPC) |
+| [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md) / [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md) | Style and implementation guides |
+| [AGENTS.md](AGENTS.md) | IDE / agent entry point |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, validation, pull requests |
 | [SECURITY.md](SECURITY.md) | Reporting vulnerabilities |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community standards |

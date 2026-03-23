@@ -272,19 +272,69 @@ const identitySections: HelpSection[] = [
   },
 ];
 
+const proxmuxSections: HelpSection[] = [
+  {
+    title: "PROXMUX (Proxmox)",
+    rows: [
+      {
+        action: "What it is",
+        mouse:
+          "Optional built-in integration for Proxmox VE: one or more clusters, guest/resource listing in the sidebar when the plugin is enabled and entitled, and Proxmox web consoles.",
+        keys: "-",
+      },
+      {
+        action: "Configure",
+        mouse:
+          "Settings → Integrations → PROXMUX: cluster URLs, credentials, TLS options. Use Plugins & license if the feature is gated by a license entitlement.",
+        keys: "-",
+      },
+      {
+        action: "Sidebar",
+        mouse:
+          "When PROXMUX is available, a sidebar section lists clusters and guests; open consoles or SSH from the row actions where supported.",
+        keys: "-",
+      },
+      {
+        action: "Web console",
+        mouse:
+          "Choose whether Proxmox noVNC/SPICE/HTML5 consoles open inside an app pane or in your default browser (toggle on the PROXMUX settings tab).",
+        keys: "-",
+      },
+    ],
+  },
+];
+
 const settingsSections: HelpSection[] = [
   {
     title: "Settings tabs (reference)",
     rows: [
-      { action: "Appearance", mouse: "Density, fonts, list tone, frame mode.", keys: "-" },
-      { action: "Layout & Navigation", mouse: "Split behavior, auto-arrange, broadcast, sidebar pin, quick connect options.", keys: "-" },
-      { action: "Files & export", mouse: "File pane titles, export paths, archive format, semantic file colors.", keys: "-" },
-      { action: "Views", mouse: "Custom host list views (filters and sort).", keys: "-" },
-      { action: "Identity Store", mouse: "Users, keys, groups, tags, per-host bindings (see above).", keys: "-" },
-      { action: "SSH", mouse: "SSH config path override and raw config editor.", keys: "-" },
+      {
+        action: "Connection",
+        mouse: "Hosts (SSH config + host list) and SSH (SSH directory override and raw config editor).",
+        keys: "-",
+      },
+      {
+        action: "Identity Store",
+        mouse: "Overview, Users, SSH keys, Groups, Tags — including per-host bindings (see Identity Store chapter).",
+        keys: "-",
+      },
+      {
+        action: "Workspace",
+        mouse: "Views (filters/sort), Layout & navigation (splits, broadcast, quick connect), Files & export.",
+        keys: "-",
+      },
+      {
+        action: "Integrations",
+        mouse: "PROXMUX (Proxmox) and Plugins & license (built-in plugins, license token).",
+        keys: "-",
+      },
+      {
+        action: "Interface",
+        mouse: "Appearance (density, fonts, list tone, visual style reset) and Keyboard (shortcuts and leader key).",
+        keys: "-",
+      },
       { action: "Data & Backup", mouse: "Encrypted backup export/import.", keys: "-" },
-      { action: "Help", mouse: "This page.", keys: "-" },
-      { action: "About", mouse: "Version and links.", keys: "-" },
+      { action: "Help & info", mouse: "This Help page and About (version and links).", keys: "-" },
     ],
   },
 ];
@@ -354,7 +404,7 @@ const helpChapters: HelpChapter[] = [
     id: "help-overview",
     title: "Overview",
     intro: [
-      "NoSuckShell is a workspace for saved SSH hosts, split terminals, drag-and-drop, optional input broadcast, and a dual-pane file browser. Use the links below to jump between chapters.",
+      "NoSuckShell is a workspace for saved SSH hosts, split terminals, drag-and-drop, optional input broadcast, a dual-pane file browser, and optional PROXMUX (Proxmox) integration. Use the links below to jump between chapters.",
       "While a terminal pane is focused, keystrokes go to the shell—use the toolbar, context menus, footer, or Settings for app actions.",
     ],
     sections: [],
@@ -382,6 +432,14 @@ const helpChapters: HelpChapter[] = [
       "Optional but powerful: link store users and keys to hosts so sessions pick up the right credentials and proxy defaults.",
     ],
     sections: identitySections,
+  },
+  {
+    id: "help-proxmux",
+    title: "PROXMUX",
+    intro: [
+      "Optional Proxmox VE integration: clusters, guest lists, and web consoles. Requires the built-in PROXMUX plugin and, where applicable, license entitlements.",
+    ],
+    sections: proxmuxSections,
   },
   {
     id: "help-settings",
@@ -441,7 +499,7 @@ function renderSectionTable(
 /**
  * In-app help: chapters + cheatsheet tables.
  * Keep in sync with App.tsx, context-actions.ts, features/file-pane-name-kind.ts,
- * host metadata / session SSH flags, and Identity Store UI.
+ * host metadata / session SSH flags, Identity Store UI, app settings tabs, and PROXMUX.
  */
 export type HelpPanelProps = {
   resolveHelpShortcutLabel?: (action: string) => string | undefined;
