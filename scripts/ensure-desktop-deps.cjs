@@ -34,14 +34,14 @@ function firstMissingPackage(desktopRoot) {
   return null;
 }
 
-const missing = firstMissingPackage(desktop);
-if (missing === null) {
-  process.exit(0);
-}
-
 if (!fs.existsSync(path.join(desktop, "package.json"))) {
   console.error("[nosuckshell] apps/desktop/package.json not found.");
   process.exit(1);
+}
+
+const missing = firstMissingPackage(desktop);
+if (missing === null) {
+  process.exit(0);
 }
 
 console.error(`[nosuckshell] Installing desktop dependencies (apps/desktop) — missing: ${missing} …`);
