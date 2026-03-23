@@ -321,7 +321,6 @@ export function HostSidebar({
           <>
             {connectedHostRows.length > 0 && (
               <div className="host-list-top">
-                <p className="host-list-section-title">Connected</p>
                 {connectedHostRows.map((row, index) => (
                   <HostListRow
                     key={`connected-${row.host.host}-${row.host.port}-${index}`}

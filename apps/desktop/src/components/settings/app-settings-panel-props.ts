@@ -159,11 +159,6 @@ export type AppSettingsPanelProps = {
   addStoreEncryptedKey: () => Promise<void>;
   unlockStoreKey: (keyId: string) => Promise<void>;
   removeStoreKey: (keyId: string) => Promise<void>;
-  storeSelectedHostForBinding: string;
-  setStoreSelectedHostForBinding: (value: string) => void;
-  storeBindingDraft: HostBinding;
-  setStoreBindingDraft: React.Dispatch<React.SetStateAction<HostBinding>>;
-  saveHostBindingDraft: () => Promise<void>;
   sshConfigRaw: string;
   setSshConfigRaw: React.Dispatch<React.SetStateAction<string>>;
   onSaveSshConfig: () => Promise<void>;

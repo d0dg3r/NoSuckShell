@@ -1,7 +1,6 @@
 import type { MutableRefObject } from "react";
 import { vi } from "vitest";
 import type { HostRowViewModel } from "../features/view-profile-filters";
-import { createDefaultHostBinding } from "../features/app-bootstrap";
 import type { HostConfig, HostMetadata } from "../types";
 import type { HostListRowBridgeProps } from "../components/HostListRow";
 
@@ -39,40 +38,18 @@ export function noopBridge(overrides: Partial<HostListRowBridgeProps> = {}): Hos
 
   return {
     activeHost: "",
-    openHostMenuHostAlias: "",
-    currentHost: sampleHost,
-    setCurrentHost: vi.fn(),
-    storeKeys: [],
-    storeUsers: [],
-    sidebarHostBindingDraft: createDefaultHostBinding(),
-    setSidebarHostBindingDraft: vi.fn(),
-    hosts: [sampleHost],
-    hostMetadataByHost: { mybox: sampleMetadata },
-    tagDraft: "",
-    setTagDraft: vi.fn(),
-    hostKeyPolicyDraft: "ask",
-    setHostKeyPolicyDraft: vi.fn(),
-    error: "",
-    canSave: true,
-    pendingRemoveConfirm: null,
     suppressHostClickAliasRef,
     setContextMenu: vi.fn(),
     setHostContextMenu: vi.fn(),
     setHoveredHostAlias: vi.fn(),
     setActiveHost: vi.fn(),
     setDragOverPaneIndex: vi.fn(),
-    setError: vi.fn(),
     toggleFavoriteForHost: vi.fn(),
-    toggleJumpHostForHost: vi.fn(),
-    toggleHostSelection: vi.fn(),
     connectToHostInNewPane: vi.fn(),
     setDragPayload: vi.fn(),
     setDraggingKind: vi.fn(),
     missingDragPayloadLoggedRef,
-    toggleHostMenu: vi.fn(),
-    onSave: vi.fn(),
-    saveTagsForActiveHost: vi.fn(),
-    handleRemoveHostIntent: vi.fn(),
+    onEditHost: vi.fn(),
     ...overrides,
   };
 }

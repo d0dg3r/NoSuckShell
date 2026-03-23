@@ -26,6 +26,36 @@ const WebPane = lazy(async () => {
   return { default: m.WebPane };
 });
 
+const ProxmoxQemuVncPane = lazy(async () => {
+  const m = await import("./ProxmoxQemuVncPane");
+  return { default: m.ProxmoxQemuVncPane };
+});
+
+const ProxmoxLxcTermPane = lazy(async () => {
+  const m = await import("./ProxmoxLxcTermPane");
+  return { default: m.ProxmoxLxcTermPane };
+});
+
+export type ProxmoxNativeConsolePanePayload =
+  | {
+      kind: "qemu-vnc";
+      clusterId: string;
+      node: string;
+      vmid: string;
+      paneTitle: string;
+      proxmoxBaseUrl: string;
+      allowInsecureTls?: boolean;
+    }
+  | {
+      kind: "lxc-term";
+      clusterId: string;
+      node: string;
+      vmid: string;
+      paneTitle: string;
+      proxmoxBaseUrl: string;
+      allowInsecureTls?: boolean;
+    };
+
 export type SplitPaneRendererBridge = {
   splitSlots: Array<string | null>;
   activePaneIndex: number;
@@ -91,6 +121,8 @@ export type SplitPaneRendererBridge = {
   fileWorkspacePluginEnabled: boolean;
   /** When set, pane shows embedded web UI instead of terminal or file browser. */
   webPanePayloadForPane: (paneIndex: number) => { url: string; title: string; allowInsecureTls?: boolean } | null;
+  /** PROXMUX pane-native QEMU noVNC or LXC terminal (ticket + WebSocket), when session kind matches. */
+  proxmoxNativeConsoleForPane: (paneIndex: number) => ProxmoxNativeConsolePanePayload | null;
   /** Surface errors from the web pane (e.g. failed in-app webview window). */
   onWebPaneOpenInAppWindowError?: (message: string) => void;
   /** Proxmox console deep links need login first; same payload as the main-window assist banner. */
@@ -122,7 +154,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
         b.isBroadcastModeEnabled &&
         eligible.length > 0 &&
         eligible.every((sessionId) => b.broadcastTargets.has(sessionId));
-      const isPaneBroadcastEligible = Boolean(paneSessionId && b.webPanePayloadForPane(paneIndex) === null);
+      const isPaneBroadcastEligible = Boolean(
+        paneSessionId && b.webPanePayloadForPane(paneIndex) === null && b.proxmoxNativeConsoleForPane(paneIndex) === null,
+      );
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
@@ -572,6 +606,47 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     url={webPayload.url}
                     paneTitle={webPayload.title}
                     allowInsecureTls={webPayload.allowInsecureTls === true}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            const px = paneSessionId ? b.proxmoxNativeConsoleForPane(paneIndex) : null;
+            if (px?.kind === "qemu-vnc") {
+              return (
+                <Suspense
+                  fallback={<div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading noVNC" />}
+                >
+                  <ProxmoxQemuVncPane
+                    clusterId={px.clusterId}
+                    node={px.node}
+                    vmid={px.vmid}
+                    paneTitle={px.paneTitle}
+                    proxmoxBaseUrl={px.proxmoxBaseUrl}
+                    allowInsecureTls={px.allowInsecureTls === true}
+                    onError={b.onWebPaneOpenInAppWindowError}
+                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
+                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
+                  />
+                </Suspense>
+              );
+            }
+            if (px?.kind === "lxc-term") {
+              return (
+                <Suspense
+                  fallback={
+                    <div className="terminal-root terminal-host" aria-busy="true" aria-label="Loading LXC console" />
+                  }
+                >
+                  <ProxmoxLxcTermPane
+                    clusterId={px.clusterId}
+                    node={px.node}
+                    vmid={px.vmid}
+                    paneTitle={px.paneTitle}
+                    proxmoxBaseUrl={px.proxmoxBaseUrl}
+                    allowInsecureTls={px.allowInsecureTls === true}
+                    onError={b.onWebPaneOpenInAppWindowError}
                     onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
                     onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
                   />

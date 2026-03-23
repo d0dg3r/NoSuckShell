@@ -209,6 +209,24 @@ export type ProxmuxSidebarPanelProps = {
   ) => void | Promise<void>;
   /** Fetch SPICE proxy via plugin and open a virt-viewer file (handled in App / shell). */
   onOpenProxmoxSpice?: (ctx: { clusterId: string; node: string; vmid: string }) => void | Promise<void>;
+  /** When true with the handlers below, QEMU/LXC consoles use pane-native clients instead of the web UI URL. */
+  usePaneNativeProxmoxConsoles?: boolean;
+  onOpenProxmoxQemuVncInPane?: (ctx: {
+    clusterId: string;
+    node: string;
+    vmid: string;
+    label: string;
+    allowInsecureTls: boolean;
+    proxmoxBaseUrl: string;
+  }) => void | Promise<void>;
+  onOpenProxmoxLxcConsoleInPane?: (ctx: {
+    clusterId: string;
+    node: string;
+    vmid: string;
+    label: string;
+    allowInsecureTls: boolean;
+    proxmoxBaseUrl: string;
+  }) => void | Promise<void>;
 };
 
 function stopRowEvent(e: MouseEvent | KeyboardEvent) {
@@ -222,6 +240,9 @@ export function ProxmuxSidebarPanel({
   onSshToProxmoxNode,
   onOpenProxmoxExternalUrl,
   onOpenProxmoxSpice,
+  usePaneNativeProxmoxConsoles = false,
+  onOpenProxmoxQemuVncInPane,
+  onOpenProxmoxLxcConsoleInPane,
 }: ProxmuxSidebarPanelProps) {
   const [clusters, setClusters] = useState<ProxmuxClusterRow[]>([]);
   const [clusterId, setClusterId] = useState<string | null>(null);
@@ -624,7 +645,9 @@ export function ProxmuxSidebarPanel({
     if (cat === "qemu") {
       const gk = guestKey(row);
       const spiceCapable = spiceCapableByGuestKey[gk] === true;
-      const showVnc = Boolean(onOpenProxmoxExternalUrl);
+      const showVnc = Boolean(
+        onOpenProxmoxExternalUrl || (usePaneNativeProxmoxConsoles && onOpenProxmoxQemuVncInPane),
+      );
       const showSpice = Boolean(onOpenProxmoxSpice && spiceCapable);
       if (!running || !node || !vmid || (!showVnc && !showSpice)) {
         return spacer();
@@ -639,6 +662,17 @@ export function ProxmuxSidebarPanel({
               aria-label="Open noVNC console"
               onClick={(e) => {
                 stopRowEvent(e);
+                if (usePaneNativeProxmoxConsoles && onOpenProxmoxQemuVncInPane && clusterId) {
+                  void onOpenProxmoxQemuVncInPane({
+                    clusterId,
+                    node,
+                    vmid,
+                    label: "noVNC",
+                    allowInsecureTls: allowInsecureTlsForOpens,
+                    proxmoxBaseUrl,
+                  });
+                  return;
+                }
                 void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "qemu", node, vmid }), "noVNC");
               }}
             >
@@ -665,7 +699,7 @@ export function ProxmuxSidebarPanel({
     }
 
     if (cat === "lxc") {
-      if (!onOpenProxmoxExternalUrl || !node || !vmid) {
+      if ((!onOpenProxmoxExternalUrl && !(usePaneNativeProxmoxConsoles && onOpenProxmoxLxcConsoleInPane)) || !node || !vmid) {
         return spacer();
       }
       return (
@@ -683,6 +717,17 @@ export function ProxmuxSidebarPanel({
             onClick={(e) => {
               stopRowEvent(e);
               if (!running) return;
+              if (usePaneNativeProxmoxConsoles && onOpenProxmoxLxcConsoleInPane && clusterId) {
+                void onOpenProxmoxLxcConsoleInPane({
+                  clusterId,
+                  node,
+                  vmid,
+                  label: "LXC console",
+                  allowInsecureTls: allowInsecureTlsForOpens,
+                  proxmoxBaseUrl,
+                });
+                return;
+              }
               void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "lxc", node, vmid }), "LXC console");
             }}
           >

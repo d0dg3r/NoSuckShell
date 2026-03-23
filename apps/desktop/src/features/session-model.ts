@@ -25,7 +25,36 @@ export type WebSessionTab = {
   /** Mirrors PROXMUX cluster "Allow insecure TLS" for in-app webview window (Linux/BSD WebKit). */
   allowInsecureTls?: boolean;
 };
-export type SessionTab = SavedSshSessionTab | QuickSshSessionTab | LocalSessionTab | WebSessionTab;
+/** Pane-native QEMU noVNC using PROXMUX vncproxy ticket + API WebSocket (or local WS proxy if TLS is insecure). */
+export type ProxmoxQemuVncSessionTab = {
+  id: string;
+  kind: "proxmoxQemuVnc";
+  label: string;
+  clusterId: string;
+  node: string;
+  vmid: string;
+  /** Cluster GUI base URL for "Open in app window" fallback (deep link). */
+  proxmoxBaseUrl: string;
+  allowInsecureTls?: boolean;
+};
+/** Pane-native LXC console using PROXMUX termproxy ticket + API WebSocket. */
+export type ProxmoxLxcTermSessionTab = {
+  id: string;
+  kind: "proxmoxLxcTerm";
+  label: string;
+  clusterId: string;
+  node: string;
+  vmid: string;
+  proxmoxBaseUrl: string;
+  allowInsecureTls?: boolean;
+};
+export type SessionTab =
+  | SavedSshSessionTab
+  | QuickSshSessionTab
+  | LocalSessionTab
+  | WebSessionTab
+  | ProxmoxQemuVncSessionTab
+  | ProxmoxLxcTermSessionTab;
 
 export type QuickConnectDraft = {
   hostName: string;

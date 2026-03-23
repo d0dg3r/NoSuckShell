@@ -17,14 +17,13 @@ export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "about", label: "About" },
 ];
 
-/** Overview first; then people → credentials → taxonomy → host bindings. */
+/** Overview first; then people → credentials → taxonomy. */
 export const IDENTITY_STORE_SUBTABS: Array<{ id: IdentityStoreSubTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "users", label: "Users" },
   { id: "keys", label: "SSH keys" },
   { id: "groups", label: "Groups" },
   { id: "tags", label: "Tags" },
-  { id: "hosts", label: "Hosts" },
 ];
 
 export const TERMINAL_FONT_OFFSET_MIN = -3;

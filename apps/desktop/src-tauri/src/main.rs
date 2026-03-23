@@ -4,6 +4,7 @@
 mod backup;
 mod license;
 mod plugins;
+mod proxmux_ws_proxy;
 mod host_metadata;
 mod sftp_export;
 mod key_crypto;
@@ -962,6 +963,8 @@ fn main() {
             list_plugins,
             set_plugin_enabled,
             plugin_invoke,
+            proxmux_ws_proxy::proxmux_ws_proxy_start,
+            proxmux_ws_proxy::proxmux_ws_proxy_stop,
             activate_license,
             license_status,
             clear_license

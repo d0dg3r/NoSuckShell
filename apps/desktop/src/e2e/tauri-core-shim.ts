@@ -387,6 +387,13 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
         if (method === "qemuSpiceCapable") {
           return { ok: true, spiceCapable: true };
         }
+        if (method === "fetchQemuVncProxy" || method === "fetchLxcTermProxy") {
+          return {
+            ok: true,
+            apiOrigin: "https://127.0.0.1:8006",
+            data: { port: 5900, ticket: "e2e-test-ticket" },
+          };
+        }
       }
       throw new Error(`e2e plugin_invoke: unknown method ${method}`);
     }
@@ -401,6 +408,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     case "license_status":
       return { active: false, licenseId: null, entitlements: [], exp: null };
     case "clear_license":
+      return undefined;
+    case "proxmux_ws_proxy_start":
+      return { proxyId: "e2e-ws-proxy", localWsUrl: "ws://127.0.0.1:59999/" };
+    case "proxmux_ws_proxy_stop":
       return undefined;
     default:
       throw new Error(`e2e invoke not implemented: ${cmd}`);

@@ -316,6 +316,22 @@ export const pluginInvoke = (
   arg: Record<string, unknown>,
 ): Promise<unknown> => invoke("plugin_invoke", { pluginId, method, arg });
 
+export type ProxmuxWsProxyStartResult = {
+  proxyId: string;
+  localWsUrl: string;
+};
+
+/** Start `127.0.0.1` WebSocket bridge to a Proxmox `wss://` console URL (for self-signed clusters). */
+export const proxmuxWsProxyStart = (
+  upstreamWssUrl: string,
+  allowInsecureTls: boolean,
+  authHeader?: string,
+): Promise<ProxmuxWsProxyStartResult> =>
+  invoke("proxmux_ws_proxy_start", { upstreamWssUrl, allowInsecureTls, authHeader: authHeader ?? null });
+
+export const proxmuxWsProxyStop = (proxyId: string): Promise<void> =>
+  invoke("proxmux_ws_proxy_stop", { proxyId });
+
 export const activateLicense = (token: string): Promise<LicensePayload> =>
   invoke("activate_license", { token });
 

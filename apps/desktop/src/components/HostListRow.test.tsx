@@ -7,7 +7,7 @@ describe("HostListRow", () => {
   it("renders host alias and display user", () => {
     render(<HostListRow row={sampleRow()} {...noopBridge()} />);
     expect(screen.getByText("mybox")).toBeInTheDocument();
-    expect(screen.getByText(/deploy · mybox\.example · port 22 · disconnected/)).toBeInTheDocument();
+    expect(screen.getByText(/deploy · mybox\.example · port 22/)).toBeInTheDocument();
   });
 
   it("omits hostname in meta when it matches the host alias", () => {
@@ -19,7 +19,7 @@ describe("HostListRow", () => {
         {...noopBridge()}
       />,
     );
-    expect(screen.getByText(/deploy · port 22 · disconnected/)).toBeInTheDocument();
+    expect(screen.getByText(/deploy · port 22/)).toBeInTheDocument();
   });
 
   it("calls toggleFavoriteForHost when favorite is clicked", () => {
@@ -33,27 +33,23 @@ describe("HostListRow", () => {
     expect(toggleFavoriteForHost).toHaveBeenCalledWith("mybox");
   });
 
-  it("calls toggleHostMenu when host row is activated (expand/collapse like PROXMUX)", () => {
-    const toggleHostMenu = vi.fn();
-    const { container } = render(<HostListRow row={sampleRow()} {...noopBridge({ toggleHostMenu })} />);
+  it("calls setActiveHost when host row is clicked", () => {
+    const setActiveHost = vi.fn();
+    const { container } = render(<HostListRow row={sampleRow()} {...noopBridge({ setActiveHost })} />);
     const rowEl = container.querySelector(".host-row");
     expect(rowEl).toBeTruthy();
     const hostItem = rowEl!.querySelector<HTMLElement>('[aria-label="SSH host mybox"]');
     expect(hostItem).toBeTruthy();
     fireEvent.click(hostItem!);
-    expect(toggleHostMenu).toHaveBeenCalledWith(sampleHost);
+    expect(setActiveHost).toHaveBeenCalledWith("mybox");
   });
 
-  it("opens slide panel with HostForm when menu is open for this row", () => {
-    render(
-      <HostListRow
-        row={sampleRow()}
-        {...noopBridge({
-          openHostMenuHostAlias: "mybox",
-          activeHost: "mybox",
-        })}
-      />,
-    );
-    expect(screen.getAllByDisplayValue("mybox")[0]).toBeInTheDocument();
+  it("calls onEditHost when overflow button is clicked", () => {
+    const onEditHost = vi.fn();
+    const { container } = render(<HostListRow row={sampleRow()} {...noopBridge({ onEditHost })} />);
+    const overflowBtn = container.querySelector<HTMLButtonElement>('[aria-label="Open host settings for mybox"]');
+    expect(overflowBtn).toBeTruthy();
+    fireEvent.click(overflowBtn!);
+    expect(onEditHost).toHaveBeenCalledWith(sampleHost);
   });
 });

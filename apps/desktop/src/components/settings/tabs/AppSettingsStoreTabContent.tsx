@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import type { GroupObject, HostKeyRef, SshKeyObject, UserObject } from "../../../types";
 import {
-  applyBindingOnlyProxyJumpSelect,
-  getBindingOnlyProxyJumpSelectValue,
   getUserObjectProxyJumpSelectValue,
   jumpHostCandidates,
   JUMP_SELECT_CUSTOM,
@@ -10,12 +8,6 @@ import {
   jumpSelectHopValue,
   userProxyJumpFromSelect,
 } from "../../../features/host-form-store-links";
-import {
-  PROXY_COMMAND_PRESET_CUSTOM,
-  PROXY_COMMAND_PRESETS,
-  proxyCommandFromPresetSelect,
-  proxyCommandPresetSelectValue,
-} from "../../../features/ssh-proxy-presets";
 import type { IdentityStoreSubTab } from "../app-settings-types";
 import type { AppSettingsPanelProps } from "../app-settings-panel-props";
 
@@ -65,11 +57,6 @@ export type AppSettingsStoreTabContentProps = Pick<
   | "addStoreEncryptedKey"
   | "unlockStoreKey"
   | "removeStoreKey"
-  | "storeSelectedHostForBinding"
-  | "setStoreSelectedHostForBinding"
-  | "storeBindingDraft"
-  | "setStoreBindingDraft"
-  | "saveHostBindingDraft"
 > & {
   identityStoreSubTab: IdentityStoreSubTab;
 };
@@ -123,20 +110,11 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     addStoreEncryptedKey,
     unlockStoreKey,
     removeStoreKey,
-    storeSelectedHostForBinding,
-    setStoreSelectedHostForBinding,
-    storeBindingDraft,
-    setStoreBindingDraft,
-    saveHostBindingDraft,
   } = rest;
 
   const allHostJumpCandidates = useMemo(
     () => jumpHostCandidates(hosts, "", metadataStore.hosts),
     [hosts, metadataStore.hosts],
-  );
-  const bindingJumpCandidates = useMemo(
-    () => jumpHostCandidates(hosts, storeSelectedHostForBinding.trim(), metadataStore.hosts),
-    [hosts, storeSelectedHostForBinding, metadataStore.hosts],
   );
 
   const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
@@ -159,30 +137,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
     const memberGroupIds = storeGroups.filter((g) => g.memberUserIds.includes(userId)).map((g) => g.id);
     const next = checked ? [...new Set([...memberGroupIds, groupId])] : memberGroupIds.filter((id) => id !== groupId);
     void setStoreUserGroupMembership(userId, next);
-  };
-
-  const toggleHostBindingKey = (keyId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => {
-      let next = prev.keyRefs.filter((r) => r.keyId !== keyId);
-      if (checked) {
-        next = [...next, { keyId, usage: "additional" }];
-      }
-      return { ...prev, keyRefs: normalizeKeyRefs(next) };
-    });
-  };
-
-  const toggleHostBindingTag = (tagId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => ({
-      ...prev,
-      tagIds: checked ? [...prev.tagIds, tagId] : prev.tagIds.filter((id) => id !== tagId),
-    }));
-  };
-
-  const toggleHostBindingGroup = (groupId: string, checked: boolean) => {
-    setStoreBindingDraft((prev) => ({
-      ...prev,
-      groupIds: checked ? [...prev.groupIds, groupId] : prev.groupIds.filter((id) => id !== groupId),
-    }));
   };
 
   const toggleGroupTag = (groupId: string, group: GroupObject, tagId: string, checked: boolean) => {
@@ -696,175 +650,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
           </section>
         )}
 
-        {identityStoreSubTab === "hosts" && (
-          <section className="identity-store-section">
-            <h4>Hosts</h4>
-            <p className="muted-copy">
-              Per-host overrides: linked user, SSH keys (first selected = primary), groups, and tags. If no keys are set
-              here, the linked user&apos;s keys apply when a user is selected.
-            </p>
-            <div className="store-inline">
-              <select
-                className="input"
-                value={storeSelectedHostForBinding}
-                onChange={(event) => setStoreSelectedHostForBinding(event.target.value)}
-              >
-                <option value="">Select host</option>
-                {hosts.map((host, hostIndex) => (
-                  <option key={`host-opt-${hostIndex}`} value={host.host}>
-                    {host.host}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="input"
-                value={storeBindingDraft.userId ?? ""}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    userId: event.target.value || undefined,
-                  }))
-                }
-              >
-                <option value="">Store user (optional)</option>
-                {storeUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">SSH keys for this host</span>
-              <div className="store-checkbox-grid">
-                {storeKeys.length === 0 ? (
-                  <span className="muted-copy">No keys in store.</span>
-                ) : (
-                  storeKeys.map((key) => (
-                    <label key={key.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.keyRefs.some((r) => r.keyId === key.id)}
-                        onChange={(event) => toggleHostBindingKey(key.id, event.target.checked)}
-                      />
-                      {key.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">Groups</span>
-              <div className="store-checkbox-grid">
-                {storeGroups.length === 0 ? (
-                  <span className="muted-copy">No groups.</span>
-                ) : (
-                  storeGroups.map((group) => (
-                    <label key={group.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.groupIds.includes(group.id)}
-                        onChange={(event) => toggleHostBindingGroup(group.id, event.target.checked)}
-                      />
-                      {group.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">Tags</span>
-              <div className="store-checkbox-grid">
-                {storeTags.length === 0 ? (
-                  <span className="muted-copy">No tags.</span>
-                ) : (
-                  storeTags.map((tag) => (
-                    <label key={tag.id} className="store-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={storeBindingDraft.tagIds.includes(tag.id)}
-                        onChange={(event) => toggleHostBindingTag(tag.id, event.target.checked)}
-                      />
-                      {tag.name}
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyJump shortcut</span>
-              <select
-                className="input density-profile-select"
-                aria-label="Host binding ProxyJump shortcut"
-                value={getBindingOnlyProxyJumpSelectValue(storeBindingDraft, bindingJumpCandidates)}
-                onChange={(event) => {
-                  const patch = applyBindingOnlyProxyJumpSelect(event.target.value, storeBindingDraft);
-                  setStoreBindingDraft((prev) => ({ ...prev, ...patch }));
-                }}
-              >
-                <option value={JUMP_SELECT_NONE}>None</option>
-                {bindingJumpCandidates.map((alias) => (
-                  <option key={alias} value={jumpSelectHopValue(alias)}>
-                    {alias}
-                  </option>
-                ))}
-                <option value={JUMP_SELECT_CUSTOM}>Custom value (edit below)</option>
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyJump override</span>
-              <input
-                className="input"
-                value={storeBindingDraft.proxyJump}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    proxyJump: event.target.value,
-                  }))
-                }
-                placeholder="bastion or user@jump"
-              />
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyCommand preset (optional)</span>
-              <select
-                className="input density-profile-select"
-                aria-label="Host binding ProxyCommand preset"
-                value={proxyCommandPresetSelectValue(storeBindingDraft.legacyProxyCommand)}
-                onChange={(event) => {
-                  const next = proxyCommandFromPresetSelect(event.target.value, storeBindingDraft.legacyProxyCommand);
-                  setStoreBindingDraft((prev) => ({ ...prev, legacyProxyCommand: next.trim() }));
-                }}
-              >
-                <option value={PROXY_COMMAND_PRESET_CUSTOM}>Custom (edit below)</option>
-                {PROXY_COMMAND_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <span className="field-label">ProxyCommand</span>
-              <input
-                className="input"
-                value={storeBindingDraft.legacyProxyCommand}
-                onChange={(event) =>
-                  setStoreBindingDraft((prev) => ({
-                    ...prev,
-                    legacyProxyCommand: event.target.value,
-                  }))
-                }
-                placeholder="ssh -W %h:%p bastion"
-              />
-            </div>
-            <div className="store-inline">
-              <button type="button" className="btn btn-settings-commit" onClick={() => void saveHostBindingDraft()}>
-                Save host binding
-              </button>
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );

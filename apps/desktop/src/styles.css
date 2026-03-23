@@ -62,11 +62,12 @@
   --space-5: 12px;
   --space-6: 14px;
   --space-7: 16px;
-  --font-xs: 10px;
-  --font-sm: 11px;
-  --font-md: 12px;
-  --font-base: 13px;
-  --font-lg: 14px;
+  /* Typography: balanced baseline; density profiles override with clamped scales */
+  --font-xs: clamp(9px, 10px, 11px);
+  --font-sm: clamp(10px, 11px, 12px);
+  --font-md: clamp(11px, 12px, 13px);
+  --font-base: clamp(12px, 13px, 14px);
+  --font-lg: clamp(13px, 14px, 15px);
   --control-height-sm: 28px;
   --control-height-md: 32px;
   --control-height-lg: 36px;
@@ -159,11 +160,11 @@
   --space-5: 10px;
   --space-6: 12px;
   --space-7: 14px;
-  --font-xs: 9px;
-  --font-sm: 10px;
-  --font-md: 11px;
-  --font-base: 12px;
-  --font-lg: 13px;
+  --font-xs: clamp(8px, 9px, 10px);
+  --font-sm: clamp(9px, 10px, 11px);
+  --font-md: clamp(10px, 11px, 12px);
+  --font-base: clamp(11px, 12px, 13px);
+  --font-lg: clamp(12px, 13px, 14px);
   --control-height-sm: 24px;
   --control-height-md: 28px;
   --control-height-lg: 32px;
@@ -183,6 +184,11 @@
   --space-5: 12px;
   --space-6: 14px;
   --space-7: 16px;
+  --font-xs: clamp(9px, 10px, 11px);
+  --font-sm: clamp(10px, 11px, 12px);
+  --font-md: clamp(11px, 12px, 13px);
+  --font-base: clamp(12px, 13px, 14px);
+  --font-lg: clamp(13px, 14px, 15px);
 }
 
 .app-shell[data-density="safe"] {
@@ -193,11 +199,11 @@
   --space-5: 14px;
   --space-6: 16px;
   --space-7: 18px;
-  --font-xs: 10px;
-  --font-sm: 11px;
-  --font-md: 12px;
-  --font-base: 13px;
-  --font-lg: 15px;
+  --font-xs: clamp(10px, 11px, 12px);
+  --font-sm: clamp(11px, 12px, 13px);
+  --font-md: clamp(12px, 13px, 14px);
+  --font-base: clamp(13px, 14px, 15px);
+  --font-lg: clamp(14px, 15px, 17px);
   --control-height-sm: 30px;
   --control-height-md: 34px;
   --control-height-lg: 40px;
@@ -1159,14 +1165,14 @@ body,
 
 .host-slide-menu .host-form-settings-root .settings-card-head h3,
 .add-host-modal .host-form-settings-root .settings-card-head h3 {
-  font-size: 9px;
+  font-size: var(--font-xs);
   letter-spacing: 0.07em;
   line-height: 1.2;
 }
 
 .host-slide-menu .host-form-settings-root .settings-card-head .muted-copy,
 .add-host-modal .host-form-settings-root .settings-card-head .muted-copy {
-  font-size: 9px;
+  font-size: var(--font-xs);
   line-height: 1.28;
   max-width: 52ch;
 }
@@ -1248,13 +1254,13 @@ body,
 }
 
 .add-host-modal .host-form-settings-root .field-label {
-  font-size: 10px;
+  font-size: var(--font-xs);
   letter-spacing: 0.15px;
   color: #d1dfd7;
 }
 
 .add-host-modal .host-form-settings-root .field-help {
-  font-size: 9px;
+  font-size: var(--font-xs);
   line-height: 1.32;
   max-width: min(100%, 44ch);
 }
@@ -1263,7 +1269,7 @@ body,
   min-height: 32px;
   padding: 6px 9px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .add-host-modal .host-form-settings-root select.input,
@@ -1328,7 +1334,7 @@ body,
 .host-slide-actions .btn.icon-btn {
   display: grid;
   place-items: center;
-  font-size: 14px;
+  font-size: var(--font-lg);
   line-height: 1;
 }
 
@@ -1354,13 +1360,13 @@ body,
 }
 
 .host-slide-menu .field-label {
-  font-size: 10px;
+  font-size: var(--font-xs);
   letter-spacing: 0.15px;
   color: #d1dfd7;
 }
 
 .host-slide-menu .field-help {
-  font-size: 9px;
+  font-size: var(--font-xs);
   max-width: min(100%, 44ch);
   line-height: 1.32;
 }
@@ -1369,7 +1375,7 @@ body,
   min-height: 32px;
   padding: 6px 9px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .host-slide-menu select.input,
@@ -1402,7 +1408,7 @@ body,
 .host-slide-menu .btn {
   min-height: 34px;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .host-slide-menu .input[type="number"] {
@@ -1624,7 +1630,7 @@ body,
 
 .btn.btn-sm {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   border-width: 1px;
 }
 
@@ -1961,7 +1967,7 @@ body,
   min-height: 34px;
   border-radius: 10px;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1.1;
 }
 
@@ -2035,7 +2041,7 @@ body,
 }
 
 .session-top-strip-title {
-  font-size: 12px;
+  font-size: var(--font-md);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #d8e8df;
@@ -2056,7 +2062,7 @@ body,
 .session-strip-toggle-btn {
   min-height: 26px;
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   border-radius: 999px;
 }
 
@@ -2097,7 +2103,7 @@ body,
   border: 0;
   background: var(--right-context-pill-bg);
   color: #d5e4da;
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 600;
   padding: 4px 9px;
 }
@@ -2150,7 +2156,7 @@ body,
   min-height: 24px;
   height: 24px;
   padding: 0 7px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1;
   border-radius: 999px;
 }
@@ -2160,7 +2166,7 @@ body,
   min-width: 24px;
   padding: 0;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 700;
 }
 
@@ -2168,13 +2174,13 @@ body,
   min-width: 30px;
   padding: 0 8px;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 700;
 }
 
 .footer-layout-controls .footer-action-btn {
   min-width: 48px;
-  font-size: 10px;
+  font-size: var(--font-xs);
 }
 
 .footer-layout-toggle.is-open {
@@ -2221,13 +2227,13 @@ body,
   padding: 0 7px;
   min-height: 24px;
   height: 24px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   line-height: 1;
 }
 
 .footer-layout-advanced .footer-action-btn {
   min-width: 56px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   padding: 0 10px;
   white-space: nowrap;
   flex: 0 0 auto;
@@ -2263,7 +2269,7 @@ body,
 .sessions-footer .footer-layout-advanced .split-profile-toggle-btn {
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 10px;
+  font-size: var(--font-xs);
 }
 
 .sessions-footer .footer-layout-controls .split-profile-select {
@@ -2313,7 +2319,7 @@ body,
 
 .session-lane-title {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #d4e4db;
@@ -2330,7 +2336,7 @@ body,
   border: 0;
   background: var(--right-session-lane-count-bg);
   color: #d6e6dd;
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 700;
 }
 
@@ -2344,7 +2350,7 @@ body,
   border-radius: 9px;
   background: rgba(13, 18, 22, 0.62);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-md);
   padding: 8px 10px;
 }
 
@@ -2434,7 +2440,7 @@ body,
   background: var(--right-session-card-pane-pill-bg);
   color: #d7f5ff;
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 700;
 }
 
@@ -2471,7 +2477,7 @@ body,
   height: 24px;
   border-radius: 999px;
   color: #ffd3ca;
-  font-size: 15px;
+  font-size: calc(var(--font-lg) + 1px);
   font-weight: 700;
   line-height: 1;
   transition: all 0.14s ease;
@@ -2542,7 +2548,7 @@ body,
   background: var(--right-target-chip-bg);
   color: #d5e4da;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.16s ease;
@@ -2678,7 +2684,7 @@ body,
 }
 
 .pane-drop-host-empty-label {
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2692,7 +2698,7 @@ body,
   border: 1px solid rgba(200, 185, 120, 0.35);
   background: rgba(8, 12, 15, 0.32);
   color: rgba(220, 205, 150, 0.9);
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2933,7 +2939,7 @@ body,
   min-width: 24px;
   height: 24px;
   margin-left: 0;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .pane-toolbar-expand-toggle.is-expanded {
@@ -2984,7 +2990,7 @@ body,
   flex: 1 1 auto;
   min-width: 0;
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: rgba(232, 238, 234, 0.82);
   white-space: nowrap;
   overflow: hidden;
@@ -2993,7 +2999,7 @@ body,
 
 .file-pane-banner {
   padding: var(--space-2, 8px) var(--space-3, 12px);
-  font-size: 12px;
+  font-size: var(--font-md);
   flex: 0 0 auto;
 }
 
@@ -3027,7 +3033,7 @@ body,
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .file-pane-table col.file-pane-col-modified {
@@ -3138,7 +3144,7 @@ body,
   min-height: 24px;
   padding: 2px 8px;
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 600;
   line-height: 1.2;
   color: rgba(232, 238, 234, 0.7);
@@ -3307,7 +3313,7 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 17px;
+  font-size: calc(var(--font-lg) + 3px);
   font-weight: 700;
   line-height: 1;
   color: #f1f5f2;
@@ -3392,7 +3398,7 @@ body,
 }
 
 .pane-toolbar-btn-broadcast-all {
-  font-size: 18px;
+  font-size: calc(var(--font-lg) + 4px);
 }
 
 .pane-toolbar-svg-close-pane {
@@ -3486,6 +3492,55 @@ body,
   width: 100%;
   border: 1px solid rgba(130, 184, 152, 0.2);
   border-radius: var(--radius-control);
+  background: #070a0d;
+}
+
+.proxmox-console-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.proxmox-console-toolbar {
+  flex-shrink: 0;
+}
+
+.proxmox-console-pane-status {
+  font-size: 0.8125rem;
+  flex-shrink: 0;
+}
+
+.proxmox-console-novnc-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  border: 1px solid rgba(130, 184, 152, 0.2);
+  border-radius: var(--radius-control);
+  background: #070a0d;
+}
+
+.proxmox-console-novnc-screen canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto !important;
+  height: auto !important;
+}
+
+.proxmox-console-xterm-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(130, 184, 152, 0.2);
+  border-radius: var(--radius-control);
+  padding: var(--space-1);
   background: #070a0d;
 }
 
@@ -3626,7 +3681,7 @@ body,
   text-align: left;
   padding: 8px 10px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--font-base);
   cursor: pointer;
 }
 
@@ -3807,7 +3862,7 @@ body,
 
 .layout-command-center-empty {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 
 .layout-command-center-profile-list {
@@ -3846,11 +3901,11 @@ body,
 
 .layout-command-center-profile-name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--font-lg);
 }
 
 .layout-command-center-profile-meta {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: rgba(212, 226, 219, 0.55);
 }
 
@@ -3912,11 +3967,11 @@ body,
 
 .layout-command-center-preset-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 
 .layout-command-center-preset-desc {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: rgba(212, 226, 219, 0.55);
   line-height: 1.35;
 }
@@ -3931,7 +3986,7 @@ body,
 }
 
 .layout-command-center-hint {
-  font-size: 12px;
+  font-size: var(--font-md);
   margin: 0 0 var(--space-3);
 }
 
@@ -4014,7 +4069,7 @@ body,
   border-radius: 0;
   background: transparent;
   color: rgba(212, 226, 219, 0.82);
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   letter-spacing: 0.01em;
   cursor: pointer;
@@ -4033,7 +4088,7 @@ body,
 }
 
 .settings-subtab {
-  font-size: 11px;
+  font-size: var(--font-sm);
   padding: 5px 10px;
   min-height: 28px;
 }
@@ -4056,7 +4111,7 @@ body,
   min-height: 280px;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1.45;
 }
 
@@ -4237,7 +4292,7 @@ body,
 
 .keyboard-shortcut-chord {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: rgba(200, 230, 210, 0.95);
 }
 
@@ -4648,7 +4703,7 @@ body,
   appearance: none;
   margin: 0;
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4722,7 +4777,7 @@ body,
 .host-sidebar-overflow-btn {
   min-width: 26px;
   padding: 2px 8px;
-  font-size: 14px;
+  font-size: var(--font-lg);
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -4863,7 +4918,7 @@ body,
 .proxmux-sidebar-row-chevron {
   display: inline-block;
   margin-right: var(--space-2);
-  font-size: 10px;
+  font-size: var(--font-xs);
   opacity: 0.85;
   vertical-align: middle;
 }
@@ -4924,7 +4979,7 @@ body,
 }
 
 .plugin-store-badge {
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4966,7 +5021,7 @@ body,
 
 .app-settings-mode-switch .btn-settings-mode {
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   border-radius: 6px;
   border-width: 1px;
@@ -5670,7 +5725,7 @@ body,
   min-width: 48px;
   min-height: 44px;
   padding: 0 var(--space-4);
-  font-size: 22px;
+  font-size: calc(var(--font-lg) + 8px);
   font-weight: 800;
   line-height: 1;
   border-radius: var(--radius-control);

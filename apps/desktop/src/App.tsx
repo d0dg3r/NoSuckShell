@@ -232,6 +232,7 @@ import {
   type TrustPromptRequest,
   createQuickConnectDraft,
 } from "./features/session-model";
+import { sessionIsWebLike, sessionKindIsWebLike } from "./features/session-tab-helpers";
 import {
   cloneSplitTree,
   collectPaneOrder,
@@ -333,49 +334,47 @@ function syncSidebarHostWithStore(
   return r;
 }
 
-/** Dirty check for the host whose inline sidebar settings row is open (`openHostMenuHostAlias`). */
-function isSidebarHostSettingsDirty(
-  menuAlias: string,
+function isHostSettingsDirty(
+  alias: string,
   hosts: HostConfig[],
   metadataHosts: HostMetadataStore["hosts"],
-  currentHost: HostConfig,
-  tagDraft: string,
-  hostKeyPolicyDraft: StrictHostKeyPolicy,
+  draftHost: HostConfig,
+  draftTagDraft: string,
+  draftKeyPolicy: StrictHostKeyPolicy,
   entityStore: EntityStore,
-  sidebarHostBindingDraft: HostBinding,
+  draftBinding: HostBinding,
 ): boolean {
-  if (!menuAlias.trim()) {
+  if (!alias.trim()) {
     return false;
   }
-  const saved = hosts.find((h) => h.host === menuAlias);
+  const saved = hosts.find((h) => h.host === alias);
   if (!saved) {
     return false;
   }
-  if (currentHost.host !== menuAlias) {
+  if (draftHost.host !== alias) {
     return true;
   }
-  if (!hostConfigsEqual(currentHost, saved)) {
+  if (!hostConfigsEqual(draftHost, saved)) {
     return true;
   }
-  const savedBinding = sidebarSavedHostBinding(menuAlias, hosts, entityStore, metadataHosts);
-  if (sidebarBindingPickerDirty(sidebarHostBindingDraft, savedBinding)) {
+  const savedBinding = sidebarSavedHostBinding(alias, hosts, entityStore, metadataHosts);
+  if (sidebarBindingPickerDirty(draftBinding, savedBinding)) {
     return true;
   }
-  const savedTags = [...(metadataHosts[menuAlias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
-  const draftTags = parseHostTagDraftToSortedTags(tagDraft);
+  const savedTags = [...(metadataHosts[alias]?.tags ?? [])].sort((a, b) => a.localeCompare(b));
+  const draftTags = parseHostTagDraftToSortedTags(draftTagDraft);
   if (savedTags.length !== draftTags.length) {
     return true;
   }
   if (savedTags.some((t, i) => t !== draftTags[i])) {
     return true;
   }
-  const savedMeta = metadataHosts[menuAlias] ?? createDefaultHostMetadata();
-  return hostKeyPolicyDraft !== effectiveStrictHostKeyPolicy(savedMeta);
+  const savedMeta = metadataHosts[alias] ?? createDefaultHostMetadata();
+  return draftKeyPolicy !== effectiveStrictHostKeyPolicy(savedMeta);
 }
 
 export function App() {
   const [hosts, setHosts] = useState<HostConfig[]>([]);
-  const [currentHost, setCurrentHost] = useState<HostConfig>(emptyHost());
   const [activeHost, setActiveHost] = useState<string>("");
   const [sessions, setSessions] = useState<SessionTab[]>([]);
   const [activeSession, setActiveSession] = useState<string>("");
@@ -390,19 +389,6 @@ export function App() {
   const [storeEncryptedKeyNameDraft, setStoreEncryptedKeyNameDraft] = useState<string>("");
   const [storeEncryptedPrivateKeyDraft, setStoreEncryptedPrivateKeyDraft] = useState<string>("");
   const [storeEncryptedPublicKeyDraft, setStoreEncryptedPublicKeyDraft] = useState<string>("");
-  const [storeSelectedHostForBinding, setStoreSelectedHostForBinding] = useState<string>("");
-  const [storeBindingDraft, setStoreBindingDraft] = useState<HostBinding>({
-    userId: undefined,
-    groupIds: [],
-    tagIds: [],
-    keyRefs: [],
-    proxyJump: "",
-    legacyUser: "",
-    legacyTags: [],
-    legacyIdentityFile: "",
-    legacyProxyJump: "",
-    legacyProxyCommand: "",
-  });
   const [error, setError] = useState<string>("");
   /** After opening Proxmox login in an external webview, user continues to the console URL here. */
   const [proxmoxWebLoginAssist, setProxmoxWebLoginAssist] = useState<{ label: string; consoleUrl: string } | null>(
@@ -442,9 +428,6 @@ export function App() {
   const [quickConnectDraft, setQuickConnectDraft] = useState<QuickConnectDraft>(() => createQuickConnectDraft());
   const [quickConnectCommandInput, setQuickConnectCommandInput] = useState<string>("");
   const [quickConnectWizardStep, setQuickConnectWizardStep] = useState<QuickConnectWizardStep>(1);
-  const [tagDraft, setTagDraft] = useState<string>("");
-  const [hostKeyPolicyDraft, setHostKeyPolicyDraft] = useState<StrictHostKeyPolicy>("ask");
-  const [sidebarHostBindingDraft, setSidebarHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [addHostBindingDraft, setAddHostBindingDraft] = useState<HostBinding>(() => createDefaultHostBinding());
   const [backupExportPath, setBackupExportPath] = useState<string>(DEFAULT_BACKUP_PATH);
   const [backupImportPath, setBackupImportPath] = useState<string>(DEFAULT_BACKUP_PATH);
@@ -494,7 +477,6 @@ export function App() {
   const [layoutSwitchToTargetAfterApply, setLayoutSwitchToTargetAfterApply] = useState<boolean>(false);
   const [layoutMirrorWorkspaceIdOnSave, setLayoutMirrorWorkspaceIdOnSave] = useState<string>("");
   const layoutCommandCenterWasOpenRef = useRef<boolean>(false);
-  const [openHostMenuHostAlias, setOpenHostMenuHostAlias] = useState<string>("");
   const [hostSettingsSelectedAlias, setHostSettingsSelectedAlias] = useState<string>("");
   const [hostSettingsDraftHost, setHostSettingsDraftHost] = useState<HostConfig>(() => emptyHost());
   const [hostSettingsDraftBinding, setHostSettingsDraftBinding] = useState<HostBinding>(() =>
@@ -684,7 +666,6 @@ export function App() {
   const isAutoArrangeApplyingRef = useRef<boolean>(false);
   const lastAutoArrangeBeforeFreeRef = useRef<AutoArrangeActiveMode>("c");
   const prevAppSettingsOpenRef = useRef(false);
-  const [pendingRemoveConfirm, setPendingRemoveConfirm] = useState<{ hostAlias: string; scope: "settings" } | null>(null);
   const [pendingCloseAllIntent, setPendingCloseAllIntent] = useState<"close" | "reset" | null>(null);
   const shouldSplitAsEmpty = (
     eventLike?:
@@ -714,10 +695,6 @@ export function App() {
     return Boolean(eventLike.altKey || eventLike.getModifierState?.("AltGraph"));
   };
 
-  const canSave = useMemo(
-    () => currentHost.host.trim().length > 0 && currentHost.hostName.trim().length > 0,
-    [currentHost],
-  );
   const canCreateHost = useMemo(
     () => newHostDraft.host.trim().length > 0 && newHostDraft.hostName.trim().length > 0,
     [newHostDraft],
@@ -730,7 +707,7 @@ export function App() {
     if (!hostSettingsSelectedAlias.trim()) {
       return false;
     }
-    return isSidebarHostSettingsDirty(
+    return isHostSettingsDirty(
       hostSettingsSelectedAlias,
       hosts,
       metadataStore.hosts,
@@ -769,7 +746,7 @@ export function App() {
   const broadcastEligibleVisiblePaneSessionIds = useMemo(() => {
     return visiblePaneSessionIds.filter((id) => {
       const s = sessionById.get(id);
-      return Boolean(s && s.kind !== "web");
+      return Boolean(s && !sessionKindIsWebLike(s.kind));
     });
   }, [visiblePaneSessionIds, sessionById]);
   const activeTrustPrompt = useMemo(() => trustPromptQueue[0] ?? null, [trustPromptQueue]);
@@ -1021,7 +998,7 @@ export function App() {
       if (session.kind === "local") {
         return session.label;
       }
-      if (session.kind === "web") {
+      if (sessionIsWebLike(session)) {
         return session.label;
       }
       if (session.kind === "sshQuick") {
@@ -1126,9 +1103,6 @@ export function App() {
     });
     if (loadedHosts.length > 0) {
       setActiveHost(loadedHosts[0].host);
-      setCurrentHost(loadedHosts[0]);
-      setTagDraft((loadedMetadata.hosts[loadedHosts[0].host]?.tags ?? []).join(", "));
-      setStoreSelectedHostForBinding((prev) => prev || loadedHosts[0].host);
     }
     setSelectedViewProfileIdInSettings((prev) => {
       if (prev && loadedViewProfiles.some((profile) => profile.id === prev)) {
@@ -1221,30 +1195,6 @@ export function App() {
     () => buildQuickConnectUserCandidates(metadataStore.defaultUser, storeUsers.map((entry) => entry.username || entry.name)),
     [metadataStore.defaultUser, storeUsers],
   );
-  useEffect(() => {
-    if (!storeSelectedHostForBinding) {
-      return;
-    }
-    const existing = entityStore.hostBindings[storeSelectedHostForBinding];
-    if (existing) {
-      setStoreBindingDraft(existing);
-      return;
-    }
-    const host = hosts.find((entry) => entry.host === storeSelectedHostForBinding);
-    setStoreBindingDraft({
-      userId: undefined,
-      groupIds: [],
-      tagIds: [],
-      keyRefs: [],
-      proxyJump: host?.proxyJump ?? "",
-      legacyUser: host?.user ?? "",
-      legacyTags: metadataStore.hosts[storeSelectedHostForBinding]?.tags ?? [],
-      legacyIdentityFile: host?.identityFile ?? "",
-      legacyProxyJump: host?.proxyJump ?? "",
-      legacyProxyCommand: host?.proxyCommand ?? "",
-    });
-  }, [entityStore.hostBindings, hosts, metadataStore.hosts, storeSelectedHostForBinding]);
-
   const persistEntityStore = useCallback(async (next: EntityStore) => {
     setEntityStore(next);
     await saveStoreObjects(next);
@@ -1675,23 +1625,6 @@ export function App() {
     [storePassphrase],
   );
 
-  const saveHostBindingDraft = useCallback(async () => {
-    const hostAlias = storeSelectedHostForBinding.trim();
-    if (!hostAlias) {
-      return;
-    }
-    const nextBindings = {
-      ...entityStore.hostBindings,
-      [hostAlias]: storeBindingDraft,
-    };
-    const next: EntityStore = {
-      ...entityStore,
-      hostBindings: nextBindings,
-      updatedAt: Date.now(),
-    };
-    await persistEntityStore(next);
-  }, [entityStore, persistEntityStore, storeBindingDraft, storeSelectedHostForBinding]);
-
   const clearPendingRemoveHostsTab = useCallback(() => {
     if (removeHostsTabTimerRef.current) {
       clearTimeout(removeHostsTabTimerRef.current);
@@ -1730,6 +1663,15 @@ export function App() {
       loadHostIntoSettingsEditor(trimmed);
     },
     [hostSettingsSelectedAlias, loadHostIntoSettingsEditor],
+  );
+
+  const openHostSettingsForHost = useCallback(
+    (alias: string) => {
+      loadHostIntoSettingsEditor(alias);
+      setActiveAppSettingsTab("hosts");
+      setIsAppSettingsOpen(true);
+    },
+    [loadHostIntoSettingsEditor],
   );
 
   useEffect(() => {
@@ -1786,7 +1728,7 @@ export function App() {
     type ProxmoxAssistAutoPayload = { webviewLabel: string; consoleUrl: string };
     let unlisten: (() => void) | undefined;
     void listen<ProxmoxAssistAutoPayload>("proxmox-web-assist-auto-console", (ev) => {
-      const { webviewLabel, consoleUrl } = ev.payload;
+      const { webviewLabel } = ev.payload;
       setProxmoxWebLoginAssist((prev) => {
         if (prev?.label !== webviewLabel) {
           return prev;
@@ -2350,161 +2292,7 @@ export function App() {
     }
   }, []);
 
-  const toggleHostMenu = (host: HostConfig) => {
-    if (openHostMenuHostAlias === host.host) {
-      setOpenHostMenuHostAlias("");
-      return;
-    }
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (
-        !window.confirm(
-          "You have unsaved changes for this host. Discard them and open another host's settings?",
-        )
-      ) {
-        return;
-      }
-    }
-    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-      host,
-      draft,
-      storeKeys,
-      storeUsers,
-      hosts,
-      metadataStore.hosts,
-    );
-    setOpenHostMenuHostAlias(host.host);
-    setActiveHost(host.host);
-    setCurrentHost(syncedHost);
-    setSidebarHostBindingDraft(syncedBinding);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-  };
 
-  const openHostMenuForHost = (host: HostConfig) => {
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (
-        !window.confirm(
-          "You have unsaved changes for this host. Discard them and open another host's settings?",
-        )
-      ) {
-        return;
-      }
-    }
-    const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-    const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-      host,
-      draft,
-      storeKeys,
-      storeUsers,
-      hosts,
-      metadataStore.hosts,
-    );
-    setActiveHost(host.host);
-    setCurrentHost(syncedHost);
-    setSidebarHostBindingDraft(syncedBinding);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-    setOpenHostMenuHostAlias(host.host);
-  };
-
-  const toggleHostSelection = (host: HostConfig) => {
-    if (activeHost === host.host) {
-      setActiveHost("");
-      if (openHostMenuHostAlias === host.host) {
-        setOpenHostMenuHostAlias("");
-      }
-      return;
-    }
-    if (
-      openHostMenuHostAlias &&
-      openHostMenuHostAlias !== host.host &&
-      isSidebarHostSettingsDirty(
-        openHostMenuHostAlias,
-        hosts,
-        metadataStore.hosts,
-        currentHost,
-        tagDraft,
-        hostKeyPolicyDraft,
-        entityStore,
-        sidebarHostBindingDraft,
-      )
-    ) {
-      if (!window.confirm("You have unsaved changes for this host. Discard them and switch?")) {
-        return;
-      }
-    }
-    setActiveHost(host.host);
-    setTagDraft((metadataStore.hosts[host.host]?.tags ?? []).join(", "));
-    setHostKeyPolicyDraft(
-      effectiveStrictHostKeyPolicy(metadataStore.hosts[host.host] ?? createDefaultHostMetadata()),
-    );
-    if (openHostMenuHostAlias) {
-      const draft = sidebarSavedHostBinding(host.host, hosts, entityStore, metadataStore.hosts);
-      const { host: syncedHost, binding: syncedBinding } = syncSidebarHostWithStore(
-        host,
-        draft,
-        storeKeys,
-        storeUsers,
-        hosts,
-        metadataStore.hosts,
-      );
-      setCurrentHost(syncedHost);
-      setSidebarHostBindingDraft(syncedBinding);
-      setOpenHostMenuHostAlias(host.host);
-    } else {
-      setCurrentHost(host);
-    }
-  };
-
-  const clearPendingRemoveConfirm = useCallback(() => {
-    if (removeConfirmResetTimerRef.current) {
-      clearTimeout(removeConfirmResetTimerRef.current);
-      removeConfirmResetTimerRef.current = null;
-    }
-    setPendingRemoveConfirm(null);
-  }, []);
-
-  const armPendingRemoveConfirm = useCallback((hostAlias: string, scope: "settings") => {
-    if (removeConfirmResetTimerRef.current) {
-      clearTimeout(removeConfirmResetTimerRef.current);
-    }
-    setPendingRemoveConfirm({ hostAlias, scope });
-    removeConfirmResetTimerRef.current = setTimeout(() => {
-      setPendingRemoveConfirm(null);
-      removeConfirmResetTimerRef.current = null;
-    }, 2200);
-  }, []);
   const clearPendingCloseAllIntent = useCallback(() => {
     if (closeAllConfirmResetTimerRef.current) {
       clearTimeout(closeAllConfirmResetTimerRef.current);
@@ -2574,17 +2362,6 @@ export function App() {
     }));
   };
 
-  const saveTagsForHost = async (hostAlias: string) => {
-    await saveHostTagsAndKeyPolicy(hostAlias, tagDraft, hostKeyPolicyDraft);
-  };
-
-  const saveTagsForActiveHost = async () => {
-    if (!activeHost.trim()) {
-      return;
-    }
-    await saveTagsForHost(activeHost);
-  };
-
   const toggleFavoriteForHost = async (hostAlias: string) => {
     try {
       await upsertHostMetadata(hostAlias, (current) => ({
@@ -2608,9 +2385,6 @@ export function App() {
           tags: nextTags,
         };
       });
-      if (openHostMenuHostAlias === hostAlias) {
-        setTagDraft(nextTags.join(", "));
-      }
       if (hostSettingsSelectedAlias === hostAlias) {
         setHostSettingsTagDraft(nextTags.join(", "));
       }
@@ -2760,23 +2534,6 @@ export function App() {
     }
   };
 
-  const onSave = async () => {
-    setError("");
-    try {
-      const normalizedAlias = currentHost.host.trim();
-      await saveHost(currentHost);
-      await persistEntityStore({
-        ...entityStore,
-        hostBindings: { ...entityStore.hostBindings, [normalizedAlias]: sidebarHostBindingDraft },
-        updatedAt: Date.now(),
-      });
-      await saveTagsForHost(normalizedAlias);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
   const onDelete = async (hostAlias: string) => {
     const normalizedAlias = hostAlias.trim();
     if (!normalizedAlias) {
@@ -2795,18 +2552,9 @@ export function App() {
         ...metadataStore,
         hosts: nextHosts,
       });
-      setOpenHostMenuHostAlias((prev) => (prev === normalizedAlias ? "" : prev));
-      if (currentHost.host === normalizedAlias) {
-        const cleared = emptyHost();
-        setCurrentHost(cleared);
-        setTagDraft("");
-        setHostKeyPolicyDraft("ask");
-        setSidebarHostBindingDraft(createDefaultHostBinding());
-      }
       if (activeHost === normalizedAlias) {
         setActiveHost("");
       }
-      clearPendingRemoveConfirm();
       clearPendingRemoveHostsTab();
       await load();
     } catch (e) {
@@ -2861,25 +2609,11 @@ export function App() {
     }, 2200);
   }, [hostSettingsSelectedAlias, hosts, pendingRemoveHostsTab, clearPendingRemoveHostsTab, onDelete]);
 
-  const handleRemoveHostIntent = (hostAlias: string, scope: "settings") => {
-    const normalizedAlias = hostAlias.trim();
-    if (!normalizedAlias || !hosts.some((host) => host.host === normalizedAlias)) {
-      setError("Select an existing host before removing.");
-      return;
-    }
-    if (pendingRemoveConfirm?.hostAlias === normalizedAlias && pendingRemoveConfirm.scope === scope) {
-      clearPendingRemoveConfirm();
-      void onDelete(normalizedAlias);
-      return;
-    }
-    armPendingRemoveConfirm(normalizedAlias, scope);
-  };
 
   const openAddHostModal = () => {
     setNewHostDraft(emptyHost());
     setAddHostBindingDraft(createDefaultHostBinding());
     setIsQuickAddMenuOpen(false);
-    setOpenHostMenuHostAlias("");
     setIsAddHostModalOpen(true);
   };
 
@@ -2900,7 +2634,6 @@ export function App() {
     setQuickConnectCommandInput(defaultUser ? `${defaultUser}@` : "");
     setQuickConnectWizardStep(1);
     setIsQuickAddMenuOpen(false);
-    setOpenHostMenuHostAlias("");
     setPendingQuickConnectPaneIndex(paneIndex);
     setIsQuickConnectModalOpen(true);
   };
@@ -2976,7 +2709,6 @@ export function App() {
       });
       setActiveSession(started.session_id);
       setActiveHost(host.host);
-      setCurrentHost(host);
       const lastUsedAt = Math.floor(Date.now() / 1000);
       setMetadataStore((prev) => ({
         ...prev,
@@ -3365,6 +3097,39 @@ export function App() {
       ]);
       return id;
     }
+    if (sourceSession.kind === "proxmoxQemuVnc" || sourceSession.kind === "proxmoxLxcTerm") {
+      const id = sourceSession.kind === "proxmoxQemuVnc" ? `pxvnc-${createId()}` : `pxlxc-${createId()}`;
+      if (sourceSession.kind === "proxmoxQemuVnc") {
+        setSessions((prev) => [
+          ...prev,
+          {
+            id,
+            kind: "proxmoxQemuVnc",
+            label: sourceSession.label,
+            clusterId: sourceSession.clusterId,
+            node: sourceSession.node,
+            vmid: sourceSession.vmid,
+            proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
+            ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+          },
+        ]);
+      } else {
+        setSessions((prev) => [
+          ...prev,
+          {
+            id,
+            kind: "proxmoxLxcTerm",
+            label: sourceSession.label,
+            clusterId: sourceSession.clusterId,
+            node: sourceSession.node,
+            vmid: sourceSession.vmid,
+            proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
+            ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+          },
+        ]);
+      }
+      return id;
+    }
     if (sourceSession.kind === "local") {
       try {
         const started = await startLocalSession();
@@ -3695,7 +3460,7 @@ export function App() {
 
   const closeSessionById = async (sessionId: string) => {
     const tab = sessions.find((s) => s.id === sessionId);
-    if (!tab || tab.kind !== "web") {
+    if (!tab || !sessionKindIsWebLike(tab.kind)) {
       await closeSession(sessionId);
     }
     setSessionFileViews((prev) => {
@@ -3748,7 +3513,7 @@ export function App() {
     const results = await Promise.allSettled(
       sessionIds.map((sessionId) => {
         const tab = sessions.find((s) => s.id === sessionId);
-        if (tab?.kind === "web") {
+        if (tab && sessionKindIsWebLike(tab.kind)) {
           return Promise.resolve();
         }
         return closeSession(sessionId);
@@ -3869,7 +3634,7 @@ export function App() {
       return;
     }
     const tab = sessions.find((s) => s.id === sessionId);
-    if (tab?.kind === "web") {
+    if (tab && sessionKindIsWebLike(tab.kind)) {
       return;
     }
     toggleBroadcastTarget(sessionId);
@@ -4336,15 +4101,19 @@ export function App() {
   const handleTerminalInput = useCallback(
     (originSessionId: string, data: string) => {
       const origin = sessionById.get(originSessionId);
-      if (origin?.kind === "web") {
+      if (origin && sessionKindIsWebLike(origin.kind)) {
         return;
       }
-      const terminalSessionIds = sessionIds.filter((id) => sessionById.get(id)?.kind !== "web");
+      const terminalSessionIds = sessionIds.filter((id) => {
+        const t = sessionById.get(id);
+        return t && !sessionKindIsWebLike(t.kind);
+      });
       const targets = isBroadcastModeEnabled
         ? resolveInputTargets(originSessionId, broadcastTargets, terminalSessionIds)
         : [originSessionId];
       for (const target of targets) {
-        if (sessionById.get(target)?.kind === "web") {
+        const t = sessionById.get(target);
+        if (t && sessionKindIsWebLike(t.kind)) {
           continue;
         }
         void sendInput(target, data);
@@ -4609,6 +4378,80 @@ export function App() {
     return newPaneIndex;
   };
 
+  const handleProxmoxQemuVncInPane = useCallback(
+    (ctx: {
+      clusterId: string;
+      node: string;
+      vmid: string;
+      label: string;
+      allowInsecureTls: boolean;
+      proxmoxBaseUrl: string;
+    }) => {
+      setError("");
+      const base = ctx.proxmoxBaseUrl.trim();
+      if (!base) {
+        setError("Proxmox base URL is missing for this cluster.");
+        return;
+      }
+      const id = `pxvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "proxmoxQemuVnc" as const,
+          label: ctx.label.trim() || `noVNC ${ctx.vmid}`,
+          clusterId: ctx.clusterId,
+          node: ctx.node,
+          vmid: ctx.vmid,
+          proxmoxBaseUrl: base,
+          ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        },
+      ]);
+      const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex],
+  );
+
+  const handleProxmoxLxcConsoleInPane = useCallback(
+    (ctx: {
+      clusterId: string;
+      node: string;
+      vmid: string;
+      label: string;
+      allowInsecureTls: boolean;
+      proxmoxBaseUrl: string;
+    }) => {
+      setError("");
+      const base = ctx.proxmoxBaseUrl.trim();
+      if (!base) {
+        setError("Proxmox base URL is missing for this cluster.");
+        return;
+      }
+      const id = `pxlxc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "proxmoxLxcTerm" as const,
+          label: ctx.label.trim() || `LXC ${ctx.vmid}`,
+          clusterId: ctx.clusterId,
+          node: ctx.node,
+          vmid: ctx.vmid,
+          proxmoxBaseUrl: base,
+          ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        },
+      ]);
+      const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex],
+  );
+
   const startSplitResize = (splitId: string, axis: SplitAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -4666,19 +4509,26 @@ export function App() {
             sessionKind: "local" as const,
           };
         }
-        if (paneSession.kind === "web") {
+        if (sessionKindIsWebLike(paneSession.kind)) {
           return {
             width: pane.width,
             height: pane.height,
             hostAlias: null,
           };
         }
+        if (paneSession.kind === "sshQuick") {
+          return {
+            width: pane.width,
+            height: pane.height,
+            hostAlias: null,
+            sessionKind: "sshQuick" as const,
+            quickSsh: { ...paneSession.request },
+          };
+        }
         return {
           width: pane.width,
           height: pane.height,
           hostAlias: null,
-          sessionKind: "sshQuick" as const,
-          quickSsh: { ...paneSession.request },
         };
       }),
       splitTree: serializeSplitTree(splitTree),
@@ -4835,7 +4685,7 @@ export function App() {
       if (!session) {
         return "empty";
       }
-      if (session.kind === "web") {
+      if (sessionKindIsWebLike(session.kind)) {
         return "web";
       }
       return session.kind === "local" ? "local" : "ssh";
@@ -4850,7 +4700,7 @@ export function App() {
         return null;
       }
       const session = sessions.find((s) => s.id === sid);
-      if (!session || session.kind === "local" || session.kind === "web") {
+      if (!session || session.kind === "local" || sessionKindIsWebLike(session.kind)) {
         return null;
       }
       if (session.kind === "sshSaved") {
@@ -4860,7 +4710,10 @@ export function App() {
         }
         return { kind: "saved", host: hostEntry };
       }
-      return { kind: "quick", request: session.request };
+      if (session.kind === "sshQuick") {
+        return { kind: "quick", request: session.request };
+      }
+      return null;
     },
     [splitSlots, sessions, hosts],
   );
@@ -4884,6 +4737,43 @@ export function App() {
         title: session.label,
         ...(session.allowInsecureTls ? { allowInsecureTls: true } : {}),
       };
+    },
+    [splitSlots, sessions],
+  );
+
+  const proxmoxNativeConsoleForPane = useCallback(
+    (paneIndex: number) => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) {
+        return null;
+      }
+      const session = sessions.find((s) => s.id === sid);
+      if (!session) {
+        return null;
+      }
+      if (session.kind === "proxmoxQemuVnc") {
+        return {
+          kind: "qemu-vnc" as const,
+          clusterId: session.clusterId,
+          node: session.node,
+          vmid: session.vmid,
+          paneTitle: session.label,
+          proxmoxBaseUrl: session.proxmoxBaseUrl,
+          ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        };
+      }
+      if (session.kind === "proxmoxLxcTerm") {
+        return {
+          kind: "lxc-term" as const,
+          clusterId: session.clusterId,
+          node: session.node,
+          vmid: session.vmid,
+          paneTitle: session.label,
+          proxmoxBaseUrl: session.proxmoxBaseUrl,
+          ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+        };
+      }
+      return null;
     },
     [splitSlots, sessions],
   );
@@ -4946,6 +4836,7 @@ export function App() {
     semanticFileNameColors: filePaneSemanticNameColors.enabled,
     fileWorkspacePluginEnabled,
     webPanePayloadForPane,
+    proxmoxNativeConsoleForPane,
     onWebPaneOpenInAppWindowError: setError,
     onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
@@ -4967,7 +4858,7 @@ export function App() {
     if (!session) {
       return "empty";
     }
-    if (session.kind === "web") {
+    if (sessionKindIsWebLike(session.kind)) {
       return "web";
     }
     return session.kind === "local" ? "local" : "ssh";
@@ -5100,6 +4991,9 @@ export function App() {
               onSshToProxmoxNode={handleProxmuxSshNode}
               onOpenProxmoxExternalUrl={handleProxmuxOpenExternalUrl}
               onOpenProxmoxSpice={handleProxmuxSpice}
+              usePaneNativeProxmoxConsoles={proxmuxOpenWebConsolesInPane}
+              onOpenProxmoxQemuVncInPane={handleProxmoxQemuVncInPane}
+              onOpenProxmoxLxcConsoleInPane={handleProxmoxLxcConsoleInPane}
             />
           ) : null
         }
@@ -5117,40 +5011,18 @@ export function App() {
         otherHostRows={otherHostRows}
         hostListRowBridge={{
           activeHost,
-          openHostMenuHostAlias,
-          currentHost,
-          setCurrentHost,
-          hosts,
-          tagDraft,
-          setTagDraft,
-          hostKeyPolicyDraft,
-          setHostKeyPolicyDraft,
-          storeKeys,
-          storeUsers,
-          sidebarHostBindingDraft,
-          setSidebarHostBindingDraft,
-          error,
-          canSave,
-          pendingRemoveConfirm,
           suppressHostClickAliasRef,
           setContextMenu,
           setHostContextMenu,
           setHoveredHostAlias,
           setActiveHost,
           setDragOverPaneIndex,
-          setError,
           toggleFavoriteForHost,
-          toggleJumpHostForHost,
-          hostMetadataByHost: metadataStore.hosts,
-          toggleHostSelection,
           connectToHostInNewPane,
           setDragPayload,
           setDraggingKind,
           missingDragPayloadLoggedRef,
-          toggleHostMenu,
-          onSave,
-          saveTagsForActiveHost,
-          handleRemoveHostIntent,
+          onEditHost: (host: HostConfig) => openHostSettingsForHost(host.host),
         }}
       />
       <div className={`sidebar-resize-handle ${isSidebarOpen ? "" : "is-hidden"}`}>
@@ -5331,11 +5203,6 @@ export function App() {
           addStoreEncryptedKey={addStoreEncryptedKey}
           unlockStoreKey={unlockStoreKey}
           removeStoreKey={removeStoreKey}
-          storeSelectedHostForBinding={storeSelectedHostForBinding}
-          setStoreSelectedHostForBinding={setStoreSelectedHostForBinding}
-          storeBindingDraft={storeBindingDraft}
-          setStoreBindingDraft={setStoreBindingDraft}
-          saveHostBindingDraft={saveHostBindingDraft}
           sshConfigRaw={sshConfigRaw}
           setSshConfigRaw={setSshConfigRaw}
           onSaveSshConfig={handleSaveSshConfig}
@@ -5484,7 +5351,7 @@ export function App() {
           host={hostContextMenu.host}
           workspaces={workspaceTabs}
           onConnectInWorkspace={connectToHostInWorkspace}
-          onEditHost={openHostMenuForHost}
+          onEditHost={(host: HostConfig) => openHostSettingsForHost(host.host)}
           onClose={() => setHostContextMenu(null)}
         />
       )}

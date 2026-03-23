@@ -159,11 +159,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     addStoreEncryptedKey,
     unlockStoreKey,
     removeStoreKey,
-    storeSelectedHostForBinding,
-    setStoreSelectedHostForBinding,
-    storeBindingDraft,
-    setStoreBindingDraft,
-    saveHostBindingDraft,
     sshConfigRaw,
     setSshConfigRaw,
     onSaveSshConfig,
@@ -367,6 +362,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               hostMetadataByHost={metadataStore.hosts}
               storeKeys={storeKeys}
               storeUsers={storeUsers}
+              storeGroups={storeGroups}
+              storeTags={storeTags}
               toggleFavoriteForHost={toggleFavoriteForHost}
               toggleJumpHostForHost={toggleJumpHostForHost}
               onSaveHost={onSaveHostSettingsTab}
@@ -436,11 +433,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               addStoreEncryptedKey={addStoreEncryptedKey}
               unlockStoreKey={unlockStoreKey}
               removeStoreKey={removeStoreKey}
-              storeSelectedHostForBinding={storeSelectedHostForBinding}
-              setStoreSelectedHostForBinding={setStoreSelectedHostForBinding}
-              storeBindingDraft={storeBindingDraft}
-              setStoreBindingDraft={setStoreBindingDraft}
-              saveHostBindingDraft={saveHostBindingDraft}
             />
           )}
           {activeAppSettingsTab === "plugins" && <AppSettingsPluginsTab />}

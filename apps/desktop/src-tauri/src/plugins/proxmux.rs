@@ -51,6 +51,8 @@ impl NssPlugin for ProxmuxPlugin {
             "guestPower" => Ok(guest_power(arg)?),
             "toggleProxmuxFavorite" => Ok(toggle_proxmux_favorite(arg)?),
             "fetchSpiceProxy" => Ok(fetch_spice_proxy(arg)?),
+            "fetchQemuVncProxy" => Ok(fetch_qemu_vnc_proxy(arg)?),
+            "fetchLxcTermProxy" => Ok(fetch_lxc_term_proxy(arg)?),
             "qemuSpiceCapable" => Ok(qemu_spice_capable(arg)?),
             _ => anyhow::bail!("unknown method: {method}"),
         }
@@ -1034,6 +1036,109 @@ fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
     })?;
 
     Ok(json!({ "ok": true, "data": data }))
+}
+
+fn fetch_qemu_vnc_proxy(arg: &Value) -> Result<Value> {
+    let GuestClusterArg {
+        cluster_id,
+        node,
+        guest_type,
+        vmid,
+    } = serde_json::from_value(arg.clone()).context("parse fetchQemuVncProxy")?;
+    let vmid = guest_arg_vmid_string(&vmid)?;
+    validate_pve_node_segment(&node)?;
+    validate_pve_vmid(&vmid)?;
+    let typ = normalize_guest_type(guest_type.trim())?;
+    if typ != "qemu" {
+        anyhow::bail!("fetchQemuVncProxy only supports guestType \"qemu\"");
+    }
+
+    let state = load_state()?;
+    let c = state
+        .clusters
+        .get(&cluster_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
+    let secret = read_api_secret(c)?;
+    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
+    let client = http_client(c.allow_insecure_tls)?;
+    let primary = normalize_base_url(&c.proxmox_url);
+
+    let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/vncproxy");
+    let (api_origin, data) = with_failover(&primary, &c.failover_urls, |base| {
+        let norm = normalize_base_url(base);
+        let url = format!("{norm}{path_tail}");
+        let response = client
+            .post(&url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/json")
+            .send()
+            .with_context(|| format!("POST {url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().unwrap_or_default();
+            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+        }
+        let body: Value = response.json().context("parse vncproxy JSON")?;
+        let data = body
+            .get("data")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing data in vncproxy response"))?;
+        Ok((norm, data))
+    })?;
+
+    Ok(json!({ "ok": true, "apiOrigin": api_origin, "authHeader": auth, "data": data }))
+}
+
+fn fetch_lxc_term_proxy(arg: &Value) -> Result<Value> {
+    let GuestClusterArg {
+        cluster_id,
+        node,
+        guest_type,
+        vmid,
+    } = serde_json::from_value(arg.clone()).context("parse fetchLxcTermProxy")?;
+    let vmid = guest_arg_vmid_string(&vmid)?;
+    validate_pve_node_segment(&node)?;
+    validate_pve_vmid(&vmid)?;
+    let typ = normalize_guest_type(guest_type.trim())?;
+    if typ != "lxc" {
+        anyhow::bail!("fetchLxcTermProxy only supports guestType \"lxc\"");
+    }
+
+    let state = load_state()?;
+    let c = state
+        .clusters
+        .get(&cluster_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
+    let secret = read_api_secret(c)?;
+    let auth = pve_api_token_header(&c.api_user, &c.api_token_id, &secret);
+    let client = http_client(c.allow_insecure_tls)?;
+    let primary = normalize_base_url(&c.proxmox_url);
+
+    let api_user = c.api_user.clone();
+    let path_tail = format!("/api2/json/nodes/{node}/lxc/{vmid}/termproxy");
+    let (api_origin, data) = with_failover(&primary, &c.failover_urls, |base| {
+        let norm = normalize_base_url(base);
+        let url = format!("{norm}{path_tail}");
+        let response = client
+            .post(&url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/json")
+            .send()
+            .with_context(|| format!("POST {url}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().unwrap_or_default();
+            anyhow::bail!("{}", pve_error_hint(status.as_u16(), &text));
+        }
+        let body: Value = response.json().context("parse termproxy JSON")?;
+        let data = body
+            .get("data")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing data in termproxy response"))?;
+        Ok((norm, data))
+    })?;
+
+    Ok(json!({ "ok": true, "apiOrigin": api_origin, "apiUser": api_user, "authHeader": auth, "data": data }))
 }
 
 /// Matches PROXMUX-Manager `isSpiceEnabled`: SPICE is meaningful when display uses QXL, virtio-gpu, or explicit spice.

@@ -1,7 +1,20 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { HostBinding, HostConfig, HostMetadata, SshKeyObject, StrictHostKeyPolicy, UserObject } from "../../../types";
+import type {
+  GroupObject,
+  HostBinding,
+  HostConfig,
+  HostKeyRef,
+  HostMetadata,
+  SshKeyObject,
+  StrictHostKeyPolicy,
+  TagObject,
+  UserObject,
+} from "../../../types";
 import { HostForm } from "../../HostForm";
 import { HostMetadataFields } from "../../HostMetadataFields";
+
+const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
+  refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
 
 export type AppSettingsHostsTabProps = {
   hosts: HostConfig[];
@@ -19,6 +32,8 @@ export type AppSettingsHostsTabProps = {
   hostMetadataByHost: Record<string, HostMetadata | undefined>;
   storeKeys: SshKeyObject[];
   storeUsers: UserObject[];
+  storeGroups: GroupObject[];
+  storeTags: TagObject[];
   toggleFavoriteForHost: (alias: string) => void | Promise<void>;
   toggleJumpHostForHost: (alias: string) => void | Promise<void>;
   onSaveHost: () => void | Promise<void>;
@@ -44,6 +59,8 @@ export function AppSettingsHostsTab({
   hostMetadataByHost,
   storeKeys,
   storeUsers,
+  storeGroups,
+  storeTags,
   toggleFavoriteForHost,
   toggleJumpHostForHost,
   onSaveHost,
@@ -52,6 +69,30 @@ export function AppSettingsHostsTab({
   removeConfirmActive,
   error,
 }: AppSettingsHostsTabProps) {
+  const toggleBindingKey = (keyId: string, checked: boolean) => {
+    setDraftBinding((prev) => {
+      let next = prev.keyRefs.filter((r) => r.keyId !== keyId);
+      if (checked) {
+        next = [...next, { keyId, usage: "additional" }];
+      }
+      return { ...prev, keyRefs: normalizeKeyRefs(next) };
+    });
+  };
+
+  const toggleBindingGroup = (groupId: string, checked: boolean) => {
+    setDraftBinding((prev) => ({
+      ...prev,
+      groupIds: checked ? [...prev.groupIds, groupId] : prev.groupIds.filter((id) => id !== groupId),
+    }));
+  };
+
+  const toggleBindingTag = (tagId: string, checked: boolean) => {
+    setDraftBinding((prev) => ({
+      ...prev,
+      tagIds: checked ? [...prev.tagIds, tagId] : prev.tagIds.filter((id) => id !== tagId),
+    }));
+  };
+
   if (hosts.length === 0) {
     return (
       <div className="identity-store-section">
@@ -64,8 +105,8 @@ export function AppSettingsHostsTab({
     <div className="identity-store-section app-settings-hosts-tab">
       <h3 className="settings-card-title">SSH host</h3>
       <p className="muted-copy">
-        Same options as the host menu in the sidebar: connection, access, proxy, tags, host-key policy, jump host, and
-        favorite. Changes apply after you save.
+        Connection, access, proxy, identity store bindings, tags, host-key policy, jump host, and favorite.
+        Changes apply after you save.
       </p>
       <div className="field" style={{ marginBottom: "var(--space-3)" }}>
         <span className="field-label">Host</span>
@@ -96,6 +137,78 @@ export function AppSettingsHostsTab({
             hostMetadataByHost={hostMetadataByHost}
             copyDensity="verbose"
           />
+
+          <div className="settings-stack host-form-settings-stack" style={{ marginTop: "var(--space-3)" }}>
+            <section className="settings-card host-form-settings-card">
+              <div className="settings-card-head">
+                <h3>Identity Store bindings</h3>
+                <p className="muted-copy">
+                  Per-host overrides: SSH keys (first selected = primary), groups, and tags from the Identity Store.
+                  If no keys are set here, the linked user&apos;s keys apply when a user is selected.
+                </p>
+              </div>
+              <div className="host-form-card-fields">
+                <div className="field">
+                  <span className="field-label">SSH keys for this host</span>
+                  <div className="store-checkbox-grid">
+                    {storeKeys.length === 0 ? (
+                      <span className="muted-copy">No keys in store.</span>
+                    ) : (
+                      storeKeys.map((key) => (
+                        <label key={key.id} className="store-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={draftBinding.keyRefs.some((r) => r.keyId === key.id)}
+                            onChange={(event) => toggleBindingKey(key.id, event.target.checked)}
+                          />
+                          {key.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="field">
+                  <span className="field-label">Groups</span>
+                  <div className="store-checkbox-grid">
+                    {storeGroups.length === 0 ? (
+                      <span className="muted-copy">No groups.</span>
+                    ) : (
+                      storeGroups.map((group) => (
+                        <label key={group.id} className="store-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={draftBinding.groupIds.includes(group.id)}
+                            onChange={(event) => toggleBindingGroup(group.id, event.target.checked)}
+                          />
+                          {group.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="field">
+                  <span className="field-label">Store tags</span>
+                  <div className="store-checkbox-grid">
+                    {storeTags.length === 0 ? (
+                      <span className="muted-copy">No tags in store.</span>
+                    ) : (
+                      storeTags.map((tag) => (
+                        <label key={tag.id} className="store-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={draftBinding.tagIds.includes(tag.id)}
+                            onChange={(event) => toggleBindingTag(tag.id, event.target.checked)}
+                          />
+                          {tag.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
           <HostMetadataFields
             hostAlias={selectedHostAlias}
             metadata={metadataForSelected}
