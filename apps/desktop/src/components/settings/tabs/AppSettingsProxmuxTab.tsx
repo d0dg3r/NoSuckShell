@@ -29,11 +29,61 @@ type ListStateResponse = {
 };
 
 type ResourceRow = Record<string, unknown>;
+type DraftAuthPayload = {
+  proxmoxUrl: string;
+  apiUser: string;
+  totpCode: string;
+  password: string;
+  failoverUrls: string[];
+  allowInsecureTls: boolean;
+};
 
 function resourceString(row: ResourceRow, key: string): string {
   const v = row[key];
   if (v == null) return "";
   return String(v);
+}
+
+function normalizeFailoverUrls(text: string): string[] {
+  return text
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function buildDraftAuthPayload(input: {
+  draftUrl: string;
+  draftUser: string;
+  draftTotpCode: string;
+  draftPassword: string;
+  draftFailoverText: string;
+  draftInsecure: boolean;
+}): DraftAuthPayload {
+  return {
+    proxmoxUrl: input.draftUrl.trim(),
+    apiUser: input.draftUser.trim(),
+    totpCode: input.draftTotpCode.trim(),
+    password: input.draftPassword,
+    failoverUrls: normalizeFailoverUrls(input.draftFailoverText),
+    allowInsecureTls: input.draftInsecure,
+  };
+}
+
+function validateDraftAuthPayload(payload: DraftAuthPayload, mode: "save-new" | "save-edit" | "test"): string | null {
+  if (!payload.proxmoxUrl) return "Proxmox URL is required.";
+  if (!payload.apiUser) return "Username is required.";
+  if (mode === "test" && !payload.password) return "Password is required to test a connection.";
+  if (mode === "save-new" && !payload.password) return "Password is required for a new cluster.";
+  return null;
+}
+
+function mapPluginError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalized = raw.trim();
+  if (/HTTP\s+401/i.test(normalized) || /authentication failure/i.test(normalized)) {
+    return "Authentication failed. Verify username, password, and TOTP code, then try again.";
+  }
+  return normalized || "Unexpected plugin error.";
 }
 
 export type AppSettingsProxmuxTabProps = {
@@ -117,7 +167,7 @@ export function AppSettingsProxmuxTab({
       await refreshMeta();
       setMessage("PROXMUX plugin enabled.");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -150,28 +200,37 @@ export function AppSettingsProxmuxTab({
     setBusy(true);
     setMessage("");
     try {
-      const failoverUrls = draftFailoverText
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const payload = buildDraftAuthPayload({
+        draftUrl,
+        draftUser,
+        draftTotpCode,
+        draftPassword,
+        draftFailoverText,
+        draftInsecure,
+      });
+      const validationError = validateDraftAuthPayload(payload, draftId ? "save-edit" : "save-new");
+      if (validationError) {
+        setMessage(validationError);
+        return;
+      }
       await pluginInvoke(PROXMUX_PLUGIN_ID, "saveCluster", {
         cluster: {
           id: draftId ?? undefined,
           name: draftName.trim(),
-          proxmoxUrl: draftUrl.trim(),
-          apiUser: draftUser.trim(),
-          totpCode: draftTotpCode.trim(),
-          password: draftPassword,
-          failoverUrls,
+          proxmoxUrl: payload.proxmoxUrl,
+          apiUser: payload.apiUser,
+          totpCode: payload.totpCode,
+          password: payload.password,
+          failoverUrls: payload.failoverUrls,
           isEnabled: true,
-          allowInsecureTls: draftInsecure,
+          allowInsecureTls: payload.allowInsecureTls,
         },
       });
       setMessage("Cluster saved.");
       clearDraft();
       await refreshState();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -188,7 +247,7 @@ export function AppSettingsProxmuxTab({
       if (resourceClusterId === id) setResourceClusterId(null);
       await refreshState();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -203,7 +262,7 @@ export function AppSettingsProxmuxTab({
       setResourceClusterId(id);
       await refreshState();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -214,17 +273,26 @@ export function AppSettingsProxmuxTab({
     setBusy(true);
     setMessage("");
     try {
-      const failoverUrls = draftFailoverText
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const payload = buildDraftAuthPayload({
+        draftUrl,
+        draftUser,
+        draftTotpCode,
+        draftPassword,
+        draftFailoverText,
+        draftInsecure,
+      });
+      const validationError = validateDraftAuthPayload(payload, "test");
+      if (validationError) {
+        setMessage(validationError);
+        return;
+      }
       const out = (await pluginInvoke(PROXMUX_PLUGIN_ID, "testConnectionDraft", {
-        proxmoxUrl: draftUrl.trim(),
-        apiUser: draftUser.trim(),
-        totpCode: draftTotpCode.trim(),
-        password: draftPassword,
-        failoverUrls,
-        allowInsecureTls: draftInsecure,
+        proxmoxUrl: payload.proxmoxUrl,
+        apiUser: payload.apiUser,
+        totpCode: payload.totpCode,
+        password: payload.password,
+        failoverUrls: payload.failoverUrls,
+        allowInsecureTls: payload.allowInsecureTls,
       })) as { ok?: boolean; message?: string };
       if (out.ok) {
         setMessage("Connection OK (Proxmox API responded).");
@@ -232,7 +300,7 @@ export function AppSettingsProxmuxTab({
         setMessage(out.message || "Connection failed.");
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -253,7 +321,7 @@ export function AppSettingsProxmuxTab({
         setMessage(out.message || "Connection failed.");
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }
@@ -270,7 +338,7 @@ export function AppSettingsProxmuxTab({
       setResources(out.resources ?? []);
       setMessage(`Loaded ${(out.resources ?? []).length} resources (nodes, VMs, LXCs).`);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(mapPluginError(e));
     } finally {
       setBusy(false);
     }

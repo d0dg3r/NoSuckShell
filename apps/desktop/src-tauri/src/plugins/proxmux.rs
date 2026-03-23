@@ -976,6 +976,7 @@ fn list_state() -> Result<Value> {
 struct SaveClusterPayload {
     id: Option<String>,
     name: String,
+    #[serde(default)]
     proxmox_url: String,
     #[serde(default)]
     api_user: String,
@@ -1016,14 +1017,18 @@ fn save_cluster(arg: &Value) -> Result<Value> {
 
     let proxmox_url = normalize_base_url(&payload.proxmox_url);
     if proxmox_url.is_empty() {
-        anyhow::bail!("proxmoxUrl is required");
+        anyhow::bail!("Proxmox URL is required.");
+    }
+    let api_user = payload.api_user.trim().to_string();
+    if api_user.is_empty() {
+        anyhow::bail!("Username is required.");
     }
 
     let (plain, enc) = if let Some(existing) = state.clusters.get(&id) {
         merge_stored_secret(&payload.password, existing)?
     } else {
         if payload.password.is_empty() {
-            anyhow::bail!("password is required for a new cluster");
+            anyhow::bail!("Password is required for a new cluster.");
         }
         write_api_secret_fields(&payload.password)?
     };
@@ -1039,7 +1044,7 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         id: id.clone(),
         name: payload.name.trim().to_string(),
         proxmox_url,
-        api_user: payload.api_user.trim().to_string(),
+        api_user,
         totp_code: payload.totp_code.trim().to_string(),
         api_token_id: String::new(),
         api_secret_plain: plain,
@@ -1102,11 +1107,13 @@ fn test_connection(arg: &Value) -> Result<Value> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DraftClusterArg {
+    #[serde(default)]
     proxmox_url: String,
     #[serde(default)]
     api_user: String,
     #[serde(default)]
     totp_code: String,
+    #[serde(default)]
     password: String,
     #[serde(default)]
     failover_urls: Vec<String>,
@@ -1116,18 +1123,32 @@ struct DraftClusterArg {
 
 fn test_connection_draft(arg: &Value) -> Result<Value> {
     let d: DraftClusterArg = serde_json::from_value(arg.clone()).context("parse testConnectionDraft")?;
+    let proxmox_url = normalize_base_url(&d.proxmox_url);
+    if proxmox_url.is_empty() {
+        return Ok(json!({
+            "ok": false,
+            "message": "Proxmox URL is required."
+        }));
+    }
+    let api_user = d.api_user.trim().to_string();
+    if api_user.is_empty() {
+        return Ok(json!({
+            "ok": false,
+            "message": "Username is required."
+        }));
+    }
     if d.password.is_empty() {
         return Ok(json!({
             "ok": false,
-            "message": "Password is required."
+            "message": "Password is required to test a connection."
         }));
     }
     let c = StoredCluster {
         id: "draft".to_string(),
         name: String::new(),
-        proxmox_url: normalize_base_url(&d.proxmox_url),
-        api_user: d.api_user,
-        totp_code: d.totp_code,
+        proxmox_url,
+        api_user,
+        totp_code: d.totp_code.trim().to_string(),
         api_token_id: String::new(),
         api_secret_plain: Some(d.password),
         api_secret_encrypted: None,
