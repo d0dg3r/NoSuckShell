@@ -12,13 +12,11 @@ export function SettingsSubtabRow<T extends string>({
   onSelect,
 }: SettingsSubtabRowProps<T>) {
   return (
-    <div className="app-settings-subtabs" role="tablist" aria-label={ariaLabel}>
+    <div className="app-settings-subtabs" role="group" aria-label={ariaLabel}>
       {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
-          role="tab"
-          aria-selected={activeTab === tab.id}
           className={`settings-tab settings-subtab ${activeTab === tab.id ? "is-active" : ""}`}
           onClick={() => onSelect(tab.id)}
         >
