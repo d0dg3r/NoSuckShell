@@ -9,10 +9,16 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::accept_async;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
 
-type JoinMap = Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>;
+/// Tracks the accept-loop task handle and all per-connection task handles for a running proxy.
+struct ProxyEntry {
+    accept_handle: tokio::task::JoinHandle<()>,
+    conn_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+}
+
+type JoinMap = Arc<Mutex<HashMap<String, ProxyEntry>>>;
 
 fn proxy_tasks() -> &'static JoinMap {
     static MAP: std::sync::OnceLock<JoinMap> = std::sync::OnceLock::new();
@@ -76,12 +82,23 @@ async fn connect_upstream_wss(
 
 async fn proxy_one_browser_connection(
     browser_tcp: TcpStream,
+    expected_path: String,
     upstream_wss_url: String,
     allow_insecure_tls: bool,
     auth_header: Option<String>,
     auth_cookie: Option<String>,
 ) {
-    let browser_ws = match accept_async(browser_tcp).await {
+    let callback = move |req: &Request, response: Response| -> Result<Response, http::Response<Option<String>>> {
+        if req.uri().path() != expected_path.as_str() {
+            let err = http::Response::builder()
+                .status(http::StatusCode::FORBIDDEN)
+                .body(Some("Forbidden".to_string()))
+                .expect("response");
+            return Err(err);
+        }
+        Ok(response)
+    };
+    let browser_ws = match accept_hdr_async(browser_tcp, callback).await {
         Ok(ws) => ws,
         Err(e) => {
             eprintln!("proxmux ws proxy: accept browser ws: {e}");
@@ -169,24 +186,34 @@ pub async fn proxmux_ws_proxy_start(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let proxy_id = uuid::Uuid::new_v4().to_string();
-    let local_ws_url = format!("ws://127.0.0.1:{port}/");
+    let path_token = format!("/{proxy_id}");
+    let local_ws_url = format!("ws://127.0.0.1:{port}{path_token}");
 
     let upstream = upstream_wss_url.clone();
+    let conn_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let conn_handles_for_loop = conn_handles.clone();
 
-    let handle = tokio::spawn(async move {
+    let accept_handle = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
                     let upstream = upstream.clone();
                     let auth = auth_header.clone();
                     let cookie = auth_cookie.clone();
-                    tokio::spawn(proxy_one_browser_connection(
+                    let path = path_token.clone();
+                    let conn_handle = tokio::spawn(proxy_one_browser_connection(
                         stream,
+                        path,
                         upstream,
                         allow_insecure_tls,
                         auth,
                         cookie,
                     ));
+                    let mut guard = conn_handles_for_loop.lock().expect("conn handles lock");
+                    // Prune finished task handles to avoid unbounded growth.
+                    guard.retain(|h| !h.is_finished());
+                    guard.push(conn_handle);
                 }
                 Err(e) => {
                     eprintln!("proxmux ws proxy: accept: {e}");
@@ -199,7 +226,7 @@ pub async fn proxmux_ws_proxy_start(
     proxy_tasks()
         .lock()
         .expect("proxy map lock")
-        .insert(proxy_id.clone(), handle);
+        .insert(proxy_id.clone(), ProxyEntry { accept_handle, conn_handles });
 
     Ok(ProxmuxWsProxyStartResult {
         proxy_id,
@@ -213,8 +240,12 @@ pub fn proxmux_ws_proxy_stop(proxy_id: String) -> Result<(), String> {
     if id.is_empty() {
         return Err("proxyId is required".to_string());
     }
-    if let Some(h) = proxy_tasks().lock().expect("proxy map lock").remove(&id) {
-        h.abort();
+    if let Some(entry) = proxy_tasks().lock().expect("proxy map lock").remove(&id) {
+        entry.accept_handle.abort();
+        let handles = entry.conn_handles.lock().expect("conn handles lock");
+        for h in handles.iter() {
+            h.abort();
+        }
     }
     Ok(())
 }
