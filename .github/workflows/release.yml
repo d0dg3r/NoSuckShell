@@ -272,6 +272,31 @@ jobs:
           NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
         run: npm run tauri:build
 
+      - name: Build Arch Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_VERSION}"
+          # Arch versions cannot have hyphens
+          PKGVER="${VERSION//-/.}"
+          
+          cd apps/desktop/src-tauri
+          
+          # Inject version into PKGBUILD
+          sed -i "s/pkgver=\${_PKGVER}/pkgver=${PKGVER}/" PKGBUILD
+          sed -i "s/_REALVER}/${VERSION}/" PKGBUILD
+
+          # Use a Docker container to run makepkg since Ubuntu doesn't have it natively
+          docker run --rm \
+            -v "$(pwd):/package" \
+            -w /package \
+            archlinux:latest \
+            bash -c "pacman -Sy --noconfirm base-devel binutils && \
+                     useradd -m builduser && \
+                     chown -R builduser:builduser /package && \
+                     sudo -u builduser makepkg --noconfirm"
+
       - name: Upload platform bundles
         uses: actions/upload-artifact@v7
         with:
@@ -286,6 +311,7 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/**/*.deb
             apps/desktop/src-tauri/target/release/bundle/**/*.rpm
             apps/desktop/src-tauri/target/release/bundle/**/*.tar.gz
+            apps/desktop/src-tauri/*.pkg.tar.zst
 
   release:
     name: Publish GitHub release

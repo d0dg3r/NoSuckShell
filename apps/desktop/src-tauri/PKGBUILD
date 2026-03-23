@@ -1,0 +1,33 @@
+# Maintainer: Joe <joe@nosuckshell.dev>
+pkgname=nosuckshell
+pkgver=${_PKGVER}
+pkgrel=1
+pkgdesc="Cross-platform SSH manager desktop app"
+arch=('x86_64')
+url="https://github.com/d0dg3r/NoSuckShell"
+license=('MIT')
+depends=('gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator-gtk3' 'librsvg' 'libsoup3' 'openssl')
+options=('!strip' '!rsync')
+
+package() {
+  # The Tauri build for Debian creates a directory structure we can reuse.
+  # We find the data directory within the deb bundle folder.
+  _deb_bundle_dir=$(find target/release/bundle/deb -maxdepth 1 -type d -name "*${_REALVER}*" | head -n 1)
+  _src_dir="${_deb_bundle_dir}/data"
+  
+  if [ ! -d "$_src_dir" ]; then
+    echo "Error: Source directory $_src_dir not found"
+    exit 1
+  fi
+
+  # The binary name might be capitalized or lowercase depending on tauri's config.
+  # We look for it specifically in the usr/bin folder.
+  _bin_path=$(ls "${_src_dir}/usr/bin/"* | head -n 1)
+  
+  install -Dm755 "${_bin_path}" "${pkgdir}/usr/bin/${pkgname}"
+  
+  # Copy icons and desktop file
+  mkdir -p "${pkgdir}/usr/share"
+  cp -r "${_src_dir}/usr/share/applications" "${pkgdir}/usr/share/"
+  cp -r "${_src_dir}/usr/share/icons" "${pkgdir}/usr/share/"
+}
