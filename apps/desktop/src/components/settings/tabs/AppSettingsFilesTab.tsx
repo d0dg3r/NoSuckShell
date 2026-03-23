@@ -8,6 +8,7 @@ import {
   type FilePaneNameKind,
 } from "../../../features/file-pane-name-kind";
 import { resolveFilePaneSemanticNameColorHex } from "../../../features/file-pane-semantic-name-colors-prefs";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsFilesTabProps = {
   fileExportDestMode: FileExportDestMode;
@@ -48,16 +49,20 @@ export function AppSettingsFilesTab({
     <div className="settings-stack">
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>File browser export</h3>
-          <p className="muted-copy">
-            Save icon and bulk export use this destination. Path keys match the local file browser (empty = home, “Downloads” for ~/Downloads, or an absolute path).
-          </p>
+          <div className="settings-card-head-row">
+            <h3>File browser export</h3>
+            <SettingsHelpHint
+              topic="File browser export"
+              description="Save icon and bulk export use this destination. Path keys match the local file browser: empty means home, “Downloads” maps to ~/Downloads, or use an absolute path."
+            />
+          </div>
+          <p className="settings-card-lead">Default folder for saves and bulk export.</p>
         </header>
-        <div className="host-form-grid">
-          <label className="field field-span-2">
+        <div className="settings-form-row settings-files-export-row">
+          <label className="field">
             <span className="field-label">Destination</span>
             <select
-              className="input density-profile-select"
+              className="input density-profile-select settings-control-intrinsic"
               value={fileExportDestMode}
               onChange={(e) => setFileExportDestMode(e.target.value === "ask" ? "ask" : "fixed")}
             >
@@ -66,26 +71,29 @@ export function AppSettingsFilesTab({
             </select>
           </label>
           {fileExportDestMode === "fixed" ? (
-            <label className="field field-span-2">
-              <span className="field-label">Folder path key</span>
+            <label className="field">
+              <span className="field-label field-label-inline-hint">
+                Folder path key
+                <SettingsHelpHint
+                  topic="Folder path key"
+                  description="Same rules as the local file pane path field: relative paths stay under your home directory."
+                />
+              </span>
               <input
                 type="text"
-                className="input"
+                className="input settings-path-input"
                 value={fileExportPathKey}
                 onChange={(e) => setFileExportPathKey(e.target.value)}
                 placeholder="Downloads"
                 spellCheck={false}
                 autoComplete="off"
               />
-              <p className="muted-copy field-help">
-                Same rules as the local file pane path field: relative paths stay under your home directory.
-              </p>
             </label>
           ) : null}
-          <label className="field field-span-2">
+          <label className="field">
             <span className="field-label">Archive format (folders &amp; multi-select)</span>
             <select
-              className="input density-profile-select"
+              className="input density-profile-select settings-control-intrinsic"
               value={fileExportArchiveFormat}
               onChange={(e) =>
                 setFileExportArchiveFormat(e.target.value === "zip" ? "zip" : "tarGz")
@@ -100,11 +108,14 @@ export function AppSettingsFilesTab({
 
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>File browser name colors</h3>
-          <p className="muted-copy">
-            Muted tints on folder and file names help you scan the list (similar to terminal directory colors). This is
-            for orientation only, not a trust or security indicator.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>File browser name colors</h3>
+            <SettingsHelpHint
+              topic="File browser name colors"
+              description="Muted tints on folder and file names help you scan the list (similar to terminal directory colors). This is for orientation only, not a trust or security indicator."
+            />
+          </div>
+          <p className="settings-card-lead">Optional tints for scanning the list.</p>
         </header>
         <div className="host-form-grid">
           <label className="field field-span-2 checkbox-field">

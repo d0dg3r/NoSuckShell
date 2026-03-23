@@ -1,18 +1,18 @@
 import type { AppSettingsTab, IdentityStoreSubTab } from "./app-settings-types";
 
-/** Order: look & workspace & quick connect → views → identities → advanced SSH → data safety → meta. */
+/** Order: work-first (hosts, identity, integrations) → data safety → layout/input → look & feel → meta. */
 export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
-  { id: "appearance", label: "Appearance" },
+  { id: "hosts", label: "Hosts" },
+  { id: "store", label: "Identity Store" },
+  { id: "views", label: "Views" },
+  { id: "ssh", label: "SSH" },
+  { id: "proxmux", label: "PROXMUX" },
+  { id: "plugins", label: "Plugins & license" },
+  { id: "data", label: "Data & Backup" },
   { id: "layout", label: "Layout & Navigation" },
   { id: "keyboard", label: "Keyboard" },
   { id: "files", label: "Files & export" },
-  { id: "views", label: "Views" },
-  { id: "hosts", label: "Hosts" },
-  { id: "store", label: "Identity Store" },
-  { id: "ssh", label: "SSH" },
-  { id: "data", label: "Data & Backup" },
-  { id: "plugins", label: "Plugins & license" },
-  { id: "proxmux", label: "PROXMUX" },
+  { id: "appearance", label: "Appearance" },
   { id: "help", label: "Help" },
   { id: "about", label: "About" },
 ];

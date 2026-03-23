@@ -1483,11 +1483,6 @@ body,
   padding-bottom: 6px;
 }
 
-.app-settings-content .app-settings-hosts-meta {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid rgba(150, 170, 161, 0.14);
-}
 
 .app-settings-content .app-settings-hosts-tab .host-form-settings-root {
   border: 1px solid rgba(150, 170, 161, 0.14);
@@ -1507,6 +1502,84 @@ body,
   border-top: 1px solid rgba(150, 170, 161, 0.1);
   margin-top: var(--space-2);
   padding-top: var(--space-3);
+}
+
+.app-settings-content .app-settings-host-pick-field {
+  margin-bottom: var(--space-3);
+  justify-items: start;
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-card-fields > .field {
+  flex: 0 1 auto;
+  min-width: min(100%, 11rem);
+  max-width: 100%;
+  justify-items: start;
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-settings-row {
+  flex: 1 1 100%;
+  min-width: min(100%, 100%);
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-field--full {
+  flex: 1 1 100%;
+  min-width: min(100%, 100%);
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-proxy-command-input {
+  width: min(100%, 42rem);
+  max-width: 100%;
+}
+
+.app-settings-content .app-settings-hosts-tab .host-form-settings-root--settings-layout .host-form-port-input {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 100%;
+}
+
+.app-settings-content .app-settings-hosts-meta {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid rgba(150, 170, 161, 0.14);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  align-items: flex-end;
+}
+
+.app-settings-content .app-settings-hosts-meta > .field {
+  flex: 0 1 auto;
+  min-width: min(100%, 12rem);
+  max-width: 100%;
+  justify-items: start;
+}
+
+.app-settings-content .app-settings-hosts-meta > .field.checkbox-field {
+  flex: 1 1 100%;
+  min-width: 100%;
+  align-items: center;
+}
+
+.license-token-field {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  width: 100%;
+}
+
+.license-token-input {
+  width: min(100%, 42rem);
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-sm);
+  box-sizing: border-box;
 }
 
 .host-slide-menu .host-form-grid {
@@ -4315,7 +4388,7 @@ body,
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 2px 0;
+  gap: 6px 4px;
   margin-bottom: var(--space-3);
   border-bottom: 1px solid rgba(150, 170, 161, 0.22);
   box-sizing: border-box;
@@ -4437,6 +4510,87 @@ body,
   max-width: none;
 }
 
+/* App settings main panel: adaptive grids + controls that fill each cell (dock + window). */
+.app-settings-content.app-settings-panel-body .settings-stack {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 900px) {
+  .app-settings-content.app-settings-panel-body .settings-stack:has(> .settings-card:nth-child(2)):not(:has(> .app-settings-subtabs)) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  }
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid > .field-span-2 {
+  grid-column: 1 / -1;
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid > .settings-form-row.field-span-2 {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid select.input,
+.app-settings-content.app-settings-panel-body .host-form-grid select.density-profile-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid > .field:not(.checkbox-field) {
+  justify-items: stretch;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid > .field:not(.checkbox-field) > .input:not(textarea):not(.ssh-config-textarea):not([type="range"]):not([type="number"]) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .host-form-grid .field input.input[type="number"] {
+  width: auto;
+  max-width: 100%;
+  min-width: 5.25rem;
+}
+
+.app-settings-content.app-settings-panel-body .settings-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.app-settings-content.app-settings-panel-body .settings-form-row > .field {
+  flex: 1 1 min(100%, 18rem);
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .settings-form-row > .field:not(.checkbox-field) > .input:not(textarea):not(.ssh-config-textarea) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .settings-form-row > .field:not(.checkbox-field) > select.input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body select.input.settings-control-intrinsic {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .app-settings-content .view-manager-panel .filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -4488,13 +4642,274 @@ body,
 }
 
 .backup-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
+}
+
+.app-settings-panel-body .backup-panel-actions-row {
+  align-items: flex-end;
+  width: 100%;
+}
+
+.app-settings-panel-body .backup-panel-actions-row .btn-settings-commit {
+  flex: 0 0 auto;
+}
+
+/* Main App settings panel: direct fields on a card (no inner grid) fill the card width. */
+.app-settings-content.app-settings-panel-body .settings-stack .settings-card > .field:not(.checkbox-field) {
+  justify-items: stretch;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .settings-stack .settings-card > .field:not(.checkbox-field) > .input:not(textarea):not(.ssh-config-textarea) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .settings-stack .settings-card > .field:not(.checkbox-field) > select.input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-panel-body .settings-path-input {
+  width: min(100%, 42rem) !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.app-settings-panel-body .settings-password-input {
+  min-width: min(100%, 14rem) !important;
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.app-settings-panel-body .settings-numeric-input {
+  width: 5.5rem !important;
+  min-width: 5.5rem !important;
+  max-width: 100%;
+}
+
+.app-settings-panel-body .settings-compact-text {
+  width: max-content;
+  max-width: 100%;
+  min-width: min(100%, 10rem);
+}
+
+.app-settings-panel-body .settings-ssh-config-editor {
+  width: min(100%, 56rem);
+  max-width: 100%;
+  min-height: 12rem;
+}
+
+.app-settings-panel-body .settings-ssh-hoststar-grid {
+  align-items: start;
+}
+
+.app-settings-panel-body .settings-status-message {
+  color: rgba(184, 204, 194, 0.88);
+}
+
+.app-settings-panel-body .settings-ssh-dir-kv .ssh-dir-kv-line {
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.app-settings-panel-body .identity-store-section .field:not(.checkbox-field) {
+  justify-items: stretch;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .identity-store-section .field > .input:not(textarea),
+.app-settings-content.app-settings-panel-body .identity-store-section .field > select.input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-settings-panel-body .plugin-store-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.app-settings-panel-body .plugin-installed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.app-settings-panel-body .plugin-installed-row-meta {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel .settings-field {
+  justify-items: stretch;
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel .settings-field > .input:not(textarea):not([type="range"]),
+.app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel .settings-field > select.input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel .settings-field--inline > .input:not(textarea):not([type="checkbox"]) {
+  width: auto;
+  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app-settings-panel-body .proxmux-settings-tab-panel .settings-field-span-2 > .input,
+.app-settings-panel-body .proxmux-settings-tab-panel .settings-field-span-2 > textarea {
+  width: min(100%, 42rem);
+  max-width: 100%;
+}
+
+/* Identity Store: inline add rows and list rows (global .input is width 100%) */
+.app-settings-panel-body .identity-store-section .store-inline {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.app-settings-panel-body .identity-store-section .store-inline > .input:not(textarea) {
+  width: auto !important;
+  max-width: min(100%, 22rem);
+  min-width: min(100%, 10rem);
+  flex: 0 1 auto;
+  box-sizing: border-box;
+}
+
+.app-settings-panel-body .identity-store-section .store-inline > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.app-settings-panel-body .identity-store-section .store-list-row > .input {
+  width: auto !important;
+  max-width: min(100%, 22rem);
+  min-width: min(100%, 8rem);
+  flex: 0 1 auto;
+  box-sizing: border-box;
+}
+
+.app-settings-panel-body .identity-store-section .store-list-row.identity-store-row {
+  align-items: center;
+}
+
+.app-settings-panel-body .identity-store-section .store-key-grid textarea.input.store-textarea {
+  width: min(100%, 42rem) !important;
+  max-width: 100%;
+  min-height: 6rem;
+  max-height: 18rem;
+  box-sizing: border-box;
+}
+
+/* Appearance: range sliders should not stretch to full grid cell width */
+.app-settings-panel-body .host-form-grid .field > input[type="range"] {
+  width: auto;
+  max-width: min(100%, 15rem);
+  min-width: 10rem;
+  box-sizing: border-box;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .settings-stack {
   display: grid;
   gap: var(--space-4);
+}
+
+.settings-card-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.settings-card-lead {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  color: rgba(184, 204, 194, 0.78);
+  max-width: 62ch;
+}
+
+.settings-help-hint-wrap {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.settings-help-hint {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(130, 184, 152, 0.42);
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(212, 226, 219, 0.92);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.settings-help-hint:hover,
+.settings-help-hint:focus-visible {
+  outline: none;
+  border-color: rgba(130, 184, 152, 0.78);
+  background: rgba(130, 184, 152, 0.12);
+  color: #f2faf5;
+}
+
+.field-label-inline-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  width: 100%;
+}
+
+.settings-form-row > .field {
+  margin: 0;
+}
+
+.settings-control-intrinsic.input,
+.app-settings-content select.input.settings-control-intrinsic {
+  width: max-content;
+  max-width: 100%;
+  min-width: min(100%, 10.5rem);
+  box-sizing: border-box;
 }
 
 /* Flat panels (same language as custom Views editor) */

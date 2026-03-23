@@ -6,6 +6,7 @@ import type {
   ViewProfile,
   ViewSortField,
 } from "../../../types";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsViewsTabProps = {
   sortedViewProfiles: ViewProfile[];
@@ -38,7 +39,7 @@ export function AppSettingsViewsTab({
         <div className="view-manager-panel-head">
           <span className="field-label">Saved custom views</span>
           {sortedViewProfiles.length === 0 ? (
-            <p className="muted-copy view-manager-empty">No custom views yet.</p>
+            <p className="settings-card-lead view-manager-empty">No custom views yet.</p>
           ) : (
             <div className="app-settings-subtabs view-manager-view-tabs" role="tablist" aria-label="Custom views">
               {sortedViewProfiles.map((profile) => (
@@ -271,8 +272,12 @@ export function AppSettingsViewsTab({
           </div>
         </div>
         <div className="view-manager-after">
-          <p className="muted-copy view-manager-footnote">
-            Built-in views are fixed (`All`, `Favorites`). Custom views are persisted and shown as sidebar tabs.
+          <p className="settings-card-lead view-manager-footnote">
+            Built-in views are fixed; custom views become sidebar tabs.{" "}
+            <SettingsHelpHint
+              topic="Custom views"
+              description="Built-in views are fixed (All, Favorites). Custom views are persisted and shown as sidebar tabs."
+            />
           </p>
         </div>
       </section>

@@ -10,6 +10,7 @@ import {
 } from "../../../features/host-form-store-links";
 import type { IdentityStoreSubTab } from "../app-settings-types";
 import type { AppSettingsPanelProps } from "../app-settings-panel-props";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsStoreTabContentProps = Pick<
   AppSettingsPanelProps,
@@ -156,8 +157,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
       <div className="store-panel store-panel--identity">
         {identityStoreSubTab === "overview" && (
           <section className="identity-store-section">
-            <p className="muted-copy">
-              Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as objects.
+            <p className="settings-card-lead">
+              Objects link to hosts; host fields stay compatible.{" "}
+              <SettingsHelpHint
+                topic="Identity Store overview"
+                description="Hybrid store: host fields stay compatible; users, groups, tags, and keys can be linked as objects."
+              />
             </p>
             <label className="field field-span-2">
               <span className="field-label">Master passphrase (Keychain fallback)</span>
@@ -166,7 +171,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 type="password"
                 value={storePassphrase}
                 onChange={(event) => setStorePassphrase(event.target.value)}
-                placeholder="Optional, fuer encrypted keys"
+                placeholder="Optional, for encrypted keys"
               />
             </label>
           </section>
@@ -174,13 +179,22 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
 
         {identityStoreSubTab === "users" && (
           <section className="identity-store-section">
-            <h4>Users</h4>
-            <p className="muted-copy">
-              Import creates store users from each distinct <span className="inline-code">User</span> value on your saved
-              hosts. Keys on the user apply when a host binding does not set its own keys.
-            </p>
+            <div className="settings-card-head-row">
+              <h4>Users</h4>
+              <SettingsHelpHint
+                topic="Store users"
+                description="Import creates store users from each distinct User value on your saved hosts. Keys on the user apply when a host binding does not set its own keys."
+              />
+            </div>
+            <p className="settings-card-lead">Import from hosts; per-user keys when the host has none.</p>
             <label className="field">
-              <span className="field-label">Default login user</span>
+              <span className="field-label field-label-inline-hint">
+                Default login user
+                <SettingsHelpHint
+                  topic="Default login user"
+                  description="Used when a host has no explicit user (SSH config / host entry)."
+                />
+              </span>
               <input
                 className="input"
                 value={metadataStore.defaultUser}
@@ -193,7 +207,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                 }}
                 placeholder="ubuntu"
               />
-              <span className="field-help">Used when a host has no explicit user (SSH config / host entry).</span>
             </label>
             <div className="store-inline">
               <button type="button" className="btn btn-settings-tool" onClick={() => void importStoreUsersFromHosts()}>
@@ -258,7 +271,13 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         />
                       </label>
                       <label className="field">
-                        <span className="field-label">HostName (optional)</span>
+                        <span className="field-label field-label-inline-hint">
+                          HostName (optional)
+                          <SettingsHelpHint
+                            topic="Store user HostName"
+                            description="When this user is linked on a host, overrides the SSH HostName for that session. Leave empty to use the host entry from your config."
+                          />
+                        </span>
                         <input
                           key={`${user.id}-hostName`}
                           className="input"
@@ -271,10 +290,6 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                           }}
                           placeholder="10.0.1.25"
                         />
-                        <span className="field-help">
-                          When this user is linked on a host, overrides the SSH HostName for that session. Leave empty to
-                          use the host entry from your config.
-                        </span>
                       </label>
                       <label className="field">
                         <span className="field-label">Jump shortcut (optional)</span>
@@ -302,7 +317,13 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         </select>
                       </label>
                       <label className="field">
-                        <span className="field-label">ProxyJump (optional)</span>
+                        <span className="field-label field-label-inline-hint">
+                          ProxyJump (optional)
+                          <SettingsHelpHint
+                            topic="Store user ProxyJump"
+                            description="Used when this user is linked on a host and that host's binding has no ProxyJump set. A ProxyJump saved on the host binding for that host still wins. The hop is usually another host alias in your list or a custom ProxyJump string."
+                          />
+                        </span>
                         <input
                           key={`${user.id}-proxyJump-${user.proxyJump}`}
                           className="input"
@@ -315,17 +336,12 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                           }}
                           placeholder="bastion or user@jump"
                         />
-                        <span className="field-help">
-                          Used when this user is linked on a host and that host&apos;s binding has no ProxyJump set. A
-                          ProxyJump saved on the host binding for that host still wins. The hop is usually another host
-                          alias in your list or a custom ProxyJump string.
-                        </span>
                       </label>
                       <div className="field">
                         <span className="field-label">SSH keys (first = primary for sessions)</span>
                         <div className="store-checkbox-grid">
                           {storeKeys.length === 0 ? (
-                            <span className="muted-copy">No keys in store yet.</span>
+                            <span className="settings-card-lead">No keys in store yet.</span>
                           ) : (
                             storeKeys.map((key) => (
                               <label key={key.id} className="store-checkbox-label">
@@ -380,7 +396,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         <span className="field-label">Tags</span>
                         <div className="store-checkbox-grid">
                           {storeTags.length === 0 ? (
-                            <span className="muted-copy">No tags yet.</span>
+                            <span className="settings-card-lead">No tags yet.</span>
                           ) : (
                             storeTags.map((tag) => (
                               <label key={tag.id} className="store-checkbox-label">
@@ -399,7 +415,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                         <span className="field-label">Groups</span>
                         <div className="store-checkbox-grid">
                           {storeGroups.length === 0 ? (
-                            <span className="muted-copy">No groups yet.</span>
+                            <span className="settings-card-lead">No groups yet.</span>
                           ) : (
                             storeGroups.map((group) => (
                               <label key={group.id} className="store-checkbox-label">
@@ -462,7 +478,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Members</span>
                     <div className="store-checkbox-grid">
                       {storeUsers.length === 0 ? (
-                        <span className="muted-copy">No users yet.</span>
+                        <span className="settings-card-lead">No users yet.</span>
                       ) : (
                         storeUsers.map((user) => (
                           <label key={user.id} className="store-checkbox-label">
@@ -484,7 +500,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Tags</span>
                     <div className="store-checkbox-grid">
                       {storeTags.length === 0 ? (
-                        <span className="muted-copy">No tags yet.</span>
+                        <span className="settings-card-lead">No tags yet.</span>
                       ) : (
                         storeTags.map((tag) => (
                           <label key={tag.id} className="store-checkbox-label">
@@ -566,7 +582,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     className="input"
                     value={storePathKeyNameDraft}
                     onChange={(event) => setStorePathKeyNameDraft(event.target.value)}
-                    placeholder="Pfad-Key Name"
+                    placeholder="Path key name"
                   />
                   <input
                     className="input"
@@ -629,7 +645,7 @@ export function AppSettingsStoreTabContent(props: AppSettingsStoreTabContentProp
                     <span className="field-label">Tags</span>
                     <div className="store-checkbox-grid">
                       {storeTags.length === 0 ? (
-                        <span className="muted-copy">No tags yet.</span>
+                        <span className="settings-card-lead">No tags yet.</span>
                       ) : (
                         storeTags.map((tag) => (
                           <label key={tag.id} className="store-checkbox-label">

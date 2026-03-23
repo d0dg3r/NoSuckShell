@@ -12,6 +12,7 @@ import type {
 } from "../../../types";
 import { HostForm } from "../../HostForm";
 import { HostMetadataFields } from "../../HostMetadataFields";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 const normalizeKeyRefs = (refs: HostKeyRef[]): HostKeyRef[] =>
   refs.map((r, i) => ({ ...r, usage: i === 0 ? "primary" : "additional" }));
@@ -96,22 +97,25 @@ export function AppSettingsHostsTab({
   if (hosts.length === 0) {
     return (
       <div className="identity-store-section">
-        <p className="muted-copy">No SSH hosts yet. Add one from the sidebar or Quick add.</p>
+        <p className="settings-card-lead">No SSH hosts yet. Add one from the sidebar or Quick add.</p>
       </div>
     );
   }
 
   return (
     <div className="identity-store-section app-settings-hosts-tab">
-      <h3 className="settings-card-title">SSH host</h3>
-      <p className="muted-copy">
-        Connection, access, proxy, identity store bindings, tags, host-key policy, jump host, and favorite.
-        Changes apply after you save.
-      </p>
-      <div className="field" style={{ marginBottom: "var(--space-3)" }}>
+      <div className="settings-card-head-row">
+        <h3 className="settings-card-title">SSH host</h3>
+        <SettingsHelpHint
+          topic="SSH host settings"
+          description="Connection, access, proxy, identity store bindings, tags, host-key policy, jump host, and favorite. Changes apply after you save."
+        />
+      </div>
+      <p className="settings-card-lead">Edit the selected host; save to apply.</p>
+      <div className="field app-settings-host-pick-field">
         <span className="field-label">Host</span>
         <select
-          className="input density-profile-select"
+          className="input density-profile-select settings-control-intrinsic"
           aria-label="Select host to edit"
           value={selectedHostAlias}
           onChange={(event) => onSelectHostAlias(event.target.value)}
@@ -136,23 +140,27 @@ export function AppSettingsHostsTab({
             hostAliasForJumpExclude={draftHost.host.trim()}
             hostMetadataByHost={hostMetadataByHost}
             copyDensity="verbose"
+            settingsLayout
           />
 
           <div className="settings-stack host-form-settings-stack" style={{ marginTop: "var(--space-3)" }}>
             <section className="settings-card host-form-settings-card">
               <div className="settings-card-head">
-                <h3>Identity Store bindings</h3>
-                <p className="muted-copy">
-                  Per-host overrides: SSH keys (first selected = primary), groups, and tags from the Identity Store.
-                  If no keys are set here, the linked user&apos;s keys apply when a user is selected.
-                </p>
+                <div className="settings-card-head-row">
+                  <h3>Identity Store bindings</h3>
+                  <SettingsHelpHint
+                    topic="Identity Store bindings"
+                    description="Per-host overrides: SSH keys (first selected = primary), groups, and tags from the Identity Store. If no keys are set here, the linked user's keys apply when a user is selected."
+                  />
+                </div>
+                <p className="settings-card-lead">Keys, groups, and tags for this host.</p>
               </div>
               <div className="host-form-card-fields">
                 <div className="field">
                   <span className="field-label">SSH keys for this host</span>
                   <div className="store-checkbox-grid">
                     {storeKeys.length === 0 ? (
-                      <span className="muted-copy">No keys in store.</span>
+                      <span className="settings-card-lead">No keys in store.</span>
                     ) : (
                       storeKeys.map((key) => (
                         <label key={key.id} className="store-checkbox-label">
@@ -171,7 +179,7 @@ export function AppSettingsHostsTab({
                   <span className="field-label">Groups</span>
                   <div className="store-checkbox-grid">
                     {storeGroups.length === 0 ? (
-                      <span className="muted-copy">No groups.</span>
+                      <span className="settings-card-lead">No groups.</span>
                     ) : (
                       storeGroups.map((group) => (
                         <label key={group.id} className="store-checkbox-label">
@@ -190,7 +198,7 @@ export function AppSettingsHostsTab({
                   <span className="field-label">Store tags</span>
                   <div className="store-checkbox-grid">
                     {storeTags.length === 0 ? (
-                      <span className="muted-copy">No tags in store.</span>
+                      <span className="settings-card-lead">No tags in store.</span>
                     ) : (
                       storeTags.map((tag) => (
                         <label key={tag.id} className="store-checkbox-label">
@@ -219,6 +227,7 @@ export function AppSettingsHostsTab({
             toggleFavoriteForHost={toggleFavoriteForHost}
             toggleJumpHostForHost={toggleJumpHostForHost}
             copyDensity="verbose"
+            settingsLayout
             className="host-meta-edit app-settings-hosts-meta"
           />
           <div className="action-row" style={{ marginTop: "var(--space-4)" }}>

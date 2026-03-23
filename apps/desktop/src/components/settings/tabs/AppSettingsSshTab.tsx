@@ -2,6 +2,7 @@ import { useState } from "react";
 import { mergeManagedHostStarBlock } from "../../../features/ssh-config-managed-block";
 import type { SshDirInfo } from "../../../types";
 import type React from "react";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsSshTabProps = {
   setError: (message: string) => void;
@@ -61,33 +62,34 @@ export function AppSettingsSshTab({
     <div className="settings-stack">
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>SSH directory</h3>
-          <p className="muted-copy">
-            Default is <code className="inline-code">~/.ssh</code> (on Windows typically{" "}
-            <code className="inline-code">%USERPROFILE%\.ssh</code>). The identity store,{" "}
-            <code className="inline-code">config</code>, and related files live under the active folder. Override must be
-            an <strong>absolute</strong> path. After changing it, hosts and store reload from the new location.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>SSH directory</h3>
+            <SettingsHelpHint
+              topic="SSH directory"
+              description="Default is ~/.ssh (on Windows typically %USERPROFILE%\\.ssh). The identity store, config, and related files live under the active folder. Override must be an absolute path. After changing it, hosts and store reload from the new location."
+            />
+          </div>
+          <p className="settings-card-lead">Active folder for config and keys; override must be absolute.</p>
         </header>
         {sshDirInfo && (
-          <div className="ssh-dir-info-block">
-            <p className="muted-copy">
+          <div className="ssh-dir-info-block settings-ssh-dir-kv">
+            <p className="settings-card-lead ssh-dir-kv-line">
               <strong>Detected default:</strong> <code className="inline-code">{sshDirInfo.defaultPath}</code>
             </p>
-            <p className="muted-copy">
+            <p className="settings-card-lead ssh-dir-kv-line">
               <strong>Active:</strong> <code className="inline-code">{sshDirInfo.effectivePath}</code>
             </p>
             {sshDirInfo.userProfile ? (
-              <p className="muted-copy">
+              <p className="settings-card-lead ssh-dir-kv-line">
                 <strong>USERPROFILE:</strong> <code className="inline-code">{sshDirInfo.userProfile}</code>
               </p>
             ) : null}
           </div>
         )}
-        <label className="field field-span-2">
+        <label className="field">
           <span className="field-label">Custom SSH directory (optional)</span>
           <input
-            className="input"
+            className="input settings-path-input"
             value={sshDirOverrideDraft}
             onChange={(event) => setSshDirOverrideDraft(event.target.value)}
             placeholder={sshDirInfo?.defaultPath ?? "Absolute path to .ssh folder"}
@@ -106,15 +108,17 @@ export function AppSettingsSshTab({
       </section>
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>SSH config</h3>
-          <p className="muted-copy">
-            Full <code className="inline-code">config</code> inside the active SSH directory (see above). Content reloads
-            when you open this tab. Broken syntax can prevent the host list from loading until you fix the file or
-            restore a backup.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>SSH config</h3>
+            <SettingsHelpHint
+              topic="SSH config"
+              description="Full config inside the active SSH directory. Content reloads when you open this tab. Broken syntax can prevent the host list from loading until you fix the file or restore a backup."
+            />
+          </div>
+          <p className="settings-card-lead">Full config file for the active SSH directory.</p>
         </header>
         <textarea
-          className="input ssh-config-textarea"
+          className="input ssh-config-textarea settings-ssh-config-editor"
           value={sshConfigRaw}
           onChange={(event) => setSshConfigRaw(event.target.value)}
           spellCheck={false}
@@ -129,19 +133,20 @@ export function AppSettingsSshTab({
       </section>
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Global defaults (Host *)</h3>
-          <p className="muted-copy">
-            Inserts or replaces only the block between{" "}
-            <code className="inline-code">BEGIN_NOSUCKSHELL_HOST_STAR</code> /{" "}
-            <code className="inline-code">END_NOSUCKSHELL_HOST_STAR</code>. The block is placed at the top of the buffer
-            if missing (later stanzas can override). Use Apply, then Save SSH config, to write to disk.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>Global defaults (Host *)</h3>
+            <SettingsHelpHint
+              topic="Global SSH defaults (Host *)"
+              description="Inserts or replaces only the block between BEGIN_NOSUCKSHELL_HOST_STAR / END_NOSUCKSHELL_HOST_STAR. The block is placed at the top of the buffer if missing (later stanzas can override). Use Apply, then Save SSH config, to write to disk."
+            />
+          </div>
+          <p className="settings-card-lead">Managed Host * block merged into your config buffer.</p>
         </header>
-        <div className="host-form-grid">
+        <div className="host-form-grid settings-ssh-hoststar-grid">
           <label className="field">
             <span className="field-label">ServerAliveInterval</span>
             <input
-              className="input"
+              className="input settings-numeric-input"
               value={sshHostStarServerAliveInterval}
               onChange={(event) => setSshHostStarServerAliveInterval(event.target.value)}
               placeholder="60"
@@ -151,7 +156,7 @@ export function AppSettingsSshTab({
           <label className="field">
             <span className="field-label">ServerAliveCountMax</span>
             <input
-              className="input"
+              className="input settings-numeric-input"
               value={sshHostStarServerAliveCountMax}
               onChange={(event) => setSshHostStarServerAliveCountMax(event.target.value)}
               placeholder="3"
@@ -161,7 +166,7 @@ export function AppSettingsSshTab({
           <label className="field">
             <span className="field-label">TCPKeepAlive</span>
             <select
-              className="input density-profile-select"
+              className="input density-profile-select settings-control-intrinsic"
               value={sshHostStarTcpKeepAlive}
               onChange={(event) => setSshHostStarTcpKeepAlive(event.target.value as "" | "yes" | "no")}
             >
@@ -173,7 +178,7 @@ export function AppSettingsSshTab({
           <label className="field">
             <span className="field-label">IdentityFile</span>
             <input
-              className="input"
+              className="input settings-path-input"
               value={sshHostStarIdentityFile}
               onChange={(event) => setSshHostStarIdentityFile(event.target.value)}
               placeholder="~/.ssh/id_ed25519"
@@ -182,7 +187,7 @@ export function AppSettingsSshTab({
           <label className="field">
             <span className="field-label">User</span>
             <input
-              className="input"
+              className="input settings-compact-text"
               value={sshHostStarUser}
               onChange={(event) => setSshHostStarUser(event.target.value)}
               placeholder="default user"

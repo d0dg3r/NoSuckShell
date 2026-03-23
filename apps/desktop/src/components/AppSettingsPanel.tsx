@@ -258,7 +258,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
         {activeAppSettingsTab === "store" && (
           <IdentityStoreSubtabs identityStoreSubTab={identityStoreSubTab} setIdentityStoreSubTab={setIdentityStoreSubTab} />
         )}
-        <div className="app-settings-content">
+        <div className="app-settings-content app-settings-panel-body">
           {activeAppSettingsTab === "appearance" && (
             <AppSettingsAppearanceTab
               densityProfile={densityProfile}

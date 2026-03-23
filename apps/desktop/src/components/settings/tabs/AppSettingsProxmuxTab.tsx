@@ -3,6 +3,7 @@ import { licenseStatus, listPlugins, pluginInvoke, setPluginEnabled } from "../.
 import type { LicenseStatus, PluginListEntry } from "../../../types";
 import { PROXMUX_PLUGIN_ID } from "../../../features/builtin-plugin-ids";
 import { PLUGIN_STORE_CATALOG, storeItemAccessGranted } from "../../../features/plugin-store-catalog";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 const PROXMUX_ENTITLEMENT = "dev.nosuckshell.addon.proxmox";
 
@@ -449,11 +450,14 @@ export function AppSettingsProxmuxTab({
       <div className="settings-stack">
         <section className="settings-card">
           <header className="settings-card-head">
-            <h3>PROXMUX</h3>
-            <p className="muted-copy">
-              Browse Proxmox VE nodes, VMs, and LXCs via the official API. This add-on requires a license entitlement. Open{" "}
-              <strong>Plugins &amp; license</strong> to activate a token, then return here.
-            </p>
+            <div className="settings-card-head-row">
+              <h3>PROXMUX</h3>
+              <SettingsHelpHint
+                topic="PROXMUX license"
+                description="Browse Proxmox VE nodes, VMs, and LXCs via the official API. This add-on requires a license entitlement. Open Plugins & license to activate a token, then return here."
+              />
+            </div>
+            <p className="settings-card-lead">Requires a Proxmox entitlement in Plugins &amp; license.</p>
           </header>
           {loadError ? <p className="error-text">{loadError}</p> : null}
         </section>
@@ -466,8 +470,14 @@ export function AppSettingsProxmuxTab({
       <div className="settings-stack">
         <section className="settings-card">
           <header className="settings-card-head">
-            <h3>PROXMUX</h3>
-            <p className="muted-copy">Your license is missing the Proxmox entitlement. Activate a token that includes it under Plugins &amp; license.</p>
+            <div className="settings-card-head-row">
+              <h3>PROXMUX</h3>
+              <SettingsHelpHint
+                topic="Proxmox entitlement"
+                description="Your license is missing the Proxmox entitlement. Activate a token that includes it under Plugins & license."
+              />
+            </div>
+            <p className="settings-card-lead">Missing Proxmox entitlement on this license.</p>
           </header>
         </section>
       </div>
@@ -479,15 +489,21 @@ export function AppSettingsProxmuxTab({
       <div className="settings-stack">
         <section className="settings-card">
           <header className="settings-card-head">
-            <h3>PROXMUX</h3>
-            <p className="muted-copy">Enable the built-in PROXMUX plugin to use Proxmox inventory.</p>
+            <div className="settings-card-head-row">
+              <h3>PROXMUX</h3>
+              <SettingsHelpHint
+                topic="Enable PROXMUX"
+                description="Enable the built-in PROXMUX plugin to use Proxmox inventory."
+              />
+            </div>
+            <p className="settings-card-lead">Turn on the plugin to use inventory and consoles.</p>
           </header>
           <div className="settings-actions-row">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void onEnablePlugin()}>
               Enable PROXMUX plugin
             </button>
           </div>
-          {message ? <p className="muted-copy">{message}</p> : null}
+          {message ? <p className="settings-card-lead">{message}</p> : null}
         </section>
       </div>
     );
@@ -497,11 +513,14 @@ export function AppSettingsProxmuxTab({
     <div className="settings-stack">
       <section className="settings-card proxmux-settings-intro-card">
         <header className="settings-card-head">
-          <h3>PROXMUX</h3>
-          <p className="muted-copy">
-            Proxmox VE inventory and consoles. Use the tabs below to manage <strong>clusters</strong>, <strong>network / HTTP proxy</strong>, and{" "}
-            <strong>tools</strong>.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>PROXMUX</h3>
+            <SettingsHelpHint
+              topic="PROXMUX"
+              description="Proxmox VE inventory and consoles. Use the tabs below to manage clusters, network / HTTP proxy, and tools."
+            />
+          </div>
+          <p className="settings-card-lead">Clusters, network proxy, and tools.</p>
         </header>
         {loadError ? <p className="error-text">{loadError}</p> : null}
       </section>
@@ -526,20 +545,23 @@ export function AppSettingsProxmuxTab({
           <>
             <section className="settings-card">
               <header className="settings-card-head">
-                <h4>Connections</h4>
-                <p className="muted-copy">
-                  Sign in with username/password (<code className="inline-code">user@realm</code>) and optional TOTP. Use <strong>Allow insecure TLS</strong>{" "}
-                  only for homelab hosts with self-signed certificates.
-                </p>
+                <div className="settings-card-head-row">
+                  <h4>Connections</h4>
+                  <SettingsHelpHint
+                    topic="Proxmox connections"
+                    description="Sign in with username/password (user@realm) and optional TOTP. Use Allow insecure TLS only for homelab hosts with self-signed certificates."
+                  />
+                </div>
+                <p className="settings-card-lead">API login and TLS options.</p>
                 {state?.usesPlainSecrets ? (
-                  <p className="muted-copy">
+                  <p className="settings-card-lead">
                     Secrets are stored in <code className="inline-code">nosuckshell.proxmux.v1.json</code> under your SSH directory. Set{" "}
                     <code className="inline-code">NOSUCKSHELL_MASTER_KEY</code> or create <code className="inline-code">nosuckshell.master.key</code> there to
                     encrypt passwords like other app credentials.
                   </p>
                 ) : null}
                 {(state?.legacyTokenClusters ?? 0) > 0 ? (
-                  <p className="muted-copy">
+                  <p className="settings-card-lead">
                     {state?.legacyTokenClusters} legacy token-based cluster{state?.legacyTokenClusters === 1 ? "" : "s"} detected. Edit and save each one with a
                     password to finish the direct-login migration.
                   </p>
@@ -549,8 +571,14 @@ export function AppSettingsProxmuxTab({
 
             <section className="settings-card">
               <header className="settings-card-head">
-                <h4>Saved clusters</h4>
-                <p className="muted-copy">Set a cluster active for the sidebar; edit to change credentials or proxy.</p>
+                <div className="settings-card-head-row">
+                  <h4>Saved clusters</h4>
+                  <SettingsHelpHint
+                    topic="Saved clusters"
+                    description="Set a cluster active for the sidebar; edit to change credentials or proxy."
+                  />
+                </div>
+                <p className="settings-card-lead">Pick active cluster; edit credentials or proxy.</p>
               </header>
               {state?.clusters?.length ? (
                 <ul className="proxmux-cluster-list">
@@ -558,11 +586,11 @@ export function AppSettingsProxmuxTab({
                     <li key={c.id} className="proxmux-cluster-row">
                       <div>
                         <strong>{c.name}</strong>{" "}
-                        <span className="muted-copy">
+                        <span className="settings-card-lead">
                           <code className="inline-code">{c.id}</code>
                         </span>
-                        <div className="muted-copy">{c.proxmoxUrl}</div>
-                        <div className="muted-copy">Proxy: {clusterProxyLabel(c.proxyId, state?.proxyProfiles ?? [])}</div>
+                        <div className="settings-card-lead">{c.proxmoxUrl}</div>
+                        <div className="settings-card-lead">Proxy: {clusterProxyLabel(c.proxyId, state?.proxyProfiles ?? [])}</div>
                         {c.requiresReauth ? <span className="proxmux-badge-insecure">Re-auth required</span> : null}
                         {c.allowInsecureTls ? <span className="proxmux-badge-insecure">Insecure TLS</span> : null}
                       </div>
@@ -584,7 +612,7 @@ export function AppSettingsProxmuxTab({
                   ))}
                 </ul>
               ) : (
-                <p className="muted-copy">No clusters yet. Add your first cluster in the form below.</p>
+                <p className="settings-card-lead">No clusters yet. Add your first cluster in the form below.</p>
               )}
             </section>
 
@@ -660,7 +688,13 @@ export function AppSettingsProxmuxTab({
                   <span>Allow insecure TLS (self-signed)</span>
                 </label>
                 <label className="settings-field settings-field-span-2">
-                  <span>HTTP proxy for this cluster</span>
+                  <span className="field-label-inline-hint">
+                    HTTP proxy for this cluster
+                    <SettingsHelpHint
+                      topic="Cluster HTTP proxy"
+                      description="Named profiles are configured on the Network tab. Global default uses the default proxy URL there."
+                    />
+                  </span>
                   <select className="input" value={draftClusterProxy} onChange={(e) => setDraftClusterProxy(e.target.value)} disabled={busy}>
                     <option value="">Global default</option>
                     <option value="direct">Direct (no proxy)</option>
@@ -671,7 +705,6 @@ export function AppSettingsProxmuxTab({
                       </option>
                     ))}
                   </select>
-                  <span className="field-help">Named profiles are configured on the Network tab. Global default uses the default proxy URL there.</span>
                 </label>
               </div>
               <div className="settings-actions-row">
@@ -694,18 +727,26 @@ export function AppSettingsProxmuxTab({
         {proxmuxSubTab === "network" ? (
           <section className="settings-card">
             <header className="settings-card-head">
-              <h4>Network &amp; proxy</h4>
-              <p className="muted-copy">
-                Corporate HTTPS may require a proxy. <strong>Saved Proxmox cluster URLs are merged into the bypass list</strong> so internal hosts (for example{" "}
-                <code className="inline-code">https://px01.lan:8006</code>) are not sent through the proxy. Add extra patterns under No proxy if needed (for example{" "}
-                <code className="inline-code">.lan</code>).
-              </p>
+              <div className="settings-card-head-row">
+                <h4>Network &amp; proxy</h4>
+                <SettingsHelpHint
+                  topic="Network and proxy"
+                  description="Corporate HTTPS may require a proxy. Saved Proxmox cluster URLs are merged into the bypass list so internal hosts (for example https://px01.lan:8006) are not sent through the proxy. Add extra patterns under No proxy if needed (for example .lan)."
+                />
+              </div>
+              <p className="settings-card-lead">Default proxy and bypass list; cluster URLs merge into bypass.</p>
             </header>
 
             <h5 className="proxmux-settings-subheading">Default proxy</h5>
             <div className="settings-form-grid">
               <label className="settings-field settings-field-span-2">
-                <span>HTTP(S) proxy URL</span>
+                <span className="field-label-inline-hint">
+                  HTTP(S) proxy URL
+                  <SettingsHelpHint
+                    topic="HTTP(S) proxy URL"
+                    description="Leave empty for a direct connection. Authentication: include user and password in the URL if required."
+                  />
+                </span>
                 <input
                   className="input"
                   type="url"
@@ -715,10 +756,15 @@ export function AppSettingsProxmuxTab({
                   onChange={(e) => setDraftHttpProxy(e.target.value)}
                   disabled={busy}
                 />
-                <span className="field-help">Leave empty for a direct connection. Authentication: include user and password in the URL if required.</span>
               </label>
               <label className="settings-field settings-field-span-2">
-                <span>No proxy (bypass)</span>
+                <span className="field-label-inline-hint">
+                  No proxy (bypass)
+                  <SettingsHelpHint
+                    topic="No proxy bypass list"
+                    description="Optional extra bypass list (comma-separated). Cluster hosts from saved URLs are merged in automatically when a proxy is set."
+                  />
+                </span>
                 <input
                   className="input"
                   type="text"
@@ -728,9 +774,6 @@ export function AppSettingsProxmuxTab({
                   onChange={(e) => setDraftNoProxy(e.target.value)}
                   disabled={busy}
                 />
-                <span className="field-help">
-                  Optional extra bypass list (comma-separated). Cluster hosts from saved URLs are merged in automatically when a proxy is set.
-                </span>
               </label>
             </div>
             <div className="settings-actions-row">
@@ -742,9 +785,12 @@ export function AppSettingsProxmuxTab({
             <hr className="proxmux-settings-section-divider" />
 
             <h5 className="proxmux-settings-subheading">Named proxy profiles</h5>
-            <p className="muted-copy">
-              Add corporate proxies and toggle them without deleting. Assign a profile per cluster on the <strong>Clusters</strong> tab, or use{" "}
-              <strong>Global default</strong> (URL above) / <strong>Direct</strong> (no HTTP proxy).
+            <p className="settings-card-lead">
+              Toggle named proxies without deleting.{" "}
+              <SettingsHelpHint
+                topic="Named proxy profiles"
+                description="Add corporate proxies and toggle them without deleting. Assign a profile per cluster on the Clusters tab, or use Global default (URL above) / Direct (no HTTP proxy)."
+              />
             </p>
             <div className="proxmux-settings-proxy-profiles-stack">
               {draftProxyProfiles.map((row, idx) => (
@@ -823,12 +869,14 @@ export function AppSettingsProxmuxTab({
           <>
             <section className="settings-card">
               <header className="settings-card-head">
-                <h4>Web consoles</h4>
-                <p className="muted-copy">
-                  noVNC and Proxmox web shells open in a <strong>split pane</strong> by default (iframe with same-origin sandbox so WebSockets work). If a site
-                  still blocks embedding (for example <code>X-Frame-Options</code>), use <strong>Open in app window</strong> on that pane’s toolbar for a top-level
-                  in-app webview. Turn this off to use your default system browser instead.
-                </p>
+                <div className="settings-card-head-row">
+                  <h4>Web consoles</h4>
+                  <SettingsHelpHint
+                    topic="Web consoles"
+                    description="noVNC and Proxmox web shells open in a split pane by default (iframe with same-origin sandbox so WebSockets work). If a site still blocks embedding (for example X-Frame-Options), use Open in app window on that pane's toolbar for a top-level in-app webview. Turn this off to use your default system browser instead."
+                  />
+                </div>
+                <p className="settings-card-lead">Open consoles in-app or in the system browser.</p>
               </header>
               <label className="settings-field settings-field-span-2 settings-field--inline">
                 <input
@@ -842,8 +890,14 @@ export function AppSettingsProxmuxTab({
 
             <section className="settings-card">
               <header className="settings-card-head">
-                <h4>Inventory</h4>
-                <p className="muted-copy">Fetches <code className="inline-code">/cluster/resources</code> (nodes, QEMU, LXC).</p>
+                <div className="settings-card-head-row">
+                  <h4>Inventory</h4>
+                  <SettingsHelpHint
+                    topic="Proxmox inventory"
+                    description="Fetches /cluster/resources (nodes, QEMU, LXC)."
+                  />
+                </div>
+                <p className="settings-card-lead">Refresh cluster resource list.</p>
               </header>
               <label className="settings-field">
                 <span>Cluster</span>
@@ -898,7 +952,7 @@ export function AppSettingsProxmuxTab({
       </div>
 
       {message ? (
-        <p className="muted-copy">
+        <p className="settings-card-lead">
           <strong>Notice:</strong> {message}
         </p>
       ) : null}

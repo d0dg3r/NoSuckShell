@@ -5,6 +5,7 @@ export type HostFormCopy = {
   proxyLead: string;
   aliasHelp: string;
   hostNameHelp: string;
+  portHelp: string;
   storeUserHelp: string;
   identityHelp: string;
   jumpShortcutHelp: string;
@@ -17,6 +18,7 @@ export const HOST_FORM_COPY_VERBOSE: HostFormCopy = {
   proxyLead: "Jump through another saved host, or enter a custom ProxyJump value.",
   aliasHelp: "Friendly name used in your SSH host list.",
   hostNameHelp: "IP or DNS hostname of the target machine.",
+  portHelp: "TCP port for SSH (default 22).",
   storeUserHelp:
     "When set, the store user’s login name is used for SSH (and can supply defaults elsewhere).",
   identityHelp:
@@ -32,6 +34,7 @@ export const HOST_FORM_COPY_COMPACT: HostFormCopy = {
   proxyLead: "Jump host shortcut or custom ProxyJump / ProxyCommand.",
   aliasHelp: "List name (~/.ssh/config Host).",
   hostNameHelp: "Real address SSH connects to.",
+  portHelp: "SSH port (default 22).",
   storeUserHelp: "Uses store user’s login for SSH.",
   identityHelp: "Store keys; unlock under Settings → Identity Store → SSH keys.",
   jumpShortcutHelp: "Jump-tagged hosts only when any exist; else all aliases.",

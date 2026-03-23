@@ -14,6 +14,7 @@ import {
   formatLicenseExpSummary,
   storeItemAccessGranted,
 } from "../../../features/plugin-store-catalog";
+import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export function AppSettingsPluginsTab() {
   const [plugins, setPlugins] = useState<PluginListEntry[]>([]);
@@ -106,12 +107,14 @@ export function AppSettingsPluginsTab() {
     <div className="settings-stack">
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Plugin store</h3>
-          <p className="muted-copy">
-            NoSuckShell is <strong>open source (MIT)</strong>; only a few built-in add-ons ask for a <strong>license token</strong> in
-            official builds. Add-ons ship inside the app — purchasing on Ko-fi (or your checkout) should give you a token to paste below.
-            Replace the default Ko-fi link in <code className="inline-code">plugin-store-catalog.ts</code> with your shop or membership URL.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>Plugin store</h3>
+            <SettingsHelpHint
+              topic="Plugin store"
+              description="NoSuckShell is open source (MIT); only a few built-in add-ons ask for a license token in official builds. Add-ons ship inside the app — purchasing on Ko-fi (or your checkout) should give you a token to paste below. Replace the default Ko-fi link in plugin-store-catalog.ts with your shop or membership URL."
+            />
+          </div>
+          <p className="settings-card-lead">Built-in add-ons and license unlocks (MIT app; optional tokens).</p>
         </header>
         <ul className="plugin-store-list">
           {PLUGIN_STORE_CATALOG.map((item) => {
@@ -129,24 +132,28 @@ export function AppSettingsPluginsTab() {
                       <img src={item.logoSrc} alt="" className="plugin-store-logo" width={40} height={40} />
                     ) : null}
                     <strong>{item.title}</strong>
+                    <SettingsHelpHint
+                      topic={item.title}
+                      description={
+                        item.trialHint ? `${item.description} ${item.trialHint}` : item.description
+                      }
+                    />
                   </div>
                   <span className={`plugin-store-badge ${badgeClass}`}>{badgeLabel}</span>
                 </div>
-                <p className="muted-copy">{item.description}</p>
-                {item.trialHint ? <p className="muted-copy plugin-store-trial-hint">{item.trialHint}</p> : null}
                 {accessGranted && licenseExpLabel && !item.isFree ? (
-                  <p className="muted-copy">
+                  <p className="settings-card-lead">
                     <strong>License expires:</strong> {licenseExpLabel}
                   </p>
                 ) : null}
                 {!accessGranted && item.requiredEntitlements.length > 0 ? (
-                  <p className="muted-copy">
+                  <p className="settings-card-lead">
                     <strong>Required entitlements:</strong>{" "}
                     <code className="inline-code">{item.requiredEntitlements.join(", ")}</code>
                   </p>
                 ) : null}
                 {pluginRow ? (
-                  <p className="muted-copy">
+                  <p className="settings-card-lead">
                     Installed plugin: <code className="inline-code">{pluginRow.manifest.id}</code>
                     {pluginRow.enabled && pluginRow.entitlementOk ? " (enabled)" : null}
                     {pluginRow.enabled && !pluginRow.entitlementOk ? " (waiting on entitlement — enable after activating license)" : null}
@@ -167,50 +174,50 @@ export function AppSettingsPluginsTab() {
 
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>License</h3>
-          <p className="muted-copy">
-            Optional paid add-ons use an offline-signed token (separate from the MIT license on the source). After a purchase or donation,
-            paste the token issued by the project (for example via a Ko-fi webhook service you operate). See{" "}
-            <a href="https://ko-fi.com/" target="_blank" rel="noreferrer">
-              Ko-fi
-            </a>
-            , <code className="inline-code">docs/licensing.md</code>, <code className="inline-code">docs/terms-of-sale.md</code>, and{" "}
-            <code className="inline-code">docs/license-server-runbook.md</code>.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>License</h3>
+            <SettingsHelpHint
+              topic="License token"
+              description="Optional paid add-ons use an offline-signed token (separate from the MIT license on the source). After a purchase or donation, paste the token issued by the project (for example via a Ko-fi webhook service you operate). See Ko-fi, docs/licensing.md, docs/terms-of-sale.md, and docs/license-server-runbook.md."
+            />
+          </div>
+          <p className="settings-card-lead">Paste an offline-signed token for paid add-ons.</p>
         </header>
         {loadError ? <p className="error-text">{loadError}</p> : null}
         {status && (
-          <div className="muted-copy">
-            <p>
+          <div className="settings-license-status-block">
+            <p className="settings-card-lead">
               <strong>Status:</strong> {status.active ? "Active" : "None"}
             </p>
             {status.active ? (
               <>
-                <p>
+                <p className="settings-card-lead">
                   <strong>License ID:</strong> <code className="inline-code">{status.licenseId}</code>
                 </p>
-                <p>
+                <p className="settings-card-lead">
                   <strong>Entitlements:</strong>{" "}
                   {status.entitlements.length ? status.entitlements.join(", ") : "(none)"}
                 </p>
                 {status.exp != null ? (
-                  <p>
+                  <p className="settings-card-lead">
                     <strong>Expires:</strong> {new Date(status.exp * 1000).toISOString()}
-                    <span className="muted-copy"> — time-limited (trial or subscription)</span>
+                    <span> — time-limited (trial or subscription)</span>
                   </p>
                 ) : null}
               </>
             ) : null}
           </div>
         )}
-        <label className="settings-card-title">
+        <label className="settings-card-title license-token-field">
           <span>License token</span>
-          <textarea
-            className="input ssh-config-textarea"
-            rows={3}
+          <input
+            type="text"
+            className="input license-token-input"
             value={tokenDraft}
             onChange={(e) => setTokenDraft(e.target.value)}
             placeholder="base64url(payload).base64url(signature)"
+            spellCheck={false}
+            autoComplete="off"
             disabled={busy}
           />
         </label>
@@ -226,34 +233,27 @@ export function AppSettingsPluginsTab() {
 
       <section className="settings-card">
         <header className="settings-card-head">
-          <h3>Installed plugins</h3>
-          <p className="muted-copy">
-            Built-in plugins register hooks in the desktop core. Future secret backends (for example Vault or Bitwarden)
-            can ship as additional modules using the same interface.
-          </p>
+          <div className="settings-card-head-row">
+            <h3>Installed plugins</h3>
+            <SettingsHelpHint
+              topic="Installed plugins"
+              description="Built-in plugins register hooks in the desktop core. Future secret backends (for example Vault or Bitwarden) can ship as additional modules using the same interface."
+            />
+          </div>
+          <p className="settings-card-lead">Enable or disable bundled integrations.</p>
         </header>
-        <ul className="muted-copy" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="plugin-installed-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {plugins.map((row) => (
-            <li
-              key={row.manifest.id}
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: "0.75rem",
-                marginBottom: "1rem",
-              }}
-            >
-              <div>
+            <li key={row.manifest.id} className="plugin-installed-row">
+              <div className="plugin-installed-row-meta">
                 <strong>{row.manifest.displayName}</strong>{" "}
-                <span className="muted-copy">
+                <span className="settings-card-lead">
                   <code className="inline-code">{row.manifest.id}</code> v{row.manifest.version}
                 </span>
                 {!row.entitlementOk ? (
-                  <p className="muted-copy">Waiting on license entitlement for this plugin.</p>
+                  <p className="settings-card-lead">Waiting on license entitlement for this plugin.</p>
                 ) : null}
-                <p className="muted-copy">Capabilities: {row.manifest.capabilities.join(", ") || "(none)"}</p>
+                <p className="settings-card-lead">Capabilities: {row.manifest.capabilities.join(", ") || "(none)"}</p>
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", whiteSpace: "nowrap" }}>
                 <input
@@ -273,7 +273,7 @@ export function AppSettingsPluginsTab() {
           </button>
         </div>
         {actionMessage ? (
-          <p className="muted-copy">
+          <p className="settings-card-lead">
             <strong>Last result:</strong> {actionMessage}
           </p>
         ) : null}

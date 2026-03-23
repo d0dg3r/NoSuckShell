@@ -411,7 +411,7 @@ export function App() {
   });
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("appearance");
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("hosts");
   const [keyboardShortcutChords, setKeyboardShortcutChords] = useState<Record<KeyboardShortcutCommandId, KeyChord>>(() =>
     mergeChordMap(parseStoredShortcutMap(window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY))),
   );
