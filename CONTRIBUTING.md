@@ -21,6 +21,12 @@ On Linux, `WEBKIT_DISABLE_DMABUF_RENDERER=1` matches the workflow documented in 
 
 You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:dev`); the root scripts ensure dependencies are present when you use the root commands.
 
+## Style and code
+
+- **Product copy and documentation tone:** [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)
+- **Implementation, tests, and validation:** [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)
+- **IDE and agent index:** [AGENTS.md](AGENTS.md)
+
 ## Marketing screenshots
 
 To regenerate README / store PNGs (Playwright + stubbed Tauri IPC), from the **repository root**:
