@@ -7,7 +7,19 @@ describe("HostListRow", () => {
   it("renders host alias and display user", () => {
     render(<HostListRow row={sampleRow()} {...noopBridge()} />);
     expect(screen.getByText("mybox")).toBeInTheDocument();
-    expect(screen.getByText("deploy")).toBeInTheDocument();
+    expect(screen.getByText(/deploy · mybox\.example · port 22 · disconnected/)).toBeInTheDocument();
+  });
+
+  it("omits hostname in meta when it matches the host alias", () => {
+    render(
+      <HostListRow
+        row={sampleRow({
+          host: { ...sampleHost, host: "same", hostName: "same" },
+        })}
+        {...noopBridge()}
+      />,
+    );
+    expect(screen.getByText(/deploy · port 22 · disconnected/)).toBeInTheDocument();
   });
 
   it("calls toggleFavoriteForHost when favorite is clicked", () => {
@@ -21,15 +33,15 @@ describe("HostListRow", () => {
     expect(toggleFavoriteForHost).toHaveBeenCalledWith("mybox");
   });
 
-  it("calls toggleHostSelection when host item is activated", () => {
-    const toggleHostSelection = vi.fn();
-    const { container } = render(<HostListRow row={sampleRow()} {...noopBridge({ toggleHostSelection })} />);
+  it("calls toggleHostMenu when host row is activated (expand/collapse like PROXMUX)", () => {
+    const toggleHostMenu = vi.fn();
+    const { container } = render(<HostListRow row={sampleRow()} {...noopBridge({ toggleHostMenu })} />);
     const rowEl = container.querySelector(".host-row");
     expect(rowEl).toBeTruthy();
     const hostItem = rowEl!.querySelector<HTMLElement>('[aria-label="SSH host mybox"]');
     expect(hostItem).toBeTruthy();
     fireEvent.click(hostItem!);
-    expect(toggleHostSelection).toHaveBeenCalledWith(sampleHost);
+    expect(toggleHostMenu).toHaveBeenCalledWith(sampleHost);
   });
 
   it("opens slide panel with HostForm when menu is open for this row", () => {

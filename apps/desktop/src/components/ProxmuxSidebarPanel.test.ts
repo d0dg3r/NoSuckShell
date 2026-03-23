@@ -4,6 +4,7 @@ import {
   expansionKeyForRow,
   proxmuxCategory,
   proxmuxPower,
+  resourceIpStat,
 } from "./ProxmuxSidebarPanel";
 
 describe("proxmuxCategory / proxmuxPower", () => {
@@ -51,5 +52,19 @@ describe("expansionKeyForRow / expandableProxmuxRow", () => {
   it("returns null for node row missing node name", () => {
     expect(expansionKeyForRow({ type: "node", status: "online" })).toBe(null);
     expect(expandableProxmuxRow({ type: "node", status: "online" })).toBe(false);
+  });
+});
+
+describe("resourceIpStat", () => {
+  it("shows em dash when missing or blank", () => {
+    expect(resourceIpStat({}, "ip4")).toBe("—");
+    expect(resourceIpStat({ ip4: "" }, "ip4")).toBe("—");
+    expect(resourceIpStat({ ip4: "   " }, "ip4")).toBe("—");
+    expect(resourceIpStat({}, "ip6")).toBe("—");
+  });
+
+  it("returns trimmed address strings", () => {
+    expect(resourceIpStat({ ip4: " 10.0.0.1 " }, "ip4")).toBe("10.0.0.1");
+    expect(resourceIpStat({ ip6: "2001:db8::1" }, "ip6")).toBe("2001:db8::1");
   });
 });

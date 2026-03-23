@@ -191,8 +191,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     toggleJumpHostForHost,
     proxmuxOpenWebConsolesInPane,
     setProxmuxOpenWebConsolesInPane,
-    proxmuxOpenWebConsolesInAppWebviewWindow,
-    setProxmuxOpenWebConsolesInAppWebviewWindow,
   } = props;
 
   const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
@@ -450,8 +448,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             <AppSettingsProxmuxTab
               openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
               setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
-              openWebConsolesInDedicatedAppWindow={proxmuxOpenWebConsolesInAppWebviewWindow}
-              setOpenWebConsolesInDedicatedAppWindow={setProxmuxOpenWebConsolesInAppWebviewWindow}
             />
           )}
           {activeAppSettingsTab === "help" && (

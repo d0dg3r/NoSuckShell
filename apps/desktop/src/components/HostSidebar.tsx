@@ -174,12 +174,14 @@ export function HostSidebar({
               title="Add host, terminal, or connection"
               onClick={onToggleQuickAddMenu}
             >
-              <svg className="brand-quick-add-chevron" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
-              </svg>
-              <span className="brand-quick-add-trigger-label">ADD</span>
-              <svg className="brand-quick-add-chevron" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+              <svg className="brand-quick-add-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  d="M12 5.5v13M5.5 12h13"
+                />
               </svg>
             </button>
           </div>

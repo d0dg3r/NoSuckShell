@@ -582,12 +582,14 @@ body,
 
 .brand-bar {
   --brand-bar-row-min-height: calc(var(--brand-toolbar-cluster-min-height) - 25px);
+  /* Yellow strip frame matches brand yellow (outer border is split: logo row = --border-main, quick-add = yellow). */
+  --brand-quick-add-frame: color-mix(in srgb, var(--brand-yellow-strong) 76%, #2a1f00);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: auto;
   align-items: stretch;
   gap: 0;
-  border: 2px solid var(--border-main);
+  border: none;
   border-radius: var(--radius-panel);
   background: linear-gradient(
     90deg,
@@ -609,14 +611,7 @@ body,
   min-width: 0;
   padding: var(--space-1) var(--space-2);
   box-sizing: border-box;
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-}
-
-.brand-bar:not(.is-quick-add-open) .brand-bar-logo-row {
-  border-bottom: 1px solid rgba(150, 170, 161, 0.32);
-}
-
-.brand-bar.is-quick-add-open .brand-bar-logo-row {
+  border: 2px solid var(--border-main);
   border-bottom: 1px solid rgba(150, 170, 161, 0.32);
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
 }
@@ -756,25 +751,16 @@ body,
   min-width: 0;
 }
 
-.brand-quick-add-trigger-label {
-  font-size: calc(var(--font-lg) + 6px);
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-transform: uppercase;
-  -webkit-font-smoothing: antialiased;
-}
-
-.brand-quick-add-chevron {
+.brand-quick-add-icon {
   flex-shrink: 0;
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 19px;
+  height: 19px;
   transition: transform 0.18s ease;
 }
 
-.brand-quick-add-trigger[aria-expanded="true"] .brand-quick-add-chevron {
-  transform: rotate(180deg);
+.brand-quick-add-trigger[aria-expanded="true"] .brand-quick-add-icon {
+  transform: rotate(45deg);
 }
 
 @media (max-width: 600px) {
@@ -857,9 +843,13 @@ body,
   width: auto;
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border: 0;
-  border-top: 1px solid rgba(150, 170, 161, 0.38);
-  border-radius: 0 0 calc(var(--radius-panel) - 2px) calc(var(--radius-panel) - 2px);
+  border: none;
+  border-left: 2px solid var(--border-main);
+  border-right: 2px solid var(--border-main);
+  border-bottom: 2px solid var(--border-main);
+  /* Seam is the yellow trigger’s bottom border only */
+  border-top: none;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   background: rgba(11, 16, 20, 0.92);
   box-shadow: none;
 }
@@ -1037,31 +1027,6 @@ body,
   align-items: center;
 }
 
-.host-item-shell {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: stretch;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: var(--tone-host-item-base-bg);
-  transition: all 0.18s ease;
-}
-
-.host-item-shell.is-connected {
-  background: rgba(28, 58, 46, 0.82);
-}
-
-.host-item-shell.is-disconnected {
-  background: rgba(44, 50, 53, 0.8);
-}
-
-.host-item-shell.is-active {
-  border-color: rgba(255, 177, 58, 0.72);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 177, 58, 0.35),
-    0 0 0 1px rgba(255, 177, 58, 0.24);
-}
-
 .host-item {
   appearance: none;
   border: 0;
@@ -1091,6 +1056,14 @@ body,
   outline-offset: 2px;
 }
 
+/* SSH host row body: same stack as .proxmux-sidebar-row (title + meta) */
+.host-item.host-sidebar-row-main {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
 .host-item-main {
   font-weight: 700;
 }
@@ -1102,145 +1075,6 @@ body,
   border-radius: 999px;
   padding: 1px var(--space-2);
   color: #cde2d6;
-}
-
-.host-item-shell:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px rgba(150, 170, 161, 0.24);
-}
-
-.host-item-shell.is-connected:hover {
-  background: rgba(34, 70, 54, 0.88);
-}
-
-.host-item-shell.is-disconnected:hover {
-  background: rgba(52, 59, 63, 0.86);
-}
-
-.host-item-shell.is-favorite:not(.is-active) {
-  box-shadow: inset 2px 0 12px -2px color-mix(in srgb, var(--brand-yellow) 14%, transparent);
-}
-
-.host-item-shell.is-favorite.is-active {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 177, 58, 0.35),
-    inset 2px 0 16px -3px color-mix(in srgb, var(--brand-yellow) 12%, transparent),
-    0 0 0 1px rgba(255, 177, 58, 0.24);
-}
-
-.host-item-shell.is-favorite:hover:not(.is-active) {
-  box-shadow:
-    0 0 0 1px rgba(150, 170, 161, 0.24),
-    inset 2px 0 14px -2px color-mix(in srgb, var(--brand-yellow) 17%, transparent);
-}
-
-.host-item-shell.is-favorite.is-active:hover {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 177, 58, 0.35),
-    inset 2px 0 18px -3px color-mix(in srgb, var(--brand-yellow) 15%, transparent),
-    0 0 0 1px rgba(255, 177, 58, 0.24);
-}
-
-.host-settings-inline-btn {
-  width: var(--control-height-md);
-  min-width: var(--control-height-md);
-  height: var(--control-height-md);
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(197, 220, 208, 0.86);
-  font-size: calc(var(--font-lg) + 6px);
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
-}
-
-.host-settings-inline-btn:hover {
-  background: rgba(130, 184, 152, 0.12);
-  color: #dbefe4;
-}
-
-.host-settings-inline-btn:focus-visible {
-  outline: none;
-  background: rgba(130, 184, 152, 0.14);
-  box-shadow: 0 0 0 2px rgba(130, 184, 152, 0.46);
-}
-
-.host-settings-inline-btn.is-open {
-  background: rgba(130, 184, 152, 0.2);
-  color: #ecfff5;
-}
-
-.host-row-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border-left: 1px solid rgba(150, 170, 161, 0.2);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
-  padding-right: 2px;
-}
-
-.host-favorite-btn {
-  width: var(--control-height-md);
-  height: var(--control-height-md);
-  border-radius: var(--radius-control);
-  border: 2px solid rgba(150, 170, 161, 0.58);
-  background: rgba(25, 30, 34, 0.92);
-  color: #8fa79a;
-  font-size: var(--font-lg);
-  cursor: pointer;
-  transition: all 0.16s ease;
-}
-
-.host-favorite-btn-inline {
-  width: var(--control-height-md);
-  min-width: var(--control-height-md);
-  height: var(--control-height-md);
-  align-self: center;
-}
-
-.host-favorite-in-shell {
-  border: 0;
-  border-right: 1px solid rgba(150, 170, 161, 0.2);
-  border-radius: var(--radius-control) 0 0 var(--radius-control);
-  background: transparent;
-  color: rgba(192, 206, 198, 0.75);
-  box-shadow: none;
-}
-
-.host-favorite-in-shell:hover:not(.is-active) {
-  border-color: rgba(150, 170, 161, 0.2);
-  background: rgba(255, 227, 120, 0.08);
-  color: #e8deae;
-}
-
-.host-favorite-in-shell.is-active {
-  border-right: 1px solid rgba(255, 212, 59, 0.1);
-  background: var(--tone-host-favorite-cell-active-bg);
-  color: var(--brand-yellow);
-  box-shadow: none;
-}
-
-.host-favorite-in-shell.is-active:hover {
-  border-right-color: rgba(255, 212, 59, 0.16);
-  background: var(--tone-host-favorite-cell-active-hover-bg);
-  color: var(--brand-yellow-strong);
-}
-
-.host-favorite-btn:hover {
-  border-color: rgba(255, 212, 59, 0.9);
-  color: #ffe48a;
-}
-
-.host-favorite-btn.is-active {
-  border-color: rgba(255, 212, 59, 0.95);
-  color: #ffd43b;
-  box-shadow: 0 0 10px rgba(255, 212, 59, 0.2);
 }
 
 .settings-icon-svg {
@@ -1799,17 +1633,19 @@ body,
   width: 100%;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  min-height: var(--brand-bar-row-min-height);
-  padding: var(--space-2) var(--space-3);
+  gap: 0;
+  /* Height is driven by icon + padding; a min-height below content height has no effect (why %-tweaks looked invisible). */
+  min-height: 0;
+  line-height: 0;
+  padding: 2px var(--space-3);
   box-sizing: border-box;
-  border: none;
-  border-top: 1px solid rgba(38, 32, 8, 0.22);
-  border-radius: 0 0 calc(var(--radius-panel) - 2px) calc(var(--radius-panel) - 2px);
+  border-style: solid;
+  border-width: 1px 2px 2px 2px;
+  border-color: var(--brand-quick-add-frame);
+  border-top-color: rgba(38, 32, 8, 0.22);
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   background: linear-gradient(135deg, var(--brand-yellow), var(--brand-yellow-strong) 76%);
   color: #171103;
-  font-weight: 900;
-  font-size: var(--font-base);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.22),
     0 4px 12px rgba(0, 0, 0, 0.18);
@@ -1817,12 +1653,15 @@ body,
 
 .brand-bar.is-quick-add-open .btn.brand-quick-add-trigger {
   border-radius: 0;
-  border-bottom: 1px solid rgba(38, 32, 8, 0.2);
+  border-bottom-width: 1px;
+  border-bottom-color: color-mix(in srgb, var(--brand-yellow-strong) 88%, #2a1f00);
 }
 
 .btn.brand-quick-add-trigger:hover {
-  border: none;
-  border-top: 1px solid rgba(38, 32, 8, 0.22);
+  border-top-color: rgba(38, 32, 8, 0.22);
+  border-left-color: color-mix(in srgb, var(--brand-quick-add-frame) 88%, #fff 12%);
+  border-right-color: color-mix(in srgb, var(--brand-quick-add-frame) 88%, #fff 12%);
+  border-bottom-color: color-mix(in srgb, var(--brand-quick-add-frame) 88%, #fff 12%);
   background: linear-gradient(135deg, #ffe999, #ffca2f 72%);
   color: #171103;
   box-shadow:
@@ -1831,13 +1670,18 @@ body,
 }
 
 .brand-bar.is-quick-add-open .btn.brand-quick-add-trigger:hover {
-  border-bottom: 1px solid rgba(38, 32, 8, 0.2);
+  border-bottom-width: 1px;
+  border-bottom-color: color-mix(in srgb, var(--brand-yellow-strong) 92%, #fff 8%);
+  border-left-color: color-mix(in srgb, var(--brand-quick-add-frame) 88%, #fff 12%);
+  border-right-color: color-mix(in srgb, var(--brand-quick-add-frame) 88%, #fff 12%);
 }
 
 .btn.brand-quick-add-trigger:focus-visible,
 .btn.brand-quick-add-trigger:active {
-  border: none;
-  border-top: 1px solid rgba(38, 32, 8, 0.22);
+  border-top-color: rgba(38, 32, 8, 0.22);
+  border-left-color: var(--brand-quick-add-frame);
+  border-right-color: var(--brand-quick-add-frame);
+  border-bottom-color: var(--brand-quick-add-frame);
   outline: none;
   color: #171103;
   box-shadow:
@@ -1848,7 +1692,14 @@ body,
 
 .brand-bar.is-quick-add-open .btn.brand-quick-add-trigger:focus-visible,
 .brand-bar.is-quick-add-open .btn.brand-quick-add-trigger:active {
-  border-bottom: 1px solid rgba(38, 32, 8, 0.2);
+  border-bottom-width: 1px;
+  border-bottom-color: color-mix(in srgb, var(--brand-yellow-strong) 88%, #2a1f00);
+  border-left-color: var(--brand-quick-add-frame);
+  border-right-color: var(--brand-quick-add-frame);
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--brand-yellow-strong) 55%, #1a1400),
+    inset 0 0 0 3px rgba(255, 255, 255, 0.42),
+    0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* Opaque .btn fills hide the brand-bar gradient — pin/settings cells stay transparent */
@@ -4615,9 +4466,10 @@ body,
   background: transparent;
 }
 
-.proxmux-guest-slide.host-slide-menu.is-open {
+.proxmux-sidebar-row-wrap--expanded .proxmux-guest-slide.host-slide-menu.is-open {
   max-height: 520px;
   border: none;
+  border-radius: 0 0 5px 5px;
 }
 
 .proxmux-sidebar-guest-detail-head {
@@ -4709,8 +4561,9 @@ body,
   gap: var(--space-2);
 }
 
-/* PROXMUX rows: flat list cells; status = full symmetric border tint (no left-only strip). */
-.proxmux-sidebar-row-wrap {
+/* PROXMUX + SSH host rows: flat list cells; status = full symmetric border tint (no left-only strip). */
+.proxmux-sidebar-row-wrap,
+.host-sidebar-row-wrap {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -4721,27 +4574,46 @@ body,
   background-image: none;
 }
 
-.proxmux-sidebar-row-wrap > * {
+.proxmux-sidebar-row-wrap > *,
+.host-sidebar-row-wrap > * {
   position: relative;
   z-index: 1;
 }
 
-.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"] {
+.proxmux-sidebar-row-wrap[data-proxmux-favorite="true"],
+.host-sidebar-row-wrap[data-host-favorite="true"] {
   background: rgba(22, 21, 18, 0.97);
   border-color: rgba(255, 212, 59, 0.22);
 }
 
-.proxmux-sidebar-row-wrap[data-proxmux-power="up"] {
+.proxmux-sidebar-row-wrap[data-proxmux-power="up"],
+.host-sidebar-row-wrap[data-host-power="up"] {
   border-color: color-mix(in srgb, var(--support-green) 82%, rgba(150, 170, 161, 0.35));
   background: color-mix(in srgb, var(--support-green) 14%, rgba(18, 22, 26, 0.97));
 }
 
-.proxmux-sidebar-row-wrap[data-proxmux-power="down"] {
+.proxmux-sidebar-row-wrap[data-proxmux-power="down"],
+.host-sidebar-row-wrap[data-host-power="down"] {
   border-color: color-mix(in srgb, var(--danger) 48%, rgba(150, 170, 161, 0.16));
 }
 
 .proxmux-sidebar-row-wrap[data-proxmux-power="template"] {
   border-color: rgba(132, 124, 158, 0.42);
+}
+
+/* SSH host list: selected row (same emphasis as former .host-item-shell.is-active) */
+.host-sidebar-row-wrap.host-sidebar-row-wrap--selected {
+  border-color: rgba(255, 177, 58, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 177, 58, 0.35),
+    0 0 0 1px rgba(255, 177, 58, 0.24);
+}
+
+.host-sidebar-row-wrap.host-sidebar-row-wrap--selected[data-host-favorite="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 177, 58, 0.35),
+    inset 2px 0 16px -3px color-mix(in srgb, var(--brand-yellow) 12%, transparent),
+    0 0 0 1px rgba(255, 177, 58, 0.24);
 }
 
 .proxmux-sidebar-item-shell {
@@ -4846,6 +4718,31 @@ body,
   background: color-mix(in srgb, #b49df0 18%, rgba(8, 12, 16, 0.92));
 }
 
+/* SSH row overflow / settings control — pill size aligned with .proxmux-action-btn */
+.host-sidebar-overflow-btn {
+  min-width: 26px;
+  padding: 2px 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1;
+  color: rgba(200, 215, 206, 0.88);
+  border-color: rgba(150, 170, 161, 0.28);
+  background: color-mix(in srgb, var(--text-muted) 10%, rgba(8, 12, 16, 0.88));
+}
+
+.host-sidebar-overflow-btn:hover:not(:disabled) {
+  border-color: rgba(150, 170, 161, 0.45);
+  background: rgba(130, 184, 152, 0.1);
+  color: var(--text-main);
+}
+
+.host-sidebar-overflow-btn.is-open {
+  border-color: color-mix(in srgb, var(--support-green) 55%, transparent);
+  background: color-mix(in srgb, var(--support-green) 18%, rgba(8, 12, 16, 0.9));
+}
+
 .proxmux-sidebar-favorite-spacer {
   width: var(--control-height-md);
   min-width: var(--control-height-md);
@@ -4893,31 +4790,40 @@ body,
   outline-offset: 2px;
 }
 
-.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-item-shell {
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-item-shell,
+.host-sidebar-row-wrap--expanded .proxmux-sidebar-item-shell {
   border-bottom: none;
   border-radius: 0;
 }
 
-/* Expanded guest: single symmetric frame on the wrap */
-.proxmux-sidebar-row-wrap--expanded {
+/* Expanded guest / SSH settings: single symmetric frame on the wrap */
+.proxmux-sidebar-row-wrap--expanded,
+.host-sidebar-row-wrap--expanded {
   border-color: rgba(130, 184, 152, 0.32);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.proxmux-sidebar-row-wrap--expanded .proxmux-guest-slide.host-slide-menu.is-open {
+.host-sidebar-row-wrap--expanded .proxmux-guest-slide.host-slide-menu.is-open {
+  max-height: 1100px;
+  border: none;
   border-radius: 0 0 5px 5px;
+  border-top: 1px solid rgba(150, 170, 161, 0.16);
+  background: rgba(12, 16, 20, 0.42);
 }
 
-.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:hover {
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:hover,
+.host-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:hover {
   background: rgba(8, 12, 16, 0.35);
 }
 
-.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:focus-visible {
+.proxmux-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:focus-visible,
+.host-sidebar-row-wrap--expanded .proxmux-sidebar-row--guest:focus-visible {
   outline-offset: -2px;
 }
 
-.proxmux-sidebar-row-wrap--expanded .host-slide-content {
+.proxmux-sidebar-row-wrap--expanded .host-slide-content,
+.host-sidebar-row-wrap--expanded .host-slide-content {
   border-top: 1px solid rgba(150, 170, 161, 0.16);
   padding: var(--space-3);
   margin: 0;
@@ -5655,7 +5561,8 @@ body,
 }
 
 .app-shell.app-shell--stacked-mobile .btn.brand-quick-add-trigger {
-  min-height: var(--brand-bar-row-min-height);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
 }
 
 .app-shell.app-shell--stacked-mobile .brand-bar:not(.is-quick-add-open) .btn.brand-quick-add-trigger {
@@ -5667,12 +5574,12 @@ body,
   padding: var(--space-4) var(--space-5);
 }
 
-.app-shell.app-shell--stacked-mobile .host-favorite-btn {
+.app-shell.app-shell--stacked-mobile .proxmux-sidebar-favorite-btn {
   min-width: 44px;
   min-height: 44px;
 }
 
-.app-shell.app-shell--stacked-mobile .host-settings-inline-btn {
+.app-shell.app-shell--stacked-mobile .host-sidebar-overflow-btn {
   min-width: 44px;
   min-height: 44px;
 }

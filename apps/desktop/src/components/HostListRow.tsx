@@ -76,7 +76,7 @@ export function HostListRow({
   setError,
   toggleFavoriteForHost,
   toggleJumpHostForHost,
-  toggleHostSelection,
+  toggleHostSelection: _toggleHostSelection,
   connectToHostInNewPane,
   setDragPayload,
   setDraggingKind,
@@ -86,6 +86,14 @@ export function HostListRow({
   saveTagsForActiveHost,
   handleRemoveHostIntent,
 }: HostListRowProps) {
+  const menuOpen = openHostMenuHostAlias === row.host.host;
+  const statusLabel = row.connected ? "connected" : "disconnected";
+  const metaUser = row.displayUser.trim() || "—";
+  const alias = row.host.host.trim();
+  const hostName = row.host.hostName.trim();
+  const showHostName = hostName.length > 0 && hostName !== alias;
+  const metaLine = [metaUser, ...(showHostName ? [hostName] : []), `port ${row.host.port}`, statusLabel].join(" · ");
+
   return (
     <div
       className="host-row"
@@ -100,92 +108,99 @@ export function HostListRow({
       }}
     >
       <div
-        className={`host-item-shell ${row.connected ? "is-connected" : "is-disconnected"} ${
-          activeHost === row.host.host ? "is-active" : ""
-        } ${row.metadata.favorite ? "is-favorite" : ""} ${
-          openHostMenuHostAlias === row.host.host ? "is-menu-open" : ""
+        className={`host-sidebar-row-wrap${menuOpen ? " host-sidebar-row-wrap--expanded" : ""}${
+          activeHost === row.host.host ? " host-sidebar-row-wrap--selected" : ""
         }`}
+        data-host-power={row.connected ? "up" : "down"}
+        data-host-favorite={row.metadata.favorite ? "true" : "false"}
       >
-        <button
-          className={`host-favorite-btn host-favorite-btn-inline host-favorite-in-shell ${
-            row.metadata.favorite ? "is-active" : ""
-          }`}
-          aria-label={`Toggle favorite for ${row.host.host}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void toggleFavoriteForHost(row.host.host);
-          }}
-        >
-          ★
-        </button>
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={`SSH host ${row.host.host}`}
-          className="host-item"
-          onClick={() => {
-            if (suppressHostClickAliasRef.current) {
-              const suppressedAlias = suppressHostClickAliasRef.current;
-              suppressHostClickAliasRef.current = null;
-              if (suppressedAlias === row.host.host) {
-                return;
-              }
-            }
-            toggleHostSelection(row.host);
-          }}
-          onMouseEnter={() => {
-            if (row.connected) {
-              setHoveredHostAlias(row.host.host);
-            }
-          }}
-          onMouseLeave={() => {
-            if (row.connected) {
-              setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
-            }
-          }}
-          onDoubleClick={() => {
-            void connectToHostInNewPane(row.host);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              if (activeHost !== row.host.host) {
-                setActiveHost(row.host.host);
-              }
-              void connectToHostInNewPane(row.host);
-            }
-          }}
-          draggable
-          onDragStart={(event) => {
-            suppressHostClickAliasRef.current = row.host.host;
-            setDragPayload(event, { type: "machine", hostAlias: row.host.host });
-            setDraggingKind("machine");
-            missingDragPayloadLoggedRef.current = false;
-          }}
-          onDragEnd={() => {
-            setDraggingKind(null);
-            setDragOverPaneIndex(null);
-            missingDragPayloadLoggedRef.current = false;
-          }}
-        >
-          <span className="host-item-main">{row.host.host}</span>
-          <span className="host-user-badge">{row.displayUser}</span>
-        </div>
-        <div className="host-row-actions">
+        <div className="proxmux-sidebar-item-shell">
           <button
-            className={`host-settings-inline-btn ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}
-            aria-label={`Open host settings for ${row.host.host}`}
-            title={`Open host settings for ${row.host.host}`}
+            type="button"
+            className={`proxmux-sidebar-favorite-btn${row.metadata.favorite ? " is-active" : ""}`}
+            aria-label={`Toggle favorite for ${row.host.host}`}
             onClick={(event) => {
               event.stopPropagation();
-              toggleHostMenu(row.host);
+              void toggleFavoriteForHost(row.host.host);
             }}
           >
-            ⋮
+            ★
           </button>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={`SSH host ${row.host.host}`}
+            aria-expanded={menuOpen}
+            className={`host-item host-sidebar-row-main proxmux-sidebar-row proxmux-sidebar-row--guest${menuOpen ? " is-expanded" : ""}`}
+            onClick={() => {
+              if (suppressHostClickAliasRef.current) {
+                const suppressedAlias = suppressHostClickAliasRef.current;
+                suppressHostClickAliasRef.current = null;
+                if (suppressedAlias === row.host.host) {
+                  return;
+                }
+              }
+              toggleHostMenu(row.host);
+            }}
+            onMouseEnter={() => {
+              if (row.connected) {
+                setHoveredHostAlias(row.host.host);
+              }
+            }}
+            onMouseLeave={() => {
+              if (row.connected) {
+                setHoveredHostAlias((prev) => (prev === row.host.host ? null : prev));
+              }
+            }}
+            onDoubleClick={() => {
+              void connectToHostInNewPane(row.host);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                if (activeHost !== row.host.host) {
+                  setActiveHost(row.host.host);
+                }
+                void connectToHostInNewPane(row.host);
+              }
+            }}
+            draggable
+            onDragStart={(event) => {
+              suppressHostClickAliasRef.current = row.host.host;
+              setDragPayload(event, { type: "machine", hostAlias: row.host.host });
+              setDraggingKind("machine");
+              missingDragPayloadLoggedRef.current = false;
+            }}
+            onDragEnd={() => {
+              setDraggingKind(null);
+              setDragOverPaneIndex(null);
+              missingDragPayloadLoggedRef.current = false;
+            }}
+          >
+            <span className="proxmux-sidebar-row-main">{row.host.host}</span>
+            <span className="proxmux-sidebar-row-meta">
+              <span className="proxmux-sidebar-row-chevron" aria-hidden="true">
+                {menuOpen ? "▾" : "▸"}
+              </span>
+              {metaLine}
+            </span>
+          </div>
+          <div className="proxmux-sidebar-actions" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`proxmux-action-btn host-sidebar-overflow-btn${menuOpen ? " is-open" : ""}`}
+              aria-label={`Open host settings for ${row.host.host}`}
+              title={`Open host settings for ${row.host.host}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleHostMenu(row.host);
+              }}
+            >
+              ⋮
+            </button>
+          </div>
         </div>
-      </div>
-      <div className={`host-slide-menu ${openHostMenuHostAlias === row.host.host ? "is-open" : ""}`}>
+        <div className={`host-slide-menu proxmux-guest-slide${menuOpen ? " is-open" : ""}`}>
         {openHostMenuHostAlias === row.host.host && (
           <div className="host-slide-content">
             <HostForm
@@ -256,6 +271,7 @@ export function HostListRow({
             {error && <p className="error-text">{error}</p>}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

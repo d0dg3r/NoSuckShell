@@ -210,36 +210,6 @@ fn proxmox_should_trigger_auto_console_nav(url: &tauri::Url) -> bool {
     proxmox_url_has_nonempty_fragment(url)
 }
 
-// #region agent log
-fn debug_proxmox_auto_console_ndjson(
-    hypothesis_id: &str,
-    location: &str,
-    message: &str,
-    data: serde_json::Value,
-) {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let entry = serde_json::json!({
-        "sessionId": "1d8adf",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": ts,
-    });
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/home/joe/Development/devops-geek/NoSuckShell/.cursor/debug-1d8adf.log")
-    {
-        let _ = writeln!(f, "{}", entry);
-    }
-}
-// #endregion
-
 fn proxmox_origin_base_uri(url: &tauri::Url) -> String {
     let mut u = url.clone();
     u.set_path("/");
@@ -258,7 +228,7 @@ fn finish_proxmox_auto_console_navigation<R: tauri::Runtime>(
     webview_label: &str,
     console_s: String,
     state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
-    trigger: &'static str,
+    _trigger: &'static str,
 ) {
     let Some(win) = app.get_webview_window(webview_label) else {
         if let Ok(mut st) = state.lock() {
@@ -284,15 +254,6 @@ fn finish_proxmox_auto_console_navigation<R: tauri::Runtime>(
         return;
     }
 
-    // #region agent log
-    debug_proxmox_auto_console_ndjson(
-        "H3",
-        "main.rs:finish_proxmox_auto_console_navigation",
-        "fired_navigate_to_console",
-        serde_json::json!({ "trigger": trigger }),
-    );
-    // #endregion
-
     let emit_payload = ProxmoxAssistAutoConsolePayload {
         webview_label: webview_label.to_string(),
         console_url: console_s,
@@ -307,24 +268,6 @@ fn try_fire_proxmox_auto_console<R: tauri::Runtime>(
     state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
     trigger: &'static str,
 ) {
-    let has_frag = proxmox_url_has_nonempty_fragment(candidate_url);
-    let has_console_q = proxmox_url_query_has_console(candidate_url);
-    let url_preview = candidate_url.as_str().chars().take(384).collect::<String>();
-
-    // #region agent log
-    debug_proxmox_auto_console_ndjson(
-        "H3",
-        "main.rs:try_fire_proxmox_auto_console",
-        "check",
-        serde_json::json!({
-            "trigger": trigger,
-            "urlPreview": url_preview,
-            "hasFragment": has_frag,
-            "hasConsoleQuery": has_console_q,
-        }),
-    );
-    // #endregion
-
     let mut st = match state.lock() {
         Ok(g) => g,
         Err(_) => return,
@@ -378,15 +321,6 @@ fn try_fire_proxmox_auto_console_when_cookies_have_ticket<R: tauri::Runtime>(
     if !proxmox_cookie_list_has_auth_ticket(cookies) {
         return;
     }
-
-    // #region agent log
-    debug_proxmox_auto_console_ndjson(
-        "H4",
-        "main.rs:try_fire_proxmox_auto_console_when_cookies_have_ticket",
-        "pve_auth_cookie_present",
-        serde_json::json!({ "trigger": trigger }),
-    );
-    // #endregion
 
     let mut st = match state.lock() {
         Ok(g) => g,

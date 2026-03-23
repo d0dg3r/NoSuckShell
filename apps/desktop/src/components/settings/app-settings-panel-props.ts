@@ -192,7 +192,4 @@ export type AppSettingsPanelProps = {
   /** When true, PROXMUX web consoles open inside a split pane instead of the system browser. */
   proxmuxOpenWebConsolesInPane: boolean;
   setProxmuxOpenWebConsolesInPane: (value: boolean) => void;
-  /** When true (and in-pane is on), PROXMUX web consoles open in a dedicated in-app webview window instead of an iframe. */
-  proxmuxOpenWebConsolesInAppWebviewWindow: boolean;
-  setProxmuxOpenWebConsolesInAppWebviewWindow: (value: boolean) => void;
 };

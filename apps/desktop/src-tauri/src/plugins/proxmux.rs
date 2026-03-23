@@ -7,11 +7,13 @@ use crate::ssh_config::HostConfig;
 use crate::ssh_home::effective_ssh_dir;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::str::FromStr;
 use std::time::Duration;
 
 pub const PROXMUX_PLUGIN_ID: &str = "dev.nosuckshell.plugin.proxmux";
@@ -258,6 +260,253 @@ where
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("no base URL to try")))
+}
+
+/// Best-effort GET returning the Proxmox `data` JSON value; used for inventory IP enrichment only.
+fn try_pve_get_json_data_optional(
+    client: &reqwest::blocking::Client,
+    auth: &str,
+    primary: &str,
+    failover: &[String],
+    path_tail: &str,
+) -> Option<Value> {
+    for base in std::iter::once(primary.to_string()).chain(failover.iter().cloned()) {
+        let base = normalize_base_url(&base);
+        if base.is_empty() {
+            continue;
+        }
+        let url = format!("{base}{path_tail}");
+        let Ok(response) = client
+            .get(&url)
+            .header("Authorization", auth)
+            .header("Accept", "application/json")
+            .send()
+        else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let Ok(body) = response.json::<Value>() else {
+            continue;
+        };
+        if let Some(d) = body.get("data") {
+            return Some(d.clone());
+        }
+    }
+    None
+}
+
+fn normalize_ip_candidate(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let base = t.split('/').next()?.trim();
+    if base.is_empty() {
+        return None;
+    }
+    let ip: IpAddr = base.parse().ok()?;
+    Some(match ip {
+        IpAddr::V4(a) => a.to_string(),
+        IpAddr::V6(a) => a.to_string(),
+    })
+}
+
+fn append_ips_from_text(s: &str, v4: &mut Vec<String>, v6: &mut Vec<String>) {
+    for token in s.split(|c| c == ' ' || c == ',' || c == ';') {
+        let t = token.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let Some(canonical) = normalize_ip_candidate(t) else {
+            continue;
+        };
+        match IpAddr::from_str(&canonical) {
+            Ok(IpAddr::V4(a)) => v4.push(a.to_string()),
+            Ok(IpAddr::V6(a)) => v6.push(a.to_string()),
+            Err(_) => {}
+        }
+    }
+}
+
+fn collect_ips_from_node_network(data: &Value) -> (Vec<String>, Vec<String>) {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    let Some(arr) = data.as_array() else {
+        return (v4, v6);
+    };
+    for item in arr {
+        if let Some(s) = item.get("address").and_then(|x| x.as_str()) {
+            append_ips_from_text(s, &mut v4, &mut v6);
+        }
+        if let Some(s) = item.get("address6").and_then(|x| x.as_str()) {
+            append_ips_from_text(s, &mut v4, &mut v6);
+        }
+    }
+    (v4, v6)
+}
+
+fn collect_ips_from_qemu_agent(data: &Value) -> (Vec<String>, Vec<String>) {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    let ifaces = data
+        .get("result")
+        .and_then(|r| r.as_array())
+        .or_else(|| data.as_array());
+    let Some(ifaces) = ifaces else {
+        return (v4, v6);
+    };
+    for iface in ifaces {
+        let Some(addr_list) = iface.get("ip-addresses").and_then(|x| x.as_array()) else {
+            continue;
+        };
+        for a in addr_list {
+            let typ = a
+                .get("ip-address-type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let Some(ip_raw) = a.get("ip-address").and_then(|i| i.as_str()) else {
+                continue;
+            };
+            let Some(canonical) = normalize_ip_candidate(ip_raw) else {
+                continue;
+            };
+            match typ.as_str() {
+                "ipv4" => {
+                    if let Ok(IpAddr::V4(addr)) = IpAddr::from_str(&canonical) {
+                        v4.push(addr.to_string());
+                    }
+                }
+                "ipv6" => {
+                    if let Ok(IpAddr::V6(addr)) = IpAddr::from_str(&canonical) {
+                        v6.push(addr.to_string());
+                    }
+                }
+                _ => match IpAddr::from_str(&canonical) {
+                    Ok(IpAddr::V4(a)) => v4.push(a.to_string()),
+                    Ok(IpAddr::V6(a)) => v6.push(a.to_string()),
+                    Err(_) => {}
+                },
+            }
+        }
+    }
+    (v4, v6)
+}
+
+fn scrape_lxc_inet_field(v: Option<&Value>, v4: &mut Vec<String>, v6: &mut Vec<String>) {
+    match v {
+        Some(Value::String(s)) => append_ips_from_text(s, v4, v6),
+        Some(Value::Array(arr)) => {
+            for x in arr {
+                if let Some(s) = x.as_str() {
+                    append_ips_from_text(s, v4, v6);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_ips_from_lxc_interfaces(data: &Value) -> (Vec<String>, Vec<String>) {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    let items: Vec<&Value> = if let Some(a) = data.as_array() {
+        a.iter().collect()
+    } else {
+        return (v4, v6);
+    };
+    for item in items {
+        scrape_lxc_inet_field(item.get("inet"), &mut v4, &mut v6);
+        scrape_lxc_inet_field(item.get("inet6"), &mut v4, &mut v6);
+    }
+    (v4, v6)
+}
+
+fn ipv4_priority(addr: Ipv4Addr) -> u8 {
+    if addr.is_loopback() || addr.is_unspecified() || addr.is_broadcast() {
+        return 0;
+    }
+    if addr.is_link_local() {
+        return 1;
+    }
+    if addr.is_private() {
+        return 2;
+    }
+    3
+}
+
+fn ipv6_priority(addr: Ipv6Addr) -> u8 {
+    if addr.is_loopback() || addr.is_unspecified() || addr.is_multicast() {
+        return 0;
+    }
+    if addr.is_unicast_link_local() {
+        return 1;
+    }
+    if addr.is_unique_local() {
+        return 2;
+    }
+    3
+}
+
+fn pick_primary_ipv4(candidates: &[String]) -> Option<String> {
+    let mut best: Option<(u8, String)> = None;
+    for c in candidates {
+        let Ok(ip) = c.parse::<Ipv4Addr>() else {
+            continue;
+        };
+        let p = ipv4_priority(ip);
+        if p == 0 {
+            continue;
+        }
+        let s = ip.to_string();
+        let better = match &best {
+            None => true,
+            Some((bp, bs)) => p > *bp || (p == *bp && s < *bs),
+        };
+        if better {
+            best = Some((p, s));
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
+fn pick_primary_ipv6(candidates: &[String]) -> Option<String> {
+    let mut best: Option<(u8, String)> = None;
+    for c in candidates {
+        let Ok(ip) = c.parse::<Ipv6Addr>() else {
+            continue;
+        };
+        let p = ipv6_priority(ip);
+        if p == 0 {
+            continue;
+        }
+        let s = ip.to_string();
+        let better = match &best {
+            None => true,
+            Some((bp, bs)) => p > *bp || (p == *bp && s < *bs),
+        };
+        if better {
+            best = Some((p, s));
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
+fn map_vmid_string(map: &Map<String, Value>) -> Option<String> {
+    map.get("vmid").and_then(|v| match v {
+        Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    })
 }
 
 fn cluster_to_public(c: &StoredCluster) -> Value {
@@ -510,7 +759,7 @@ fn fetch_resources(arg: &Value) -> Result<Value> {
     })?;
 
     let arr = data.as_array().cloned().unwrap_or_default();
-    let filtered: Vec<Value> = arr
+    let mut filtered: Vec<Value> = arr
         .into_iter()
         .filter(|row| {
             row.get("type")
@@ -518,6 +767,104 @@ fn fetch_resources(arg: &Value) -> Result<Value> {
                 .is_some_and(|t| matches!(t, "node" | "qemu" | "lxc"))
         })
         .collect();
+
+    let mut unique_nodes: HashSet<String> = HashSet::new();
+    for row in &filtered {
+        if let Some(n) = row.get("node").and_then(|x| x.as_str()) {
+            if !n.is_empty() {
+                unique_nodes.insert(n.to_string());
+            }
+        }
+    }
+
+    let mut node_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for node in &unique_nodes {
+        let path = format!("/api2/json/nodes/{node}/network");
+        let pair = if let Some(net_data) =
+            try_pve_get_json_data_optional(&client, &auth, &primary, &c.failover_urls, &path)
+        {
+            let (v4s, v6s) = collect_ips_from_node_network(&net_data);
+            (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
+        } else {
+            (None, None)
+        };
+        node_ip_cache.insert(node.clone(), pair);
+    }
+
+    let mut guest_ip_cache: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for row in &filtered {
+        let typ = row.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if typ != "qemu" && typ != "lxc" {
+            continue;
+        }
+        let status = row
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if status != "running" {
+            continue;
+        }
+        let Some(node) = row.get("node").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let Some(map) = row.as_object() else {
+            continue;
+        };
+        let Some(vmid) = map_vmid_string(map) else {
+            continue;
+        };
+        let cache_key = format!("{typ}:{node}:{vmid}");
+        if guest_ip_cache.contains_key(&cache_key) {
+            continue;
+        }
+        let path = if typ == "qemu" {
+            format!("/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
+        } else {
+            format!("/api2/json/nodes/{node}/lxc/{vmid}/interfaces")
+        };
+        let pair = if let Some(guest_data) =
+            try_pve_get_json_data_optional(&client, &auth, &primary, &c.failover_urls, &path)
+        {
+            let (v4s, v6s) = if typ == "qemu" {
+                collect_ips_from_qemu_agent(&guest_data)
+            } else {
+                collect_ips_from_lxc_interfaces(&guest_data)
+            };
+            (pick_primary_ipv4(&v4s), pick_primary_ipv6(&v6s))
+        } else {
+            (None, None)
+        };
+        guest_ip_cache.insert(cache_key, pair);
+    }
+
+    for row in &mut filtered {
+        let Value::Object(map) = row else {
+            continue;
+        };
+        let typ = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let node = map.get("node").and_then(|n| n.as_str()).unwrap_or("");
+
+        let (ip4, ip6) = match typ {
+            "node" => node_ip_cache.get(node).cloned().unwrap_or((None, None)),
+            "qemu" | "lxc" => {
+                let vmid = map_vmid_string(map);
+                if let Some(vmid) = vmid {
+                    let k = format!("{typ}:{node}:{vmid}");
+                    guest_ip_cache.get(&k).cloned().unwrap_or((None, None))
+                } else {
+                    (None, None)
+                }
+            }
+            _ => (None, None),
+        };
+        if let Some(s) = ip4 {
+            map.insert("ip4".to_string(), json!(s));
+        }
+        if let Some(s) = ip6 {
+            map.insert("ip6".to_string(), json!(s));
+        }
+    }
 
     Ok(json!({ "ok": true, "resources": filtered }))
 }
@@ -965,5 +1312,49 @@ mod tests {
         assert!(spice_capable_from_qemu_config_data(&json!({ "vga": "SPICE" })));
         assert!(!spice_capable_from_qemu_config_data(&json!({ "vga": "std" })));
         assert!(!spice_capable_from_qemu_config_data(&json!({})));
+    }
+
+    #[test]
+    fn pick_primary_ipv4_prefers_global_over_private() {
+        let c = vec![
+            "10.0.0.5".to_string(),
+            "203.0.113.10".to_string(),
+            "192.168.1.1".to_string(),
+        ];
+        assert_eq!(pick_primary_ipv4(&c).as_deref(), Some("203.0.113.10"));
+    }
+
+    #[test]
+    fn pick_primary_ipv4_skips_loopback_and_link_local() {
+        let c = vec![
+            "127.0.0.1".to_string(),
+            "169.254.1.2".to_string(),
+            "10.1.2.3".to_string(),
+        ];
+        assert_eq!(pick_primary_ipv4(&c).as_deref(), Some("10.1.2.3"));
+    }
+
+    #[test]
+    fn pick_primary_ipv4_tie_break_lexicographic() {
+        let c = vec!["10.0.0.9".to_string(), "10.0.0.10".to_string()];
+        assert_eq!(pick_primary_ipv4(&c).as_deref(), Some("10.0.0.10"));
+    }
+
+    #[test]
+    fn pick_primary_ipv6_prefers_global_over_ula() {
+        let c = vec![
+            "fd00::1".to_string(),
+            "2001:db8::1".to_string(),
+            "fe80::1".to_string(),
+        ];
+        assert_eq!(pick_primary_ipv6(&c).as_deref(), Some("2001:db8::1"));
+    }
+
+    #[test]
+    fn normalize_ip_candidate_strips_cidr() {
+        assert_eq!(
+            normalize_ip_candidate("192.0.2.4/24").as_deref(),
+            Some("192.0.2.4")
+        );
     }
 }

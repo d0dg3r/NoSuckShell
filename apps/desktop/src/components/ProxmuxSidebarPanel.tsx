@@ -20,8 +20,18 @@ type ListStateResponse = {
 type ResourceRow = Record<string, unknown>;
 
 function rowText(row: ResourceRow): string {
-  const parts = [row.type, row.vmid, row.name, row.node, row.status].map((v) => (v == null ? "" : String(v)));
+  const parts = [row.type, row.vmid, row.name, row.node, row.status, row.ip4, row.ip6].map((v) =>
+    v == null ? "" : String(v),
+  );
   return parts.join(" ").toLowerCase();
+}
+
+/** Display string for enriched `ip4` / `ip6` fields from `fetchResources` (English em dash when unset). */
+export function resourceIpStat(row: ResourceRow, kind: "ip4" | "ip6"): string {
+  const raw = row[kind];
+  if (raw == null) return "—";
+  const s = String(raw).trim();
+  return s.length > 0 ? s : "—";
 }
 
 function guestKey(row: ResourceRow): string {
@@ -851,34 +861,36 @@ export function ProxmuxSidebarPanel({
                                       {guestStatusLoading && !guestStatus ? (
                                         <p className="muted-copy proxmux-sidebar-guest-detail-loading">Loading status…</p>
                                       ) : null}
-                                      {guestStatus ? (
-                                        <dl className="proxmux-sidebar-guest-stats">
-                                          {guestStatusLine ? (
-                                            <>
-                                              <dt>Status</dt>
-                                              <dd>{guestStatusLine}</dd>
-                                            </>
-                                          ) : null}
-                                          {formatUptimeSeconds(guestStatus.uptime) ? (
-                                            <>
-                                              <dt>Uptime</dt>
-                                              <dd>{formatUptimeSeconds(guestStatus.uptime)}</dd>
-                                            </>
-                                          ) : null}
-                                          {formatCpu(guestStatus.cpu) ? (
-                                            <>
-                                              <dt>CPU</dt>
-                                              <dd>{formatCpu(guestStatus.cpu)}</dd>
-                                            </>
-                                          ) : null}
-                                          {guestMemLine ? (
-                                            <>
-                                              <dt>Memory</dt>
-                                              <dd>{guestMemLine}</dd>
-                                            </>
-                                          ) : null}
-                                        </dl>
-                                      ) : null}
+                                      <dl className="proxmux-sidebar-guest-stats">
+                                        <dt>IPv4</dt>
+                                        <dd>{resourceIpStat(row, "ip4")}</dd>
+                                        <dt>IPv6</dt>
+                                        <dd>{resourceIpStat(row, "ip6")}</dd>
+                                        {guestStatus && guestStatusLine ? (
+                                          <>
+                                            <dt>Status</dt>
+                                            <dd>{guestStatusLine}</dd>
+                                          </>
+                                        ) : null}
+                                        {guestStatus && formatUptimeSeconds(guestStatus.uptime) ? (
+                                          <>
+                                            <dt>Uptime</dt>
+                                            <dd>{formatUptimeSeconds(guestStatus.uptime)}</dd>
+                                          </>
+                                        ) : null}
+                                        {guestStatus && formatCpu(guestStatus.cpu) ? (
+                                          <>
+                                            <dt>CPU</dt>
+                                            <dd>{formatCpu(guestStatus.cpu)}</dd>
+                                          </>
+                                        ) : null}
+                                        {guestStatus && guestMemLine ? (
+                                          <>
+                                            <dt>Memory</dt>
+                                            <dd>{guestMemLine}</dd>
+                                          </>
+                                        ) : null}
+                                      </dl>
                                       {guestStatus ? (
                                         <div
                                           className="proxmux-sidebar-guest-actions"
@@ -991,6 +1003,10 @@ export function ProxmuxSidebarPanel({
                                     </span>
                                   </p>
                                   <dl className="proxmux-sidebar-guest-stats">
+                                    <dt>IPv4</dt>
+                                    <dd>{resourceIpStat(expandedNodeResource, "ip4")}</dd>
+                                    <dt>IPv6</dt>
+                                    <dd>{resourceIpStat(expandedNodeResource, "ip6")}</dd>
                                     {String(expandedNodeResource.status ?? "").trim() ? (
                                       <>
                                         <dt>Status</dt>

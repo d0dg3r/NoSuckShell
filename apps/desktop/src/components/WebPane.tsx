@@ -4,11 +4,7 @@ import {
   isProxmoxConsoleDeepLinkUrl,
   proxmoxWebUiEntryUrlFromConsoleOrBaseUrl,
 } from "../features/proxmox-console-urls";
-import {
-  isProxmoxWebUiSessionReadyForUrl,
-  markProxmoxWebUiSessionReadyForOrigin,
-  openProxmoxInAppWebviewWindow,
-} from "../features/proxmox-webview-window";
+import { openProxmoxInAppWebviewWindow } from "../features/proxmox-webview-window";
 
 type Props = {
   url: string;
@@ -31,13 +27,13 @@ export function WebPane({
   const [copyHint, setCopyHint] = useState("");
   const isConsoleDeepLink = useMemo(() => isProxmoxConsoleDeepLinkUrl(url), [url]);
   const entryUrl = useMemo(() => proxmoxWebUiEntryUrlFromConsoleOrBaseUrl(url), [url]);
-  const sessionReady = useMemo(() => isProxmoxWebUiSessionReadyForUrl(url), [url]);
   const [iframePhase, setIframePhase] = useState<"login" | "console">(() =>
-    isConsoleDeepLink && !sessionReady ? "login" : "console",
+    isConsoleDeepLink ? "login" : "console",
   );
+  // Each new console deep link must hit the cluster root first (cookie/session), then the user opens the console.
   useEffect(() => {
-    setIframePhase(isConsoleDeepLink && !sessionReady ? "login" : "console");
-  }, [url, isConsoleDeepLink, sessionReady]);
+    setIframePhase(isConsoleDeepLink ? "login" : "console");
+  }, [url, isConsoleDeepLink]);
   const iframeSrc = isConsoleDeepLink && iframePhase === "login" ? entryUrl : url;
 
   const reload = useCallback(() => {
@@ -83,35 +79,31 @@ export function WebPane({
             type="button"
             className="btn btn-primary web-pane-toolbar-btn"
             onClick={() => {
-              markProxmoxWebUiSessionReadyForOrigin(url);
               setIframePhase("console");
             }}
           >
-            Continue to console
+            Load console in pane
           </button>
         ) : null}
-        <button type="button" className="btn btn-primary web-pane-toolbar-btn" onClick={openInAppWindow}>
-          Open in app window
-        </button>
         <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={openInBrowser}>
           Open in browser
+        </button>
+        <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={openInAppWindow}>
+          Open in app window
         </button>
         <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={copyUrl}>
           Copy URL
         </button>
         {copyHint ? <span className="web-pane-toolbar-hint muted-copy">{copyHint}</span> : null}
       </div>
-      <p className="web-pane-frame-hint muted-copy">
-        If this stays blank, the site may block iframe embedding. Use <strong>Open in app window</strong> for an in-app top-level
-        view, or <strong>Open in browser</strong>.
-      </p>
       <iframe
         key={iframeKey}
         className="web-pane-iframe"
         title={paneTitle}
         src={iframeSrc}
-        sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-        referrerPolicy="no-referrer"
+        data-console-deep-link={isConsoleDeepLink ? "true" : "false"}
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
+        referrerPolicy="strict-origin-when-cross-origin"
       />
     </div>
   );

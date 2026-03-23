@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __forgetWebviewLabelForOriginForTests,
   __resetProxmoxWebviewReuseForTests,
-  markProxmoxWebUiSessionReadyForOrigin,
   openProxmoxInAppWebviewWindow,
 } from "./proxmox-webview-window";
 
@@ -64,13 +63,12 @@ describe("openProxmoxInAppWebviewWindow", () => {
     expect(openInAppWebviewWindow).toHaveBeenCalledTimes(2);
   });
 
-  it("opens console URL directly when session is marked (new webview, no root hop)", async () => {
+  it("opens root first for new webview after forgetting origin label", async () => {
     const u = "https://pve:8006/?console=kvm&novnc=1&vmid=1&node=n";
     await openProxmoxInAppWebviewWindow({ title: "a", consoleUrl: u, allowInsecureTls: false });
-    markProxmoxWebUiSessionReadyForOrigin(u);
     __forgetWebviewLabelForOriginForTests("https://pve:8006");
     const r = await openProxmoxInAppWebviewWindow({ title: "b", consoleUrl: u, allowInsecureTls: true });
-    expect(r.loginFirst).toBe(false);
-    expect(openInAppWebviewWindow).toHaveBeenLastCalledWith("b", u, true);
+    expect(r.loginFirst).toBe(true);
+    expect(openInAppWebviewWindow).toHaveBeenLastCalledWith("b", "https://pve:8006/", true, u);
   });
 });

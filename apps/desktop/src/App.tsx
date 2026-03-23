@@ -161,10 +161,8 @@ import {
 } from "./features/host-metadata-policy";
 import { createId } from "./features/app-id";
 import { validateExternalHttpUrl } from "./features/external-http-url";
-import {
-  markProxmoxWebUiSessionReadyForOrigin,
-  openProxmoxInAppWebviewWindow,
-} from "./features/proxmox-webview-window";
+import { isProxmoxConsoleDeepLinkUrl } from "./features/proxmox-console-urls";
+import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window";
 import {
   AUTO_ARRANGE_MODE_STORAGE_KEY,
   DEFAULT_BACKUP_PATH,
@@ -178,7 +176,6 @@ import {
   LAYOUT_MODE_STORAGE_KEY,
   LIST_TONE_PRESET_STORAGE_KEY,
   MOBILE_STACKED_MEDIA,
-  PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY,
   PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY,
   QUICK_CONNECT_AUTO_TRUST_STORAGE_KEY,
   QUICK_CONNECT_MODE_STORAGE_KEY,
@@ -630,12 +627,6 @@ export function App() {
     }
     const raw = window.localStorage.getItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY);
     return raw !== "false";
-  });
-  const [proxmuxOpenWebConsolesInAppWebviewWindow, setProxmuxOpenWebConsolesInAppWebviewWindow] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return window.localStorage.getItem(PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY) === "true";
   });
   const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([DEFAULT_WORKSPACE_ID]);
   const [workspaceSnapshots, setWorkspaceSnapshots] = useState<Record<string, WorkspaceSnapshot>>({
@@ -1800,7 +1791,6 @@ export function App() {
         if (prev?.label !== webviewLabel) {
           return prev;
         }
-        markProxmoxWebUiSessionReadyForOrigin(consoleUrl);
         return null;
       });
     })
@@ -2154,12 +2144,6 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(PROXMUX_OPEN_WEB_CONSOLES_IN_PANE_KEY, String(proxmuxOpenWebConsolesInPane));
   }, [proxmuxOpenWebConsolesInPane]);
-  useEffect(() => {
-    window.localStorage.setItem(
-      PROXMUX_OPEN_WEB_CONSOLES_IN_APP_WEBVIEW_WINDOW_KEY,
-      String(proxmuxOpenWebConsolesInAppWebviewWindow),
-    );
-  }, [proxmuxOpenWebConsolesInAppWebviewWindow]);
   useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
     if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
@@ -3066,16 +3050,14 @@ export function App() {
         }
         const trimmed = url.trim();
         const title = (label ?? "").trim() || "Proxmox console";
-        if (proxmuxOpenWebConsolesInAppWebviewWindow) {
+        if (isProxmoxConsoleDeepLinkUrl(trimmed)) {
           try {
             const result = await openProxmoxInAppWebviewWindow({
               title,
               consoleUrl: trimmed,
               allowInsecureTls,
             });
-            if (result.reused) {
-              setProxmoxWebLoginAssist(null);
-            } else if (result.loginFirst) {
+            if (result.loginFirst && !result.reused) {
               setProxmoxWebLoginAssist({ label: result.label, consoleUrl: trimmed });
             }
           } catch (e) {
@@ -3088,7 +3070,10 @@ export function App() {
           ...prev,
           { id, kind: "web", label: title, url: trimmed, ...(allowInsecureTls ? { allowInsecureTls: true } : {}) },
         ]);
-        placeSessionIntoNewOrFreePane(id, activePaneIndex);
+        const targetPaneIndex = splitFocusedPane("right", activePaneIndex, "empty");
+        setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+        setActivePaneIndex(targetPaneIndex);
+        setActiveSession(id);
         return;
       }
       try {
@@ -3097,7 +3082,7 @@ export function App() {
         setError(String(e));
       }
     },
-    [proxmuxOpenWebConsolesInPane, proxmuxOpenWebConsolesInAppWebviewWindow, activePaneIndex],
+    [proxmuxOpenWebConsolesInPane, activePaneIndex],
   );
 
   const handleProxmoxContinueToConsole = useCallback(async () => {
@@ -3105,7 +3090,6 @@ export function App() {
     setError("");
     try {
       await navigateInAppWebviewWindow(proxmoxWebLoginAssist.label, proxmoxWebLoginAssist.consoleUrl);
-      markProxmoxWebUiSessionReadyForOrigin(proxmoxWebLoginAssist.consoleUrl);
       setProxmoxWebLoginAssist(null);
     } catch (e) {
       setError(String(e));
@@ -5104,7 +5088,9 @@ export function App() {
         listFilterCount={selectedSidebarViewId === "builtin:proxmux" ? proxmuxResourceCount : filteredHostRows.length}
         showHostAdvancedFilters={selectedSidebarViewId !== "builtin:proxmux"}
         searchInputPlaceholder={
-          selectedSidebarViewId === "builtin:proxmux" ? "Filter name, node, VMID, status…" : undefined
+          selectedSidebarViewId === "builtin:proxmux"
+            ? "Filter name, node, VMID, status, IPv4, IPv6…"
+            : undefined
         }
         proxmuxPanel={
           proxmuxSidebarAvailable ? (
@@ -5377,8 +5363,6 @@ export function App() {
           toggleJumpHostForHost={toggleJumpHostForHost}
           proxmuxOpenWebConsolesInPane={proxmuxOpenWebConsolesInPane}
           setProxmuxOpenWebConsolesInPane={setProxmuxOpenWebConsolesInPane}
-          proxmuxOpenWebConsolesInAppWebviewWindow={proxmuxOpenWebConsolesInAppWebviewWindow}
-          setProxmuxOpenWebConsolesInAppWebviewWindow={setProxmuxOpenWebConsolesInAppWebviewWindow}
         />
       )}
       {isLayoutCommandCenterOpen && (
