@@ -36,7 +36,7 @@ export function AppSettingsLayoutTab({
   setQuickConnectAutoTrust,
 }: AppSettingsLayoutTabProps) {
   return (
-    <div className="settings-stack">
+    <div className="settings-stack settings-stack--equal-cols">
       <section className="settings-card">
         <header className="settings-card-head">
           <div className="settings-card-head-row">

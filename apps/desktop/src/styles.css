@@ -52,6 +52,8 @@
   --brand-cyan: #66d8ff;
   --brand-blue: #3b8dff;
   --brand-white: #f6fbff;
+  /* App settings / modals: rgba() tints for borders and fills (matches --brand-yellow) */
+  --settings-accent-rgb: 255, 212, 59;
   --radius-lg: 20px;
   --radius-md: 12px;
   --shadow-main: 0 18px 46px rgba(0, 0, 0, 0.54);
@@ -62,12 +64,59 @@
   --space-5: 12px;
   --space-6: 14px;
   --space-7: 16px;
-  /* Typography: balanced baseline; density profiles override with clamped scales */
-  --font-xs: clamp(9px, 10px, 11px);
-  --font-sm: clamp(10px, 11px, 12px);
-  --font-md: clamp(11px, 12px, 13px);
-  --font-base: clamp(12px, 13px, 14px);
-  --font-lg: clamp(13px, 14px, 15px);
+  /*
+   * GUI typography scale (px). Use only var(--font-*) for user-visible chrome/copy.
+   * Terminal PTY sizes are separate (programmatic fontSize), not these tokens.
+   *
+   * Roles (semantic; map components to the closest step):
+   *   --font-xs   — captions, timestamps, badge/meta text
+   *   --font-sm   — secondary labels, compact list hints
+   *   --font-md   — compact controls, table cells, dense UI
+   *   --font-base — default body and form copy
+   *   --font-lg   — section labels, emphasized rows, small titles
+   *   --font-xl   — compact glyphs (close controls, icon-only actions; one step above lg)
+   *   --font-2xl  — toolbar glyph size (pane chrome)
+   *   --font-3xl  — panel headings (h2), broadcast-all affordances
+   *   --font-title — large pager / hero chrome (e.g. stacked mobile nav)
+   *   --font-action-icon — alias of --font-xl for dense square icon buttons (same step)
+   *
+   * Line-height: use var(--leading-*) for vertical rhythm (tight / ui / body).
+   *
+   * Profiles (`.app-shell[data-density="…"]` overrides :root):
+   *   aggressive — smallest step set (tighter chrome)
+   *   balanced    — default; :root matches balanced numerically
+   *   safe        — largest step set (more readable)
+   * Steps rise by ~1px per token within a profile; profile switches shift the whole ladder.
+   * `--font-ui-nudge` (default 0px on `.app-shell`) is applied to every step; density fine-tune
+   * (`data-density-offset`) sets it to −2px…+2px so layout and GUI type move together.
+   */
+  --font-ui-nudge: 0px;
+  --font-xs: calc(10px + var(--font-ui-nudge));
+  --font-sm: calc(11px + var(--font-ui-nudge));
+  --font-md: calc(12px + var(--font-ui-nudge));
+  --font-base: calc(13px + var(--font-ui-nudge));
+  --font-lg: calc(14px + var(--font-ui-nudge));
+  --font-xl: calc(var(--font-lg) + 1px);
+  --font-2xl: calc(var(--font-lg) + 3px);
+  --font-3xl: calc(var(--font-lg) + 4px);
+  --font-title: calc(var(--font-lg) + 8px);
+  --font-action-icon: var(--font-xl);
+  /*
+   * Line-height: unitless multipliers for GUI copy (use with --font-*).
+   * --leading-none — single-line controls and icon-only buttons; --leading-tight / --leading-snug — compact rows;
+   * --leading-ui — form controls and uppercase chips; --leading-caption / --leading-label — small secondary text;
+   * --leading-body — dense readable lines; --leading-readable / --leading-relaxed / --leading-loose — banners, monospace, paragraphs.
+   */
+  --leading-none: 1;
+  --leading-tight: 1.1;
+  --leading-snug: 1.2;
+  --leading-ui: 1.25;
+  --leading-caption: 1.28;
+  --leading-label: 1.32;
+  --leading-body: 1.35;
+  --leading-readable: 1.4;
+  --leading-relaxed: 1.45;
+  --leading-loose: 1.5;
   --control-height-sm: 28px;
   --control-height-md: 32px;
   --control-height-lg: 36px;
@@ -160,11 +209,11 @@
   --space-5: 10px;
   --space-6: 12px;
   --space-7: 14px;
-  --font-xs: clamp(8px, 9px, 10px);
-  --font-sm: clamp(9px, 10px, 11px);
-  --font-md: clamp(10px, 11px, 12px);
-  --font-base: clamp(11px, 12px, 13px);
-  --font-lg: clamp(12px, 13px, 14px);
+  --font-xs: calc(9px + var(--font-ui-nudge));
+  --font-sm: calc(10px + var(--font-ui-nudge));
+  --font-md: calc(11px + var(--font-ui-nudge));
+  --font-base: calc(12px + var(--font-ui-nudge));
+  --font-lg: calc(13px + var(--font-ui-nudge));
   --control-height-sm: 24px;
   --control-height-md: 28px;
   --control-height-lg: 32px;
@@ -184,11 +233,11 @@
   --space-5: 12px;
   --space-6: 14px;
   --space-7: 16px;
-  --font-xs: clamp(9px, 10px, 11px);
-  --font-sm: clamp(10px, 11px, 12px);
-  --font-md: clamp(11px, 12px, 13px);
-  --font-base: clamp(12px, 13px, 14px);
-  --font-lg: clamp(13px, 14px, 15px);
+  --font-xs: calc(10px + var(--font-ui-nudge));
+  --font-sm: calc(11px + var(--font-ui-nudge));
+  --font-md: calc(12px + var(--font-ui-nudge));
+  --font-base: calc(13px + var(--font-ui-nudge));
+  --font-lg: calc(14px + var(--font-ui-nudge));
 }
 
 .app-shell[data-density="safe"] {
@@ -199,11 +248,11 @@
   --space-5: 14px;
   --space-6: 16px;
   --space-7: 18px;
-  --font-xs: clamp(10px, 11px, 12px);
-  --font-sm: clamp(11px, 12px, 13px);
-  --font-md: clamp(12px, 13px, 14px);
-  --font-base: clamp(13px, 14px, 15px);
-  --font-lg: clamp(14px, 15px, 17px);
+  --font-xs: calc(11px + var(--font-ui-nudge));
+  --font-sm: calc(12px + var(--font-ui-nudge));
+  --font-md: calc(13px + var(--font-ui-nudge));
+  --font-base: calc(14px + var(--font-ui-nudge));
+  --font-lg: calc(15px + var(--font-ui-nudge));
   --control-height-sm: 30px;
   --control-height-md: 34px;
   --control-height-lg: 40px;
@@ -216,6 +265,7 @@
 }
 
 .app-shell[data-density="aggressive"][data-density-offset="-2"] {
+  --font-ui-nudge: -2px;
   --space-1: 1px;
   --space-2: 2px;
   --space-3: 4px;
@@ -233,6 +283,7 @@
 }
 
 .app-shell[data-density="aggressive"][data-density-offset="-1"] {
+  --font-ui-nudge: -1px;
   --space-1: 1px;
   --space-2: 3px;
   --space-3: 5px;
@@ -250,6 +301,7 @@
 }
 
 .app-shell[data-density="aggressive"][data-density-offset="1"] {
+  --font-ui-nudge: 1px;
   --space-1: 3px;
   --space-2: 5px;
   --space-3: 7px;
@@ -284,6 +336,7 @@
 }
 
 .app-shell[data-density="balanced"][data-density-offset="-2"] {
+  --font-ui-nudge: -2px;
   --space-1: 2px;
   --space-2: 4px;
   --space-3: 6px;
@@ -301,6 +354,7 @@
 }
 
 .app-shell[data-density="balanced"][data-density-offset="-1"] {
+  --font-ui-nudge: -1px;
   --space-1: 3px;
   --space-2: 5px;
   --space-3: 7px;
@@ -318,6 +372,7 @@
 }
 
 .app-shell[data-density="balanced"][data-density-offset="1"] {
+  --font-ui-nudge: 1px;
   --space-1: 5px;
   --space-2: 7px;
   --space-3: 9px;
@@ -335,6 +390,7 @@
 }
 
 .app-shell[data-density="balanced"][data-density-offset="2"] {
+  --font-ui-nudge: 2px;
   --space-1: 6px;
   --space-2: 8px;
   --space-3: 10px;
@@ -403,6 +459,7 @@
 }
 
 .app-shell[data-density="safe"][data-density-offset="2"] {
+  --font-ui-nudge: 2px;
   --space-1: 7px;
   --space-2: 10px;
   --space-3: 12px;
@@ -557,6 +614,7 @@ body,
 }
 
 .app-shell {
+  --font-ui-nudge: 0px;
   height: 100vh;
   padding: var(--pad-shell);
   display: grid;
@@ -589,8 +647,8 @@ body,
   background: var(--bg-panel);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
-  font-size: 0.875rem;
-  line-height: 1.4;
+  font-size: var(--font-lg);
+  line-height: var(--leading-readable);
 }
 
 .proxmox-login-assist-banner-text {
@@ -649,6 +707,7 @@ body,
   background: rgba(14, 18, 21, 0.92);
   color: var(--text-muted, #9aa7a0);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  /* Icon-only control: hide text slot; not a typography scale size */
   font-size: 0;
   font-weight: 600;
 }
@@ -1182,7 +1241,7 @@ body,
   padding: var(--space-1) var(--space-3);
   border-radius: 999px;
   border: 2px solid var(--border-main);
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .host-list {
@@ -1371,13 +1430,13 @@ body,
 .add-host-modal .host-form-settings-root .settings-card-head h3 {
   font-size: var(--font-xs);
   letter-spacing: 0.07em;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
 }
 
 .host-slide-menu .host-form-settings-root .settings-card-head .muted-copy,
 .add-host-modal .host-form-settings-root .settings-card-head .muted-copy {
   font-size: var(--font-xs);
-  line-height: 1.28;
+  line-height: var(--leading-caption);
   max-width: 52ch;
 }
 
@@ -1465,7 +1524,7 @@ body,
 
 .add-host-modal .host-form-settings-root .field-help {
   font-size: var(--font-xs);
-  line-height: 1.32;
+  line-height: var(--leading-label);
   max-width: min(100%, 44ch);
 }
 
@@ -1612,7 +1671,7 @@ body,
   display: grid;
   place-items: center;
   font-size: var(--font-lg);
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .host-meta-edit {
@@ -1645,7 +1704,7 @@ body,
 .host-slide-menu .field-help {
   font-size: var(--font-xs);
   max-width: min(100%, 44ch);
-  line-height: 1.32;
+  line-height: var(--leading-label);
 }
 
 .host-slide-menu .input {
@@ -1661,7 +1720,7 @@ body,
   background-color: rgba(21, 27, 31, 0.96);
   color: var(--text-main);
   appearance: none;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
   min-height: 32px;
   padding-top: 6px;
   padding-bottom: 6px;
@@ -1828,7 +1887,7 @@ input.input[type="checkbox"] {
 
 .panel-header h2 {
   margin: 0;
-  font-size: calc(var(--font-lg) + 4px);
+  font-size: var(--font-3xl);
 }
 
 .kicker {
@@ -1899,7 +1958,7 @@ input.input[type="checkbox"] {
 .density-profile-select {
   height: var(--control-height-lg);
   min-height: var(--control-height-lg);
-  line-height: 1;
+  line-height: var(--leading-none);
   padding-top: 0;
   padding-bottom: 0;
   padding-right: 30px;
@@ -1920,6 +1979,17 @@ input.input[type="checkbox"] {
 
 .input:focus {
   border-color: var(--border-focus);
+}
+
+.app-settings-modal .input:focus,
+.app-settings-modal textarea.input:focus,
+.app-settings-modal select.input:focus,
+.app-settings-modal select.density-profile-select:focus {
+  border-color: rgba(var(--settings-accent-rgb), 0.72);
+}
+
+.app-settings-modal .btn:hover:not(:disabled):not(.brand-quick-add-trigger):not(.btn-primary):not(.btn-danger):not(.btn-danger-confirm):not(.btn-settings-tool):not(.btn-settings-commit):not(.btn-view-tool):not(.btn-view-save):not(.btn-settings-danger) {
+  border-color: rgba(var(--settings-accent-rgb), 0.55);
 }
 
 .btn {
@@ -2104,7 +2174,7 @@ input.input[type="checkbox"] {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-lg);
-  line-height: 1.5;
+  line-height: var(--leading-loose);
 }
 
 .right-dock {
@@ -2230,7 +2300,7 @@ input.input[type="checkbox"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: calc(var(--font-base) + 2px);
+  font-size: var(--font-action-icon);
   font-weight: 800;
   border-width: 2px;
   border-color: rgba(130, 184, 152, 0.45);
@@ -2279,7 +2349,7 @@ input.input[type="checkbox"] {
   border-radius: 10px;
   padding: 7px 10px;
   font-size: var(--font-md);
-  line-height: 1.1;
+  line-height: var(--leading-tight);
 }
 
 .split-profile-name {
@@ -2294,7 +2364,7 @@ input.input[type="checkbox"] {
   color: var(--text-main);
   appearance: none;
   padding: 7px 28px 7px 10px;
-  line-height: 1.1;
+  line-height: var(--leading-tight);
   background-image:
     linear-gradient(45deg, transparent 50%, #bfd2c8 50%),
     linear-gradient(135deg, #bfd2c8 50%, transparent 50%);
@@ -2468,7 +2538,7 @@ input.input[type="checkbox"] {
   height: 24px;
   padding: 0 7px;
   font-size: var(--font-sm);
-  line-height: 1;
+  line-height: var(--leading-none);
   border-radius: 999px;
 }
 
@@ -2539,7 +2609,7 @@ input.input[type="checkbox"] {
   min-height: 24px;
   height: 24px;
   font-size: var(--font-sm);
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .footer-layout-advanced .footer-action-btn {
@@ -2565,7 +2635,7 @@ input.input[type="checkbox"] {
   height: 24px;
   box-sizing: border-box;
   border-radius: 999px;
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .sessions-footer .footer-layout-controls .btn,
@@ -2717,7 +2787,7 @@ input.input[type="checkbox"] {
   background: transparent;
   color: inherit;
   font: inherit;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
   min-width: 0;
   width: 100%;
   text-align: left;
@@ -2788,9 +2858,9 @@ input.input[type="checkbox"] {
   height: 24px;
   border-radius: 999px;
   color: #ffd3ca;
-  font-size: calc(var(--font-lg) + 1px);
+  font-size: var(--font-xl);
   font-weight: 700;
-  line-height: 1;
+  line-height: var(--leading-none);
   transition: all 0.14s ease;
   cursor: pointer;
   flex: 0 0 auto;
@@ -2962,9 +3032,9 @@ input.input[type="checkbox"] {
   min-width: 26px;
   height: 26px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 600;
-  line-height: 1;
+  line-height: var(--leading-none);
   border-radius: var(--radius-control);
   opacity: 0.85;
 }
@@ -3338,7 +3408,7 @@ input.input[type="checkbox"] {
   padding-right: var(--space-3);
   background: rgba(6, 9, 11, 0.96);
   color: #e8eeea;
-  font-size: var(--font-sm, 13px);
+  font-size: var(--font-sm);
 }
 
 .file-pane-toolbar {
@@ -3525,7 +3595,7 @@ input.input[type="checkbox"] {
   margin: 0;
   font-size: var(--font-sm);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
   color: rgba(232, 238, 234, 0.7);
 }
 
@@ -3550,7 +3620,7 @@ input.input[type="checkbox"] {
   min-width: 28px;
   height: 26px;
   padding: 0 6px;
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .file-pane-table tbody tr.is-selected td {
@@ -3699,7 +3769,7 @@ input.input[type="checkbox"] {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
 }
 
 /* Stronger flex shrink when showing a long full path in file browser mode */
@@ -3720,9 +3790,9 @@ input.input[type="checkbox"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: calc(var(--font-lg) + 3px);
+  font-size: var(--font-2xl);
   font-weight: 700;
-  line-height: 1;
+  line-height: var(--leading-none);
   color: #f1f5f2;
   border-color: rgba(166, 172, 178, 0.58);
   background: rgba(8, 10, 12, 0.94);
@@ -3756,7 +3826,7 @@ input.input[type="checkbox"] {
   justify-content: center;
   width: 100%;
   height: 100%;
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 
 .pane-toolbar-btn > .pane-toolbar-svg {
@@ -3805,7 +3875,7 @@ input.input[type="checkbox"] {
 }
 
 .pane-toolbar-btn-broadcast-all {
-  font-size: calc(var(--font-lg) + 4px);
+  font-size: var(--font-3xl);
 }
 
 .pane-toolbar-svg-close-pane {
@@ -3878,18 +3948,18 @@ input.input[type="checkbox"] {
 }
 
 .web-pane-toolbar-btn {
-  font-size: 0.8125rem;
+  font-size: var(--font-base);
 }
 
 .web-pane-toolbar-hint {
-  font-size: 0.75rem;
+  font-size: var(--font-md);
 }
 
 .web-pane-frame-hint {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: var(--font-md);
   flex-shrink: 0;
-  line-height: 1.35;
+  line-height: var(--leading-ui);
 }
 
 .web-pane-iframe {
@@ -3915,7 +3985,7 @@ input.input[type="checkbox"] {
 }
 
 .proxmox-console-pane-status {
-  font-size: 0.8125rem;
+  font-size: var(--font-base);
   flex-shrink: 0;
 }
 
@@ -4298,7 +4368,7 @@ input.input[type="checkbox"] {
 }
 
 .layout-command-center-profile-item:hover {
-  border-color: rgba(130, 184, 152, 0.45);
+  border-color: rgba(var(--settings-accent-rgb), 0.48);
 }
 
 .layout-command-center-profile-item.is-selected {
@@ -4360,7 +4430,7 @@ input.input[type="checkbox"] {
 }
 
 .layout-command-center-preset-card:hover {
-  border-color: rgba(130, 184, 152, 0.55);
+  border-color: rgba(var(--settings-accent-rgb), 0.58);
   transform: translateY(-1px);
 }
 
@@ -4380,7 +4450,7 @@ input.input[type="checkbox"] {
 .layout-command-center-preset-desc {
   font-size: var(--font-sm);
   color: rgba(212, 226, 219, 0.55);
-  line-height: 1.35;
+  line-height: var(--leading-body);
 }
 
 .layout-command-center-preview-box {
@@ -4435,8 +4505,8 @@ input.input[type="checkbox"] {
 
 .layout-preview-leaf {
   flex: 1;
-  background: rgba(130, 184, 152, 0.2);
-  border: 1px solid rgba(130, 184, 152, 0.38);
+  background: rgba(var(--settings-accent-rgb), 0.2);
+  border: 1px solid rgba(var(--settings-accent-rgb), 0.38);
   border-radius: 4px;
   min-height: 6px;
   min-width: 6px;
@@ -4450,7 +4520,7 @@ input.input[type="checkbox"] {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 6px 4px;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
   border-bottom: 1px solid rgba(150, 170, 161, 0.22);
   box-sizing: border-box;
@@ -4462,9 +4532,10 @@ input.input[type="checkbox"] {
 .app-settings-subtabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 0;
-  margin: calc(var(--space-2) * -1) 0 var(--space-4);
-  padding-left: 2px;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
   border-bottom: 1px solid rgba(150, 170, 161, 0.16);
   box-sizing: border-box;
   width: 100%;
@@ -4495,9 +4566,9 @@ input.input[type="checkbox"] {
 }
 
 .settings-tab.is-active {
-  color: #f2faf5;
-  border-bottom-color: rgba(130, 184, 152, 0.85);
-  background: rgba(130, 184, 152, 0.08);
+  color: #fff8e6;
+  border-bottom-color: rgba(var(--settings-accent-rgb), 0.88);
+  background: rgba(var(--settings-accent-rgb), 0.1);
 }
 
 .settings-subtab {
@@ -4507,12 +4578,12 @@ input.input[type="checkbox"] {
 }
 
 .settings-subtab.is-active {
-  border-bottom-color: rgba(130, 184, 152, 0.65);
+  border-bottom-color: rgba(var(--settings-accent-rgb), 0.68);
 }
 
 .inline-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
+  font-size: var(--font-sm);
   padding: 0.1em 0.35em;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.35);
@@ -4525,7 +4596,7 @@ input.input[type="checkbox"] {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: var(--font-md);
-  line-height: 1.45;
+  line-height: var(--leading-relaxed);
 }
 
 .ssh-dir-info-block {
@@ -4610,6 +4681,81 @@ input.input[type="checkbox"] {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), max-content));
     justify-items: start;
     justify-content: start;
+  }
+
+  /*
+   * Multi-card settings (opt-in .settings-stack--equal-cols): equal fractional columns; cards fill cells
+   * so only the grid gap sits between cards. (Generic rule uses max-content → uneven slack.)
+   */
+  .app-settings-content.app-settings-panel-body
+    .settings-stack.settings-stack--equal-cols:has(> .settings-card:nth-child(2)):not(:has(> .app-settings-subtabs)) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    align-items: stretch;
+    justify-items: stretch;
+    justify-content: normal;
+  }
+
+  .app-settings-content.app-settings-panel-body .settings-stack--equal-cols > .settings-card {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+  }
+
+  /* SSH: always three equal columns; flex cards so textarea + actions align like the original fix */
+  .app-settings-content.app-settings-panel-body
+    .settings-stack.settings-stack--equal-cols.settings-stack--ssh:has(> .settings-card:nth-child(2)):not(:has(> .app-settings-subtabs)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-settings-content.app-settings-panel-body .settings-stack--equal-cols.settings-stack--ssh > .settings-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-height: 0;
+    box-sizing: border-box;
+  }
+
+  .app-settings-content.app-settings-panel-body .settings-stack--equal-cols.settings-stack--ssh > .settings-card .action-row {
+    margin-top: auto;
+  }
+
+  .app-settings-content.app-settings-panel-body .settings-stack--ssh .settings-ssh-config-editor {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
+    min-height: 12rem;
+    min-width: 0;
+  }
+
+  .app-settings-content.app-settings-panel-body .settings-stack--ssh .settings-ssh-hoststar-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /*
+   * PROXMUX: tab panel is its own grid; when it contains only two or three top-level cards, use equal columns.
+   */
+  .app-settings-content.app-settings-panel-body
+    .proxmux-settings-tab-panel:has(> .settings-card:nth-child(2):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .app-settings-content.app-settings-panel-body
+    .proxmux-settings-tab-panel:has(> .settings-card:nth-child(3):last-child) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel:has(> .settings-card:nth-child(2):last-child) > .settings-card,
+  .app-settings-content.app-settings-panel-body .proxmux-settings-tab-panel:has(> .settings-card:nth-child(3):last-child) > .settings-card {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
   }
 
   /* Single-card tabs (Appearance, Keyboard, …): card width follows content instead of full panel. */
@@ -5009,7 +5155,7 @@ input.input[type="checkbox"] {
 
 .app-settings-content.app-settings-panel-body .settings-stack--plugins-tab .settings-card-lead {
   margin: 0;
-  line-height: 1.35;
+  line-height: var(--leading-body);
 }
 
 .app-settings-content.app-settings-panel-body .settings-stack--plugins-tab .plugin-store-list {
@@ -5067,7 +5213,7 @@ input.input[type="checkbox"] {
   gap: 0.12rem 0.65rem;
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.35;
+  line-height: var(--leading-body);
   color: rgba(184, 204, 194, 0.78);
 }
 
@@ -5215,6 +5361,8 @@ input.input[type="checkbox"] {
 .settings-stack {
   display: grid;
   gap: var(--space-4);
+  /* Let each card size to its content; avoid equal-height stretching in multi-column rows */
+  align-items: start;
 }
 
 .settings-card-head-row {
@@ -5227,7 +5375,7 @@ input.input[type="checkbox"] {
 .settings-card-lead {
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.45;
+  line-height: var(--leading-relaxed);
   color: rgba(184, 204, 194, 0.78);
   max-width: 62ch;
 }
@@ -5242,12 +5390,12 @@ input.input[type="checkbox"] {
   height: 18px;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid rgba(130, 184, 152, 0.42);
+  border: 1px solid rgba(var(--settings-accent-rgb), 0.45);
   background: rgba(0, 0, 0, 0.28);
   color: rgba(212, 226, 219, 0.92);
-  font-size: 11px;
+  font-size: var(--font-sm);
   font-weight: 700;
-  line-height: 1;
+  line-height: var(--leading-none);
   cursor: help;
   flex-shrink: 0;
 }
@@ -5255,9 +5403,9 @@ input.input[type="checkbox"] {
 .settings-help-hint:hover,
 .settings-help-hint:focus-visible {
   outline: none;
-  border-color: rgba(130, 184, 152, 0.78);
-  background: rgba(130, 184, 152, 0.12);
-  color: #f2faf5;
+  border-color: rgba(var(--settings-accent-rgb), 0.82);
+  background: rgba(var(--settings-accent-rgb), 0.14);
+  color: #fff8e6;
 }
 
 .field-label-inline-hint {
@@ -5317,7 +5465,7 @@ input.input[type="checkbox"] {
 .settings-card-head .muted-copy {
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.45;
+  line-height: var(--leading-relaxed);
   max-width: 62ch;
 }
 
@@ -5590,7 +5738,7 @@ input.input[type="checkbox"] {
   padding: var(--space-2) var(--space-4);
   padding-right: 28px;
   font-size: var(--font-base);
-  line-height: 1.25;
+  line-height: var(--leading-ui);
 }
 
 .proxmux-sidebar-panel select.input:disabled {
@@ -5824,7 +5972,7 @@ input.input[type="checkbox"] {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  line-height: 1.25;
+  line-height: var(--leading-ui);
   border-radius: 4px;
   border: 1px solid rgba(150, 170, 161, 0.35);
   background: rgba(10, 14, 18, 0.65);
@@ -5898,7 +6046,7 @@ input.input[type="checkbox"] {
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
-  line-height: 1;
+  line-height: var(--leading-none);
   color: rgba(200, 215, 206, 0.88);
   border-color: rgba(150, 170, 161, 0.28);
   background: color-mix(in srgb, var(--text-muted) 10%, rgba(8, 12, 16, 0.88));
@@ -5939,7 +6087,7 @@ input.input[type="checkbox"] {
   box-shadow: none;
   color: rgba(150, 175, 162, 0.42);
   font-size: var(--font-lg);
-  line-height: 1;
+  line-height: var(--leading-none);
   cursor: pointer;
   transition:
     color 0.15s ease,
@@ -6051,7 +6199,7 @@ input.input[type="checkbox"] {
 .proxmux-sidebar-row-meta {
   font-size: var(--font-xs);
   font-weight: 500;
-  line-height: 1.35;
+  line-height: var(--leading-body);
   color: var(--text-muted);
   word-break: break-word;
 }
@@ -6148,16 +6296,16 @@ input.input[type="checkbox"] {
 }
 
 .app-settings-mode-switch .btn-settings-mode:hover:not(:disabled) {
-  border-color: rgba(130, 184, 152, 0.4);
+  border-color: rgba(var(--settings-accent-rgb), 0.42);
   background: rgba(26, 34, 40, 0.75);
-  color: #f0faf4;
+  color: #fff6d6;
 }
 
 .app-settings-mode-switch .btn-settings-mode.is-active {
-  background: rgba(130, 184, 152, 0.12);
-  border-color: rgba(130, 184, 152, 0.45);
-  color: #f2faf5;
-  box-shadow: inset 0 -2px 0 0 rgba(130, 184, 152, 0.65);
+  background: rgba(var(--settings-accent-rgb), 0.14);
+  border-color: rgba(var(--settings-accent-rgb), 0.48);
+  color: #fff8e6;
+  box-shadow: inset 0 -2px 0 0 rgba(var(--settings-accent-rgb), 0.68);
 }
 
 .store-panel {
@@ -6441,7 +6589,7 @@ input.input[type="checkbox"] {
 
 .help-chapter-title {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--font-2xl);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: rgba(210, 228, 218, 0.98);
@@ -6558,7 +6706,7 @@ input.input[type="checkbox"] {
   font-family: inherit;
   font-size: var(--font-xs);
   font-weight: 700;
-  line-height: 1;
+  line-height: var(--leading-none);
   padding: 4px 7px;
 }
 
@@ -6842,9 +6990,9 @@ input.input[type="checkbox"] {
   min-width: 48px;
   min-height: 44px;
   padding: 0 var(--space-4);
-  font-size: calc(var(--font-lg) + 8px);
+  font-size: var(--font-title);
   font-weight: 800;
-  line-height: 1;
+  line-height: var(--leading-none);
   border-radius: var(--radius-control);
 }
 
@@ -7066,7 +7214,7 @@ input.input[type="checkbox"] {
   padding: 0 var(--space-5);
   font-size: var(--font-base);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
   border-radius: 6px;
   border-width: 1px;
   border-color: rgba(150, 170, 161, 0.35);
@@ -7076,9 +7224,9 @@ input.input[type="checkbox"] {
 
 .btn-settings-tool:hover:not(:disabled),
 .btn-view-tool:hover:not(:disabled) {
-  border-color: rgba(130, 184, 152, 0.45);
+  border-color: rgba(var(--settings-accent-rgb), 0.48);
   background: rgba(26, 34, 40, 0.85);
-  color: #f0faf4;
+  color: #fff6d6;
 }
 
 .app-settings-modal .btn-settings-tool:disabled,
@@ -7090,7 +7238,7 @@ input.input[type="checkbox"] {
 }
 
 .app-settings-modal .settings-tab:focus-visible {
-  outline: 2px solid rgba(130, 184, 152, 0.55);
+  outline: 2px solid rgba(var(--settings-accent-rgb), 0.58);
   outline-offset: 2px;
 }
 
@@ -7098,7 +7246,7 @@ input.input[type="checkbox"] {
 .app-settings-modal .btn-settings-commit:focus-visible,
 .app-settings-modal .btn-view-tool:focus-visible,
 .app-settings-modal .btn-view-save:focus-visible {
-  outline: 2px solid rgba(130, 184, 152, 0.45);
+  outline: 2px solid rgba(var(--settings-accent-rgb), 0.48);
   outline-offset: 2px;
 }
 
@@ -7125,18 +7273,18 @@ input.input[type="checkbox"] {
   padding: 0 var(--space-7);
   font-size: var(--font-base);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: var(--leading-snug);
   border-radius: 6px;
-  background: rgba(36, 72, 54, 0.75);
-  border: 1px solid rgba(110, 168, 138, 0.5);
-  color: #e8f6ee;
+  background: linear-gradient(135deg, var(--brand-yellow), var(--brand-yellow-strong) 72%);
+  border: 1px solid rgba(var(--settings-accent-rgb), 0.9);
+  color: #261700;
 }
 
 .btn-settings-commit:hover:not(:disabled),
 .btn-view-save:hover:not(:disabled) {
-  background: rgba(44, 88, 66, 0.88);
-  border-color: rgba(130, 190, 155, 0.6);
-  color: #f6fffa;
+  background: linear-gradient(135deg, #ffe999, #ffca2f 72%);
+  border-color: #ffd24f;
+  color: #261700;
 }
 
 .view-manager-editor {
@@ -7249,6 +7397,6 @@ input.input[type="checkbox"] {
 .view-manager-footnote {
   margin: 0;
   font-size: var(--font-sm);
-  line-height: 1.45;
+  line-height: var(--leading-relaxed);
   max-width: 58ch;
 }

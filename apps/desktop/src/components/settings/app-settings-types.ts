@@ -1,17 +1,21 @@
 export type AppSettingsTab =
-  | "appearance"
-  | "layout"
-  | "keyboard"
-  | "files"
-  | "data"
-  | "ssh"
-  | "views"
-  | "hosts"
+  | "connection"
   | "store"
-  | "plugins"
-  | "proxmux"
-  | "help"
-  | "about";
+  | "workspace"
+  | "integrations"
+  | "interface"
+  | "data"
+  | "help";
+
+export type ConnectionSubTab = "hosts" | "ssh";
+
+export type WorkspaceSubTab = "views" | "layout" | "files";
+
+export type IntegrationsSubTab = "proxmux" | "plugins";
+
+export type InterfaceSubTab = "appearance" | "keyboard";
+
+export type HelpAboutSubTab = "help" | "about";
 
 /** Where SFTP downloads / file exports are saved. */
 export type FileExportDestMode = "fixed" | "ask";

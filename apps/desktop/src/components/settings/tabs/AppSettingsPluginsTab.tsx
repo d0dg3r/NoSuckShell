@@ -109,7 +109,7 @@ export function AppSettingsPluginsTab() {
   const licenseExpLabel = formatLicenseExpSummary(status?.exp ?? null);
 
   return (
-    <div className="settings-stack settings-stack--plugins-tab">
+    <div className="settings-stack settings-stack--equal-cols settings-stack--plugins-tab">
       <section className="settings-card plugins-tab-store">
         <header className="settings-card-head">
           <div className="settings-card-head-row">

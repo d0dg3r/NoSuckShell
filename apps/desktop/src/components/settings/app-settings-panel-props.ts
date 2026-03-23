@@ -17,10 +17,15 @@ import type {
 import type {
   AppSettingsTab,
   AutoArrangeMode,
+  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
   FrameModePreset,
+  HelpAboutSubTab,
+  IdentityStoreSubTab,
+  IntegrationsSubTab,
+  InterfaceSubTab,
   LayoutMode,
   ListTonePreset,
   QuickConnectMode,
@@ -28,6 +33,7 @@ import type {
   SplitRatioPreset,
   TerminalFontPreset,
   UiFontPreset,
+  WorkspaceSubTab,
 } from "./app-settings-types";
 import type { FilePaneSemanticNameColorsStored } from "../../features/file-pane-semantic-name-colors-prefs";
 import type { KeyboardShortcutCommandId, KeyChord } from "../../features/keyboard-shortcuts-types";
@@ -49,6 +55,18 @@ export type AppSettingsPanelProps = {
   settingsModalPosition: { x: number; y: number } | null;
   activeAppSettingsTab: AppSettingsTab;
   setActiveAppSettingsTab: (tab: AppSettingsTab) => void;
+  connectionSubTab: ConnectionSubTab;
+  setConnectionSubTab: (tab: ConnectionSubTab) => void;
+  workspaceSubTab: WorkspaceSubTab;
+  setWorkspaceSubTab: (tab: WorkspaceSubTab) => void;
+  integrationsSubTab: IntegrationsSubTab;
+  setIntegrationsSubTab: (tab: IntegrationsSubTab) => void;
+  interfaceSubTab: InterfaceSubTab;
+  setInterfaceSubTab: (tab: InterfaceSubTab) => void;
+  helpAboutSubTab: HelpAboutSubTab;
+  setHelpAboutSubTab: (tab: HelpAboutSubTab) => void;
+  identityStoreSubTab: IdentityStoreSubTab;
+  setIdentityStoreSubTab: (tab: IdentityStoreSubTab) => void;
   densityProfile: DensityProfile;
   setDensityProfile: (value: DensityProfile) => void;
   uiDensityOffset: number;
