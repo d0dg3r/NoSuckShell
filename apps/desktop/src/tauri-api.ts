@@ -333,12 +333,14 @@ export type ProxmuxWsProxyStartResult = {
 export const proxmuxWsProxyStart = (
   upstreamWssUrl: string,
   allowInsecureTls: boolean,
+  tlsTrustedCertPem: string | null | undefined,
   authHeader?: string,
   authCookie?: string,
 ): Promise<ProxmuxWsProxyStartResult> =>
   invoke("proxmux_ws_proxy_start", {
     upstreamWssUrl,
     allowInsecureTls,
+    tlsTrustedCertPem: tlsTrustedCertPem?.trim() ? tlsTrustedCertPem.trim() : null,
     authHeader: authHeader ?? null,
     authCookie: authCookie ?? null,
   });

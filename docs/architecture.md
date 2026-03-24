@@ -74,6 +74,7 @@ Command registration: [`main.rs`](../apps/desktop/src-tauri/src/main.rs) (`tauri
 | `layout_profiles` / `view_profiles` | Persisted JSON for layouts and host-list view profiles |
 | `sftp` | Remote/local file ops over libssh2 (no ProxyJump/ProxyCommand in this path today) |
 | `plugins` | Built-in plugin registry ([`plugins/mod.rs`](../apps/desktop/src-tauri/src/plugins/mod.rs)): `NssPlugin` trait, capabilities, `enrich_resolved_host` after store merge |
+| `proxmux_ws_proxy` | Local `ws://127.0.0.1` bridge from the webview to Proxmox `wss://` console endpoints ([`proxmux_ws_proxy.rs`](../apps/desktop/src-tauri/src/proxmux_ws_proxy.rs)); uses **native TLS** with the same relaxed verification rules as PROXMUX HTTP when **Allow insecure TLS** is on or a **trusted PEM** is stored |
 | `license` | Offline Ed25519 license verify/activate ([`license.rs`](../apps/desktop/src-tauri/src/license.rs)); entitlement checks for gated plugins |
 
 ## Plugins and licensing (Phase 1)
@@ -82,20 +83,24 @@ Command registration: [`main.rs`](../apps/desktop/src-tauri/src/main.rs) (`tauri
 
 - **Host hook:** After `resolve_host_config_with_store`, [`resolve_host_config_for_session`](../apps/desktop/src-tauri/src/secure_store.rs) calls `plugins::enrich_resolved_host` so Vault/Bitwarden-style providers can adjust `HostConfig` before SSH/SFTP (see demo plugin under [`plugins/demo.rs`](../apps/desktop/src-tauri/src/plugins/demo.rs)).
 - **Settings UI:** Settings → **Plugins & license** ([`AppSettingsPluginsTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsPluginsTab.tsx)): list plugins, enable/disable, paste license token, ping demo plugin.
-- **File workspace:** Built-in plugin `dev.nosuckshell.plugin.file-workspace` ([`plugins/file_workspace.rs`](../apps/desktop/src-tauri/src/plugins/file_workspace.rs)) gates remote/local file browser UI and `sessionFileViews` in [`App.tsx`](../apps/desktop/src/App.tsx) / [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx) / [`context-actions.ts`](../apps/desktop/src/features/context-actions.ts).
+- **NSS-Commander** (built-in plugin `dev.nosuckshell.plugin.file-workspace`): [`plugins/file_workspace.rs`](../apps/desktop/src-tauri/src/plugins/file_workspace.rs) gates remote/local file browser UI and `sessionFileViews` in [`App.tsx`](../apps/desktop/src/App.tsx) / [`SplitWorkspace.tsx`](../apps/desktop/src/components/SplitWorkspace.tsx) / [`context-actions.ts`](../apps/desktop/src/features/context-actions.ts).
 - **License issuance:** Separate HTTP service [`services/license-server`](../services/license-server/) (Ko-fi webhook + admin issue endpoint). Product/legal notes: [licensing.md](licensing.md). [Ko-fi](https://ko-fi.com/) is only the payment/webhook source; signing stays on your server.
 
 Future **Phase 2** (not implemented): load third-party code via WASM or signed bundles—same hooks, stricter sandboxing.
 
-Planned plugin-shaped features (GitHub settings sync, Bitwarden, HashiCorp Vault, NSS-Commander) are listed with proposed IDs in [roadmap.md](roadmap.md).
+Planned plugin-shaped features (GitHub settings sync, Bitwarden, HashiCorp Vault, command palette, public cloud) are listed with proposed IDs in [roadmap.md](roadmap.md).
 
 ## PROXMUX (Proxmox) integration
 
-**Built-in plugin** `dev.nosuckshell.plugin.proxmux` ([`plugins/proxmux.rs`](../apps/desktop/src-tauri/src/plugins/proxmux.rs) and UI under [`ProxmuxSidebarPanel.tsx`](../apps/desktop/src/components/ProxmuxSidebarPanel.tsx), [`AppSettingsProxmuxTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsProxmuxTab.tsx)):
+**Built-in plugin** `dev.nosuckshell.plugin.proxmux` ([`plugins/proxmux.rs`](../apps/desktop/src-tauri/src/plugins/proxmux.rs) and UI under [`ProxmuxSidebarPanel.tsx`](../apps/desktop/src/components/ProxmuxSidebarPanel.tsx), [`AppSettingsProxmuxTab.tsx`](../apps/desktop/src/components/settings/tabs/AppSettingsProxmuxTab.tsx), panes [`ProxmoxQemuVncPane.tsx`](../apps/desktop/src/components/ProxmoxQemuVncPane.tsx) / [`ProxmoxLxcTermPane.tsx`](../apps/desktop/src/components/ProxmoxLxcTermPane.tsx)):
 
-- **Settings → Integrations → PROXMUX:** cluster URLs, credentials, TLS options, and whether Proxmox web consoles open in an embedded webview pane or the system browser.
+- **Settings → Integrations → PROXMUX:** cluster URLs, credentials, **Allow insecure TLS**, optional **trusted certificate PEM** (plus stored leaf SHA-256 for confirmation on change), and whether HTML5/noVNC/SPICE-style consoles open in an **embedded pane** or the **system browser**.
+- **TLS behavior (HTTP and upstream WebSockets):** Proxmox traffic uses **reqwest** with **native-tls**. Certificate verification is **not** enforced when **Allow insecure TLS** is enabled **or** when a non-empty trusted PEM is stored—so custom CA / self-signed clusters work with the PEM path; treat this as an explicit trust decision.
 - **Sidebar:** when the plugin is enabled and entitled, lists clusters and guests; uses `plugin_invoke` for RPC-style calls (resource lists, guest status, console URLs).
+- **Embedded consoles:** QEMU **noVNC** and **LXC** serial/xterm views talk to the cluster through [`proxmux_ws_proxy.rs`](../apps/desktop/src-tauri/src/proxmux_ws_proxy.rs) (`proxmux_ws_proxy_start` / `proxmux_ws_proxy_stop` in [`main.rs`](../apps/desktop/src-tauri/src/main.rs)): the webview uses plain `ws://127.0.0.1`, Rust opens `wss://` upstream with native TLS.
 - **Startup:** optional warmup delays reduce duplicate work when the sidebar becomes visible (see [`proxmux-startup-warmup.ts`](../apps/desktop/src/features/proxmux-startup-warmup.ts)).
+
+Deeper technical notes: [superpowers/specs/2026-03-23-proxmox-console-integration-analysis.md](superpowers/specs/2026-03-23-proxmox-console-integration-analysis.md).
 
 ## SSH session path (terminal)
 
@@ -144,6 +149,7 @@ sequenceDiagram
 - **Backup / profiles:** export/import backup, layout and view profile persistence
 - **SFTP:** list/download/upload/rename/… for remote and local panes
 - **Plugins / license:** `list_plugins`, `set_plugin_enabled`, `plugin_invoke`, `activate_license`, `license_status`, `clear_license`
+- **PROXMUX console bridge:** `proxmux_ws_proxy_start`, `proxmux_ws_proxy_stop` (local WebSocket → cluster `wss://` consoles)
 
 Authoritative list: `generate_handler![...]` in `main.rs` and matching names in `tauri-api.ts`.
 
@@ -171,7 +177,7 @@ Exact paths depend on platform and optional SSH dir override (see Settings → S
 | --- | --- |
 | [backup-security.md](backup-security.md) | Backup format and threat model |
 | [licensing.md](licensing.md) | License tokens, Ko-fi, entitlements, key rotation |
-| [roadmap.md](roadmap.md) | Planned plugins (GitHub sync, Bitwarden, Vault, NSS-Commander) |
+| [roadmap.md](roadmap.md) | Shipped and planned plugins (NSS-Commander file panes, PROXMUX, GitHub sync, Vault, command palette, public cloud) |
 | [releases.md](releases.md) | Tags and GitHub releases |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [README.md](README.md) (repo root) | Clone, build, run |

@@ -300,6 +300,12 @@ const proxmuxSections: HelpSection[] = [
           "Choose whether Proxmox noVNC/SPICE/HTML5 consoles open inside an app pane or in your default browser (toggle on the PROXMUX settings tab).",
         keys: "-",
       },
+      {
+        action: "TLS and embedded consoles",
+        mouse:
+          "For private CA or self-signed HTTPS, use Allow insecure TLS and/or paste a trusted certificate PEM (confirm fingerprint changes when the leaf rotates). Embedded QEMU noVNC and LXC shells use a local WebSocket bridge to the cluster; the same TLS policy applies to Proxmox API calls.",
+        keys: "-",
+      },
     ],
   },
 ];

@@ -1,7 +1,8 @@
 //! Local WebSocket listener that bridges the Tauri webview to a Proxmox `wss://` console endpoint.
-//! Needed when the cluster uses self-signed TLS (`allow insecure TLS`): the system webview may reject
-//! `wss://` to the cluster, while this path accepts the browser `ws://127.0.0.1` hop and uses
-//! `native_tls` with optional `danger_accept_invalid_certs` toward Proxmox.
+//! Browsers cannot easily trust a self-signed cluster certificate; this path accepts `ws://127.0.0.1`
+//! from the webview and connects upstream with `native_tls`. When a trusted PEM is stored for the
+//! cluster, verification is skipped (see `http_client` in `proxmux.rs`); `allow_insecure_tls` alone
+//! also skips verification.
 
 use futures_util::{SinkExt, StreamExt};
 use http::Uri;
@@ -52,9 +53,19 @@ fn apply_upstream_auth_headers(
     }
 }
 
+fn build_tls_connector(allow_insecure_tls: bool, tls_trusted_cert_pem: Option<&str>) -> anyhow::Result<native_tls::TlsConnector> {
+    let mut tls_builder = native_tls::TlsConnector::builder();
+    let has_trusted_pem = tls_trusted_cert_pem.map(str::trim).filter(|s| !s.is_empty()).is_some();
+    if has_trusted_pem || allow_insecure_tls {
+        tls_builder.danger_accept_invalid_certs(true);
+    }
+    Ok(tls_builder.build()?)
+}
+
 async fn connect_upstream_wss(
     upstream_wss_url: &str,
     allow_insecure_tls: bool,
+    tls_trusted_cert_pem: Option<&str>,
     auth_header: Option<&str>,
     auth_cookie: Option<&str>,
 ) -> anyhow::Result<UpstreamWs> {
@@ -63,11 +74,7 @@ async fn connect_upstream_wss(
     let port = parsed.port_or_known_default().unwrap_or(443);
 
     let tcp = TcpStream::connect((host, port)).await?;
-    let mut tls_builder = native_tls::TlsConnector::builder();
-    // Certificate validation remains enabled; `allow_insecure_tls` is intentionally ignored
-    // to avoid disabling TLS security. If self-signed certificates must be supported, configure
-    // a proper trust store instead of calling `danger_accept_invalid_certs(true)`.
-    let cx = tls_builder.build()?;
+    let cx = build_tls_connector(allow_insecure_tls, tls_trusted_cert_pem)?;
     let cx = tokio_native_tls::TlsConnector::from(cx);
     let tls = cx.connect(host, tcp).await?;
 
@@ -87,9 +94,11 @@ async fn proxy_one_browser_connection(
     expected_path: String,
     upstream_wss_url: String,
     allow_insecure_tls: bool,
+    tls_trusted_cert_pem: Option<String>,
     auth_header: Option<String>,
     auth_cookie: Option<String>,
 ) {
+    let tls_pem = tls_trusted_cert_pem.as_deref();
     let callback = move |req: &Request, response: Response| -> Result<Response, http::Response<Option<String>>> {
         if req.uri().path() != expected_path.as_str() {
             let err = http::Response::builder()
@@ -111,6 +120,7 @@ async fn proxy_one_browser_connection(
     let upstream_ws = match connect_upstream_wss(
         &upstream_wss_url,
         allow_insecure_tls,
+        tls_pem,
         auth_header.as_deref(),
         auth_cookie.as_deref(),
     )
@@ -177,6 +187,7 @@ pub struct ProxmuxWsProxyStartResult {
 pub async fn proxmux_ws_proxy_start(
     upstream_wss_url: String,
     allow_insecure_tls: bool,
+    tls_trusted_cert_pem: Option<String>,
     auth_header: Option<String>,
     auth_cookie: Option<String>,
 ) -> Result<ProxmuxWsProxyStartResult, String> {
@@ -192,6 +203,7 @@ pub async fn proxmux_ws_proxy_start(
     let local_ws_url = format!("ws://127.0.0.1:{port}{expected_path}");
 
     let upstream = upstream_wss_url.clone();
+    let tls_pem = tls_trusted_cert_pem.filter(|s| !s.trim().is_empty());
     let conn_handles: ConnHandles = Arc::new(Mutex::new(Vec::new()));
     let conn_handles_for_loop = conn_handles.clone();
 
@@ -203,11 +215,13 @@ pub async fn proxmux_ws_proxy_start(
                     let auth = auth_header.clone();
                     let cookie = auth_cookie.clone();
                     let path = expected_path.clone();
+                    let tls = tls_pem.clone();
                     let conn_handle = tokio::spawn(proxy_one_browser_connection(
                         stream,
                         path,
                         upstream,
                         allow_insecure_tls,
+                        tls,
                         auth,
                         cookie,
                     ));

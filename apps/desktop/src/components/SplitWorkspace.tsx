@@ -45,6 +45,7 @@ export type ProxmoxNativeConsolePanePayload =
       paneTitle: string;
       proxmoxBaseUrl: string;
       allowInsecureTls?: boolean;
+      tlsTrustedCertPem?: string;
     }
   | {
       kind: "lxc-term";
@@ -54,6 +55,7 @@ export type ProxmoxNativeConsolePanePayload =
       paneTitle: string;
       proxmoxBaseUrl: string;
       allowInsecureTls?: boolean;
+      tlsTrustedCertPem?: string;
     };
 
 export type SplitPaneRendererBridge = {
@@ -117,12 +119,21 @@ export type SplitPaneRendererBridge = {
   fileExportArchiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
   semanticFileNameColors: boolean;
-  /** When false, SFTP/local file browser toolbar and views are disabled (File workspace plugin). */
+  /** When false, SFTP/local file browser toolbar and views are disabled (NSS-Commander plugin). */
   fileWorkspacePluginEnabled: boolean;
   /** When set, pane shows embedded web UI instead of terminal or file browser. */
   webPanePayloadForPane: (paneIndex: number) => { url: string; title: string; allowInsecureTls?: boolean } | null;
   /** PROXMUX pane-native QEMU noVNC or LXC terminal (ticket + WebSocket), when session kind matches. */
   proxmoxNativeConsoleForPane: (paneIndex: number) => ProxmoxNativeConsolePanePayload | null;
+  /** Incrementing nonce used to request a noVNC reconnect for a given pane. */
+  proxmoxQemuVncReconnectNonceForPane: (paneIndex: number) => number;
+  requestProxmoxQemuVncReconnect: (paneIndex: number) => void;
+  openProxmoxQemuVncInAppWindow: (paneIndex: number) => void;
+  openProxmoxQemuVncInBrowser: (paneIndex: number) => void;
+  proxmoxLxcReconnectNonceForPane: (paneIndex: number) => number;
+  requestProxmoxLxcReconnect: (paneIndex: number) => void;
+  openProxmoxLxcInAppWindow: (paneIndex: number) => void;
+  openProxmoxLxcInBrowser: (paneIndex: number) => void;
   /** Surface errors from the web pane (e.g. failed in-app webview window). */
   onWebPaneOpenInAppWindowError?: (message: string) => void;
   /** Proxmox console deep links need login first; same payload as the main-window assist banner. */
@@ -163,6 +174,9 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
+      const proxmoxNative = paneSessionId ? b.proxmoxNativeConsoleForPane(paneIndex) : null;
+      const hasQemuVncToolbarActions = proxmoxNative?.kind === "qemu-vnc";
+      const hasLxcToolbarActions = proxmoxNative?.kind === "lxc-term";
       const activatePaneAndMaybeFocusTerminal = () => {
         b.setActivePaneIndex(paneIndex);
         if (paneSessionId) {
@@ -475,7 +489,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   title={
                     b.fileWorkspacePluginEnabled
                       ? "Browse remote files (SFTP)"
-                      : "Browse remote files (SFTP) — enable File workspace in Settings → Plugins"
+                      : "Browse remote files (SFTP) — enable NSS-Commander in Settings → Plugins"
                   }
                   aria-label={`Browse remote files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
@@ -512,7 +526,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   title={
                     b.fileWorkspacePluginEnabled
                       ? "Browse local files"
-                      : "Browse local files — enable File workspace in Settings → Plugins"
+                      : "Browse local files — enable NSS-Commander in Settings → Plugins"
                   }
                   aria-label={`Browse local files in pane ${paneIndex + 1}`}
                   onPointerDown={(event) => event.stopPropagation()}
@@ -566,6 +580,116 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
               )}
             </div>
             <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
+            {hasQemuVncToolbarActions ? (
+              <>
+                <div className="split-pane-toolbar-group split-pane-toolbar-group-proxmox-vnc">
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Reconnect noVNC"
+                    aria-label={`Reconnect noVNC in pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.requestProxmoxQemuVncReconnect(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M19.2 12a7.2 7.2 0 1 1-2.3-5.3" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M20.4 6.4v4.8h-4.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Open console in app window"
+                    aria-label={`Open noVNC console in app window for pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.openProxmoxQemuVncInAppWindow(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="5.2" y="6.2" width="13.6" height="11.6" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M8.5 10h7M8.5 13h5" stroke="currentColor" strokeWidth="1.2" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Open console in browser"
+                    aria-label={`Open noVNC console in browser for pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.openProxmoxQemuVncInBrowser(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M13.2 5.2h5.6v5.6M18.8 5.2l-8 8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M18.8 13v5.2a.6.6 0 0 1-.6.6H5.8a.6.6 0 0 1-.6-.6V5.8a.6.6 0 0 1 .6-.6H11" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    </svg>
+                  </button>
+                </div>
+                <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
+              </>
+            ) : null}
+            {hasLxcToolbarActions ? (
+              <>
+                <div className="split-pane-toolbar-group split-pane-toolbar-group-proxmox-vnc">
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Reconnect LXC console"
+                    aria-label={`Reconnect LXC console in pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.requestProxmoxLxcReconnect(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M19.2 12a7.2 7.2 0 1 1-2.3-5.3" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M20.4 6.4v4.8h-4.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Open LXC console in app window"
+                    aria-label={`Open LXC console in app window for pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.openProxmoxLxcInAppWindow(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="5.2" y="6.2" width="13.6" height="11.6" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M8.5 10h7M8.5 13h5" stroke="currentColor" strokeWidth="1.2" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Open LXC console in browser"
+                    aria-label={`Open LXC console in browser for pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.openProxmoxLxcInBrowser(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M13.2 5.2h5.6v5.6M18.8 5.2l-8 8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M18.8 13v5.2a.6.6 0 0 1-.6.6H5.8a.6.6 0 0 1-.6-.6V5.8a.6.6 0 0 1 .6-.6H11" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    </svg>
+                  </button>
+                </div>
+                <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
+              </>
+            ) : null}
             <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
               <button
                 className="btn action-icon-btn pane-toolbar-btn"
@@ -618,7 +742,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 </Suspense>
               );
             }
-            const px = paneSessionId ? b.proxmoxNativeConsoleForPane(paneIndex) : null;
+            const px = proxmoxNative;
             if (px?.kind === "qemu-vnc") {
               return (
                 <Suspense
@@ -629,11 +753,10 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     node={px.node}
                     vmid={px.vmid}
                     paneTitle={px.paneTitle}
-                    proxmoxBaseUrl={px.proxmoxBaseUrl}
                     allowInsecureTls={px.allowInsecureTls === true}
+                    tlsTrustedCertPem={px.tlsTrustedCertPem}
+                    reconnectRequestNonce={b.proxmoxQemuVncReconnectNonceForPane(paneIndex)}
                     onError={b.onWebPaneOpenInAppWindowError}
-                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
-                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
                   />
                 </Suspense>
               );
@@ -650,11 +773,10 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     node={px.node}
                     vmid={px.vmid}
                     paneTitle={px.paneTitle}
-                    proxmoxBaseUrl={px.proxmoxBaseUrl}
                     allowInsecureTls={px.allowInsecureTls === true}
+                    tlsTrustedCertPem={px.tlsTrustedCertPem}
+                    reconnectRequestNonce={b.proxmoxLxcReconnectNonceForPane(paneIndex)}
                     onError={b.onWebPaneOpenInAppWindowError}
-                    onOpenInAppWindowError={b.onWebPaneOpenInAppWindowError}
-                    onLoginFirstWebviewOpen={b.onWebPaneLoginFirstWebviewOpen}
                   />
                 </Suspense>
               );

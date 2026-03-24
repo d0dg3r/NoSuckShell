@@ -1,4 +1,4 @@
-import { DEMO_PLUGIN_ID, FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
+import { FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
 
 /** Replace with your Ko-fi shop, membership, or donation page URL. */
 export const PLUGIN_STORE_DEFAULT_KOFI_URL = "https://ko-fi.com/";
@@ -27,20 +27,11 @@ export type PluginStoreCatalogItem = {
  */
 export const PLUGIN_STORE_CATALOG: readonly PluginStoreCatalogItem[] = [
   {
-    id: "demo-plugin",
-    title: "Demo plugin",
-    description:
-      "Sample plugin for testing the pipeline (ping, host-config enrich hook). The app is open source (MIT); this item stays free — enable it under Installed plugins and use Ping demo plugin.",
-    requiredEntitlements: [],
-    isFree: true,
-    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
-    relatedPluginId: DEMO_PLUGIN_ID,
-  },
-  {
     id: "file-workspace-addon",
-    title: "File workspace (premium)",
+    title: "NSS-Commander",
+    logoSrc: "/plugin-store/nss-commander.svg",
     description:
-      "Remote and local SFTP-style file panes in the split workspace. In official builds, unlock with a signed token (small add-on purchase) that includes the entitlement below; source remains MIT. After purchase, paste the license token under License in this tab.",
+      "NSS-Commander: remote and local SFTP-style file panes in the split workspace. In official builds, unlock with a signed token (small add-on purchase) that includes the entitlement below; source remains MIT. After purchase, paste the license token under License in this tab.",
     requiredEntitlements: ["dev.nosuckshell.addon.file-workspace"],
     purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
     relatedPluginId: FILE_WORKSPACE_PLUGIN_ID,
@@ -101,6 +92,51 @@ export const PLUGIN_STORE_CATALOG: readonly PluginStoreCatalogItem[] = [
     requiredEntitlements: ["dev.nosuckshell.addon.proxmox"],
     purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
     relatedPluginId: PROXMUX_PLUGIN_ID,
+  },
+  {
+    id: "aws-integration",
+    title: "Amazon Web Services (AWS)",
+    logoSrc: "/plugin-store/aws.svg",
+    description:
+      "Planned Proxmux-style discovery for AWS: list EC2 (and related resources where useful), power or lifecycle actions where the API allows, and connect via SSH or provider flows (for example SSM Session Manager). Not shipped yet.",
+    requiredEntitlements: ["dev.nosuckshell.addon.aws"],
+    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
+  },
+  {
+    id: "azure-integration",
+    title: "Microsoft Azure",
+    logoSrc: "/plugin-store/azure.svg",
+    description:
+      "Planned Proxmux-style discovery for Azure: list VMs and related resources, actions where the API allows, and connect via SSH or Azure-specific consoles. Not shipped yet.",
+    requiredEntitlements: ["dev.nosuckshell.addon.azure"],
+    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
+  },
+  {
+    id: "hetzner-integration",
+    title: "Hetzner Cloud",
+    logoSrc: "/plugin-store/hetzner.svg",
+    description:
+      "Planned Proxmux-style discovery for Hetzner Cloud: list servers, power actions where the API allows, and connect via SSH. Not shipped yet.",
+    requiredEntitlements: ["dev.nosuckshell.addon.hetzner"],
+    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
+  },
+  {
+    id: "gcp-integration",
+    title: "Google Cloud Platform (GCP)",
+    logoSrc: "/plugin-store/gcp.svg",
+    description:
+      "Planned Proxmux-style discovery for GCP: list Compute Engine VMs (and related resources where useful), actions where the API allows, and connect via SSH or IAP-style flows where applicable. Not shipped yet.",
+    requiredEntitlements: ["dev.nosuckshell.addon.gcp"],
+    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
+  },
+  {
+    id: "digitalocean-integration",
+    title: "DigitalOcean",
+    logoSrc: "/plugin-store/digitalocean.svg",
+    description:
+      "Planned Proxmux-style discovery for DigitalOcean Droplets and related resources: list instances, power actions where the API allows, and connect via SSH. Not shipped yet.",
+    requiredEntitlements: ["dev.nosuckshell.addon.digitalocean"],
+    purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
   },
 ];
 

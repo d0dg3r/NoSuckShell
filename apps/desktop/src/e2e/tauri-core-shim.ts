@@ -314,18 +314,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
           manifest: {
             id: "dev.nosuckshell.plugin.file-workspace",
             version: "0.0.0-e2e",
-            displayName: "File workspace",
+            displayName: "NSS-Commander",
             capabilities: ["settingsUi"],
-          },
-          enabled: true,
-          entitlementOk: true,
-        },
-        {
-          manifest: {
-            id: "dev.nosuckshell.plugin.demo",
-            version: "0.0.0-e2e",
-            displayName: "Demo plugin",
-            capabilities: ["credentialProvider", "settingsUi"],
           },
           enabled: true,
           entitlementOk: true,

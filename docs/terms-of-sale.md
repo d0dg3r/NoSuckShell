@@ -12,13 +12,18 @@ A **signed license token** (offline Ed25519) that lists **entitlement strings**.
 
 | Add-on (catalog id) | Entitlement string |
 | --- | --- |
-| File workspace (premium) (`file-workspace-addon`) | `dev.nosuckshell.addon.file-workspace` |
+| NSS-Commander (`file-workspace-addon`) | `dev.nosuckshell.addon.file-workspace` |
 | Bitwarden (`bitwarden-integration`) | `dev.nosuckshell.addon.bitwarden` |
 | GitHub sync (`github-sync`) | `dev.nosuckshell.addon.github-sync` |
 | GitLab sync (`gitlab-sync`) | `dev.nosuckshell.addon.gitlab-sync` |
 | Gitea sync (`gitea-sync`) | `dev.nosuckshell.addon.gitea-sync` |
 | HashiCorp Vault (`hashicorp-vault-integration`) | `dev.nosuckshell.addon.hashicorp-vault` |
 | Proxmox (`proxmox-integration`) | `dev.nosuckshell.addon.proxmox` |
+| AWS (`aws-integration`) | `dev.nosuckshell.addon.aws` |
+| Azure (`azure-integration`) | `dev.nosuckshell.addon.azure` |
+| Hetzner Cloud (`hetzner-integration`) | `dev.nosuckshell.addon.hetzner` |
+| GCP (`gcp-integration`) | `dev.nosuckshell.addon.gcp` |
+| DigitalOcean (`digitalocean-integration`) | `dev.nosuckshell.addon.digitalocean` |
 
 Free catalog rows (for example the **demo plugin**) do not require a purchase. The canonical list of rows and entitlements is in [`apps/desktop/src/features/plugin-store-catalog.ts`](../apps/desktop/src/features/plugin-store-catalog.ts).
 

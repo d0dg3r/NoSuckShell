@@ -9,6 +9,8 @@ type ProxmuxClusterRow = {
   proxmoxUrl: string;
   /** Omitted on older plugin payloads; treated as false. */
   allowInsecureTls?: boolean;
+  tlsTrustedCertPem?: string | null;
+  tlsTrustedLeafSha256?: string | null;
 };
 
 type ListStateResponse = {
@@ -257,6 +259,7 @@ export type ProxmuxSidebarPanelProps = {
     label: string;
     allowInsecureTls: boolean;
     proxmoxBaseUrl: string;
+    tlsTrustedCertPem?: string;
   }) => void | Promise<void>;
   onOpenProxmoxLxcConsoleInPane?: (ctx: {
     clusterId: string;
@@ -265,6 +268,7 @@ export type ProxmuxSidebarPanelProps = {
     label: string;
     allowInsecureTls: boolean;
     proxmoxBaseUrl: string;
+    tlsTrustedCertPem?: string;
   }) => void | Promise<void>;
 };
 
@@ -718,6 +722,7 @@ export function ProxmuxSidebarPanel({
   const proxmoxBaseUrl = activeCluster?.proxmoxUrl ?? "";
 
   const allowInsecureTlsForOpens = activeCluster?.allowInsecureTls === true;
+  const tlsTrustedCertPemForOpens = typeof activeCluster?.tlsTrustedCertPem === "string" ? activeCluster.tlsTrustedCertPem.trim() : "";
 
   const runOpenUrl = useCallback(
     async (url: string, label?: string) => {
@@ -828,6 +833,7 @@ export function ProxmuxSidebarPanel({
                     label: "noVNC",
                     allowInsecureTls: allowInsecureTlsForOpens,
                     proxmoxBaseUrl,
+                    ...(tlsTrustedCertPemForOpens ? { tlsTrustedCertPem: tlsTrustedCertPemForOpens } : {}),
                   });
                   return;
                 }
@@ -883,6 +889,7 @@ export function ProxmuxSidebarPanel({
                   label: "LXC console",
                   allowInsecureTls: allowInsecureTlsForOpens,
                   proxmoxBaseUrl,
+                  ...(tlsTrustedCertPemForOpens ? { tlsTrustedCertPem: tlsTrustedCertPemForOpens } : {}),
                 });
                 return;
               }

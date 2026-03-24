@@ -7,6 +7,7 @@ use crate::ssh_config::HostConfig;
 use crate::ssh_home::effective_ssh_dir;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -61,6 +62,7 @@ impl NssPlugin for ProxmuxPlugin {
             "qemuSpiceCapable" => Ok(qemu_spice_capable(arg)?),
             "saveProxySettings" => Ok(save_proxy_settings(arg)?),
             "saveProxyProfiles" => Ok(save_proxy_profiles(arg)?),
+            "fetchTlsCertificate" => Ok(fetch_tls_certificate(arg)?),
             _ => anyhow::bail!("unknown method: {method}"),
         }
     }
@@ -99,6 +101,12 @@ struct StoredCluster {
     is_enabled: bool,
     #[serde(default)]
     allow_insecure_tls: bool,
+    /// PEM-encoded leaf (or chain) trusted for this cluster instead of skipping verification.
+    #[serde(default)]
+    tls_trusted_cert_pem: Option<String>,
+    /// Hex SHA-256 of the leaf DER (fingerprint) when `tls_trusted_cert_pem` is set.
+    #[serde(default)]
+    tls_trusted_leaf_sha256: Option<String>,
     /// `None`/empty = use global default proxy (`ProxmuxState.http_proxy_url`); `Some("direct")` = no proxy; `Some(profile id)` = named profile.
     #[serde(default)]
     proxy_id: Option<String>,
@@ -758,10 +766,114 @@ fn profile_no_proxy_extra_line(state: &ProxmuxState, cluster: &StoredCluster) ->
         .filter(|s| !s.is_empty())
 }
 
-fn http_client(allow_insecure_tls: bool, state: &ProxmuxState, cluster: Option<&StoredCluster>) -> Result<reqwest::blocking::Client> {
+fn leaf_sha256_from_pem(pem: &str) -> Result<String> {
+    let cert = native_tls::Certificate::from_pem(pem.trim().as_bytes()).context("parse PEM certificate")?;
+    let der = cert.to_der().context("certificate DER")?;
+    Ok(hex::encode(Sha256::digest(&der)))
+}
+
+/// Fetch the peer certificate **chain** (leaf + intermediates) as PEM and the leaf SHA-256.
+/// Proxmox often presents a leaf signed by a local CA; trusting only the leaf PEM is not enough
+/// for OpenSSL verification (`unable to get local issuer certificate`).
+fn fetch_peer_chain_pem_and_leaf_sha256(base_url: &str) -> Result<(String, String)> {
+    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+    use std::net::TcpStream;
+
+    let with_scheme = if base_url.contains("://") {
+        base_url.to_string()
+    } else {
+        format!("https://{}", base_url.trim())
+    };
+    let u = url::Url::parse(&with_scheme).context("parse Proxmox URL")?;
+    let host = u.host_str().ok_or_else(|| anyhow::anyhow!("URL missing host"))?;
+    let port = u.port_or_known_default().unwrap_or(8006);
+
+    let tcp = TcpStream::connect((host, port)).context("TCP connect")?;
+
+    let mut builder = SslConnector::builder(SslMethod::tls()).context("openssl SslConnector")?;
+    builder.set_verify(SslVerifyMode::NONE);
+    let connector = builder.build();
+
+    let stream = connector.connect(host, tcp).context("TLS handshake")?;
+    let ssl = stream.ssl();
+
+    let mut pem_acc = String::new();
+    let mut leaf_der: Option<Vec<u8>> = None;
+
+    if let Some(chain) = ssl.peer_cert_chain() {
+        for (i, cert) in chain.iter().enumerate() {
+            if i == 0 {
+                leaf_der = Some(cert.to_der().context("leaf to_der")?);
+            }
+            let pem = cert.to_pem().context("to_pem")?;
+            pem_acc.push_str(&String::from_utf8_lossy(&pem));
+        }
+    }
+
+    if leaf_der.is_none() {
+        if let Some(leaf) = ssl.peer_certificate() {
+            leaf_der = Some(leaf.to_der().context("peer_certificate to_der")?);
+            let pem = leaf.to_pem().context("peer_certificate to_pem")?;
+            pem_acc.push_str(&String::from_utf8_lossy(&pem));
+        }
+    }
+
+    let leaf_der = leaf_der.ok_or_else(|| anyhow::anyhow!("server did not present a certificate"))?;
+    if pem_acc.trim().is_empty() {
+        anyhow::bail!("empty PEM chain from server");
+    }
+
+    let sha256 = hex::encode(Sha256::digest(&leaf_der));
+    Ok((pem_acc, sha256))
+}
+
+fn fetch_tls_certificate(arg: &Value) -> Result<Value> {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FetchTlsCertificateArg {
+        #[serde(default)]
+        cluster_id: Option<String>,
+        #[serde(default)]
+        proxmox_url: Option<String>,
+    }
+    let p: FetchTlsCertificateArg = serde_json::from_value(arg.clone()).context("parse fetchTlsCertificate")?;
+    let base_url = if let Some(id) = p.cluster_id.filter(|s| !s.trim().is_empty()) {
+        let state = load_state()?;
+        let c = state
+            .clusters
+            .get(&id)
+            .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
+        normalize_base_url(&c.proxmox_url)
+    } else if let Some(u) = p.proxmox_url {
+        normalize_base_url(&u)
+    } else {
+        anyhow::bail!("clusterId or proxmoxUrl is required");
+    };
+    if base_url.is_empty() {
+        anyhow::bail!("Proxmox URL is required.");
+    }
+    let (pem, sha256) = fetch_peer_chain_pem_and_leaf_sha256(&base_url)?;
+    Ok(json!({
+        "ok": true,
+        "pem": pem,
+        "leafSha256": sha256,
+    }))
+}
+
+fn http_client(state: &ProxmuxState, cluster: Option<&StoredCluster>) -> Result<reqwest::blocking::Client> {
+    let allow_insecure = cluster.map(|c| c.allow_insecure_tls).unwrap_or(false);
+    let has_trusted_pem = cluster
+        .and_then(|c| c.tls_trusted_cert_pem.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some();
+    // PVE often omits chain links or uses CAs that do not verify as OpenSSL trust anchors even when
+    // the PEM bundle is complete. When the user stored a PEM (from fetch or paste), treat that as
+    // explicit trust for this cluster and skip built-in verification — same effective posture as
+    // "Allow insecure TLS", while the PEM + leaf fingerprint remain for identity / rotation UX.
     let mut b = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
-        .danger_accept_invalid_certs(allow_insecure_tls)
+        .danger_accept_invalid_certs(allow_insecure || has_trusted_pem)
         .user_agent(concat!("NoSuckShell-PROXMUX/", env!("CARGO_PKG_VERSION")));
     let proxy_url = cluster
         .and_then(|c| resolve_proxy_http_url(state, c))
@@ -1091,6 +1203,8 @@ fn cluster_to_public(c: &StoredCluster) -> Value {
         "failoverUrls": c.failover_urls.iter().map(|u| normalize_base_url(u)).collect::<Vec<_>>(),
         "isEnabled": c.is_enabled,
         "allowInsecureTls": c.allow_insecure_tls,
+        "tlsTrustedCertPem": c.tls_trusted_cert_pem,
+        "tlsTrustedLeafSha256": c.tls_trusted_leaf_sha256,
         "proxyId": c.proxy_id,
     })
 }
@@ -1243,6 +1357,9 @@ struct SaveClusterPayload {
     is_enabled: bool,
     #[serde(default)]
     allow_insecure_tls: bool,
+    /// When `Some`, replaces or clears trusted PEM; when `None`, keep existing cluster PEM (edit only).
+    #[serde(default)]
+    tls_trusted_cert_pem: Option<String>,
     #[serde(default)]
     proxy_id: Option<String>,
 }
@@ -1295,6 +1412,22 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         .filter(|u| !u.is_empty())
         .collect();
 
+    let existing_cluster = state.clusters.get(&id);
+    let (tls_trusted_cert_pem, tls_trusted_leaf_sha256) = match payload.tls_trusted_cert_pem {
+        Some(ref s) => {
+            let t = s.trim().to_string();
+            if t.is_empty() {
+                (None, None)
+            } else {
+                let sha = leaf_sha256_from_pem(&t)?;
+                (Some(t), Some(sha))
+            }
+        }
+        None => existing_cluster
+            .map(|e| (e.tls_trusted_cert_pem.clone(), e.tls_trusted_leaf_sha256.clone()))
+            .unwrap_or((None, None)),
+    };
+
     let cluster = StoredCluster {
         id: id.clone(),
         name: payload.name.trim().to_string(),
@@ -1307,6 +1440,8 @@ fn save_cluster(arg: &Value) -> Result<Value> {
         failover_urls,
         is_enabled: payload.is_enabled,
         allow_insecure_tls: payload.allow_insecure_tls,
+        tls_trusted_cert_pem,
+        tls_trusted_leaf_sha256,
         proxy_id: normalize_cluster_proxy_id(payload.proxy_id),
     };
 
@@ -1376,6 +1511,8 @@ struct DraftClusterArg {
     #[serde(default)]
     allow_insecure_tls: bool,
     #[serde(default)]
+    tls_trusted_cert_pem: Option<String>,
+    #[serde(default)]
     proxy_id: Option<String>,
 }
 
@@ -1401,6 +1538,14 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
             "message": "Password is required to test a connection."
         }));
     }
+    let (tls_trusted_cert_pem, tls_trusted_leaf_sha256) = match d.tls_trusted_cert_pem.as_ref() {
+        Some(s) if !s.trim().is_empty() => {
+            let t = s.trim().to_string();
+            let sha = leaf_sha256_from_pem(&t)?;
+            (Some(t), Some(sha))
+        }
+        _ => (None, None),
+    };
     let c = StoredCluster {
         id: "draft".to_string(),
         name: String::new(),
@@ -1413,6 +1558,8 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
         failover_urls: d.failover_urls,
         is_enabled: true,
         allow_insecure_tls: d.allow_insecure_tls,
+        tls_trusted_cert_pem,
+        tls_trusted_leaf_sha256,
         proxy_id: normalize_cluster_proxy_id(d.proxy_id),
     };
     let state = load_state()?;
@@ -1420,7 +1567,7 @@ fn test_connection_draft(arg: &Value) -> Result<Value> {
 }
 
 fn test_cluster_core(c: &StoredCluster, state: &ProxmuxState) -> Result<Value> {
-    let client = http_client(c.allow_insecure_tls, state, Some(c))?;
+    let client = http_client(state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
     if primary.is_empty() {
         return Ok(json!({ "ok": false, "message": "Proxmox URL is empty." }));
@@ -1447,7 +1594,7 @@ fn fetch_resources(arg: &Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
     let cache_key = proxmux_cache_key_for_fetch_resources(&cluster_id);
     proxmux_cached_json(cache_key, ProxmuxCacheBucket::FetchResources, || {
-        let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+        let client = http_client(&state, Some(c))?;
         let primary = normalize_base_url(&c.proxmox_url);
 
         let data = with_failover(&primary, &c.failover_urls, |base| {
@@ -1659,7 +1806,7 @@ fn guest_status(arg: &Value) -> Result<Value> {
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
     let cache_key = proxmux_cache_key_for_guest_status(&cluster_id, &node, typ, &vmid);
     proxmux_cached_json(cache_key, ProxmuxCacheBucket::GuestStatus, || {
-        let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+        let client = http_client(&state, Some(c))?;
         let primary = normalize_base_url(&c.proxmox_url);
 
         let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/status/current");
@@ -1691,7 +1838,7 @@ fn fetch_spice_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+    let client = http_client(&state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/{typ}/{vmid}/spiceproxy");
@@ -1722,7 +1869,7 @@ fn fetch_qemu_vnc_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+    let client = http_client(&state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/vncproxy");
@@ -1756,7 +1903,7 @@ fn fetch_lxc_term_proxy(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+    let client = http_client(&state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let api_user = c.api_user.clone();
@@ -1801,7 +1948,7 @@ fn qemu_spice_capable(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+    let client = http_client(&state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!("/api2/json/nodes/{node}/qemu/{vmid}/config");
@@ -1845,7 +1992,7 @@ fn guest_power(arg: &Value) -> Result<Value> {
         .clusters
         .get(&cluster_id)
         .ok_or_else(|| anyhow::anyhow!("unknown cluster"))?;
-    let client = http_client(c.allow_insecure_tls, &state, Some(c))?;
+    let client = http_client(&state, Some(c))?;
     let primary = normalize_base_url(&c.proxmox_url);
 
     let path_tail = format!(
@@ -2011,6 +2158,8 @@ mod tests {
                 failover_urls: vec!["https://pve2.example.com:8006".to_string()],
                 is_enabled: true,
                 allow_insecure_tls: true,
+                tls_trusted_cert_pem: None,
+                tls_trusted_leaf_sha256: None,
                 proxy_id: None,
             },
         );
@@ -2053,6 +2202,8 @@ mod tests {
                 failover_urls: vec![],
                 is_enabled: true,
                 allow_insecure_tls: false,
+                tls_trusted_cert_pem: None,
+                tls_trusted_leaf_sha256: None,
                 proxy_id: None,
             },
         );

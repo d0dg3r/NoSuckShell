@@ -1,22 +1,20 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PROXMUX_PLUGIN_ID } from "../features/builtin-plugin-ids";
-import { buildProxmoxConsoleUrl } from "../features/proxmox-console-urls";
 import { buildProxmoxConsoleWebSocketUrl, parseProxmoxConsoleProxyData } from "../features/proxmox-console-ws";
-import { openProxmoxInAppWebviewWindow } from "../features/proxmox-webview-window";
-import { openExternalUrl, pluginInvoke, proxmuxWsProxyStart, proxmuxWsProxyStop } from "../tauri-api";
+import { pluginInvoke, proxmuxWsProxyStart, proxmuxWsProxyStop } from "../tauri-api";
 
 type Props = {
   clusterId: string;
   node: string;
   vmid: string;
   paneTitle: string;
-  proxmoxBaseUrl: string;
   allowInsecureTls?: boolean;
+  tlsTrustedCertPem?: string;
+  /** Incrementing nonce from pane toolbar to trigger reconnect. */
+  reconnectRequestNonce?: number;
   onError?: (message: string) => void;
-  onOpenInAppWindowError?: (message: string) => void;
-  onLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
 };
 
 /**
@@ -96,11 +94,10 @@ export function ProxmoxLxcTermPane({
   node,
   vmid,
   paneTitle,
-  proxmoxBaseUrl,
   allowInsecureTls = false,
+  tlsTrustedCertPem,
+  reconnectRequestNonce = 0,
   onError,
-  onOpenInAppWindowError,
-  onLoginFirstWebviewOpen,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -110,9 +107,44 @@ export function ProxmoxLxcTermPane({
   const proxyIdRef = useRef<string | null>(null);
   const [phase, setPhase] = useState<"connecting" | "ready" | "error">("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting…");
-  const [connectNonce, setConnectNonce] = useState(0);
 
-  const deepLinkUrl = buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "lxc", node, vmid });
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const root = container?.closest<HTMLElement>(".terminal-root");
+    if (!container || !root) {
+      return;
+    }
+
+    const applyTopInset = () => {
+      const pane = root.closest(".split-pane") as HTMLElement | null;
+      const label = pane?.querySelector(".split-pane-label") as HTMLElement | null;
+      if (!pane || !label) {
+        root.style.removeProperty("--pane-terminal-top-inset");
+        return;
+      }
+      const paneTop = pane.getBoundingClientRect().top;
+      const labelBottom = label.getBoundingClientRect().bottom;
+      const requiredTopInset = Math.ceil(Math.max(0, labelBottom - paneTop) + 2);
+      root.style.setProperty("--pane-terminal-top-inset", `${requiredTopInset}px`);
+    };
+
+    applyTopInset();
+    const pane = root.closest(".split-pane");
+    const label = pane?.querySelector(".split-pane-label") as HTMLElement | null;
+    if (!label) {
+      return () => {
+        root.style.removeProperty("--pane-terminal-top-inset");
+      };
+    }
+    const ro = new ResizeObserver(() => applyTopInset());
+    ro.observe(label);
+    window.addEventListener("resize", applyTopInset);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", applyTopInset);
+      root.style.removeProperty("--pane-terminal-top-inset");
+    };
+  }, [paneTitle]);
 
   const teardown = useCallback(async () => {
     detachRef.current?.();
@@ -138,22 +170,6 @@ export function ProxmoxLxcTermPane({
       /* ignore */
     }
   }, []);
-
-  const openInAppWindow = useCallback(() => {
-    void openProxmoxInAppWebviewWindow({ title: paneTitle, consoleUrl: deepLinkUrl, allowInsecureTls })
-      .then((result) => {
-        if (result.loginFirst && !result.reused) {
-          onLoginFirstWebviewOpen?.({ label: result.label, consoleUrl: deepLinkUrl });
-        }
-      })
-      .catch((e) => {
-        onOpenInAppWindowError?.(String(e));
-      });
-  }, [allowInsecureTls, deepLinkUrl, onLoginFirstWebviewOpen, onOpenInAppWindowError, paneTitle]);
-
-  const openInBrowser = useCallback(() => {
-    void openExternalUrl(deepLinkUrl).catch(() => {});
-  }, [deepLinkUrl]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -208,10 +224,14 @@ export function ProxmoxLxcTermPane({
         const vncTicket = String(ticket.ticket);
         const wssUrl = buildProxmoxConsoleWebSocketUrl(raw.apiOrigin.trim(), node, vmid, "lxc", ticket);
 
+        const tlsPem = tlsTrustedCertPem?.trim() ?? "";
+        const useTlsBridge = allowInsecureTls || tlsPem.length > 0;
+        const upstreamInsecureOnly = allowInsecureTls && tlsPem.length === 0;
+
         let connectUrl = wssUrl;
-        if (allowInsecureTls) {
+        if (useTlsBridge) {
           setStatusMessage("Starting local TLS bridge…");
-          const proxy = await proxmuxWsProxyStart(wssUrl, true, undefined, raw.authCookie);
+          const proxy = await proxmuxWsProxyStart(wssUrl, upstreamInsecureOnly, tlsPem || null, undefined, raw.authCookie);
           if (cancelled) {
             await proxmuxWsProxyStop(proxy.proxyId).catch(() => {});
             return;
@@ -281,25 +301,10 @@ export function ProxmoxLxcTermPane({
       ro.disconnect();
       void teardown();
     };
-  }, [allowInsecureTls, clusterId, connectNonce, node, onError, teardown, vmid]);
-
-  const reconnect = useCallback(() => {
-    setConnectNonce((n) => n + 1);
-  }, []);
+  }, [allowInsecureTls, clusterId, node, onError, reconnectRequestNonce, teardown, tlsTrustedCertPem, vmid]);
 
   return (
     <div className="proxmox-console-pane proxmox-console-pane--lxc terminal-root terminal-host" role="region" aria-label={paneTitle}>
-      <div className="web-pane-toolbar proxmox-console-toolbar">
-        <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={reconnect}>
-          Reconnect
-        </button>
-        <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={openInAppWindow}>
-          Open in app window
-        </button>
-        <button type="button" className="btn btn-settings-tool web-pane-toolbar-btn" onClick={openInBrowser}>
-          Open in browser
-        </button>
-      </div>
       {phase !== "ready" && statusMessage ? (
         <div className="proxmox-console-pane-status muted-copy" role="status">
           {statusMessage}

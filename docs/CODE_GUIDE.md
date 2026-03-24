@@ -50,6 +50,8 @@ cargo check
 There is **no ESLint/Prettier** in the repo today; **`tsc` (via `npm run build`) and `cargo check`** are the baseline. If formatters are added later, follow the repo configuration.
 A validation script is available at `.agents/skills/nosuckshell_ops/scripts/validate_project.sh` to run these checks in one go.
 
+**Releases:** Before tagging, follow the **Release preparation** checklist in [`.agents/skills/nosuckshell_ops/SKILL.md`](../.agents/skills/nosuckshell_ops/SKILL.md) (aligned versions, changelog, lockfiles, docs).
+
 ## AI-assisted editors and agents
 
 - Read [STYLE_GUIDE.md](STYLE_GUIDE.md) and this **CODE_GUIDE** before large edits.
