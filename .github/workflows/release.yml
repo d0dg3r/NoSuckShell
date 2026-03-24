@@ -309,7 +309,6 @@ jobs:
           
           # Inject version into PKGBUILD
           sed -i "s/pkgver=\${_PKGVER}/pkgver=${PKGVER}/" PKGBUILD
-          sed -i "s/\${_REALVER}/${VERSION}/" PKGBUILD
 
           # Use a Docker container to run makepkg since Ubuntu doesn't have it natively
           # Pre-install dependencies as root
