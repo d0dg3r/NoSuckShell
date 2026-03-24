@@ -101,10 +101,14 @@ struct StoredCluster {
     is_enabled: bool,
     #[serde(default)]
     allow_insecure_tls: bool,
-    /// PEM-encoded leaf (or chain) trusted for this cluster instead of skipping verification.
+    /// PEM-encoded leaf (or chain) associated with this cluster.
+    /// NOTE: the current HTTP client logic still disables standard TLS verification
+    /// (e.g. via `danger_accept_invalid_certs(true)`) when this field is set; the PEM is
+    /// not used as a replacement trust store.
     #[serde(default)]
     tls_trusted_cert_pem: Option<String>,
-    /// Hex SHA-256 of the leaf DER (fingerprint) when `tls_trusted_cert_pem` is set.
+    /// Hex SHA-256 of the leaf DER (fingerprint) recorded when `tls_trusted_cert_pem` is set.
+    /// This is currently informational and is not enforced by the HTTP client.
     #[serde(default)]
     tls_trusted_leaf_sha256: Option<String>,
     /// `None`/empty = use global default proxy (`ProxmuxState.http_proxy_url`); `Some("direct")` = no proxy; `Some(profile id)` = named profile.
