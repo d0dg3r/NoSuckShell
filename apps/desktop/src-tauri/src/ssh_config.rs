@@ -77,27 +77,39 @@ pub fn parse_hosts(content: &str) -> Vec<HostConfig> {
     result
 }
 
+/// Renders one `Host` stanza. Each `extra_line` should include its own newline or be a full logical line (e.g. `  # comment\n`).
+pub fn render_single_host_stanza(host: &HostConfig, extra_lines: &[String]) -> String {
+    let mut output = format!("Host {}\n", host.host);
+    if !host.host_name.is_empty() {
+        output.push_str(&format!("  HostName {}\n", host.host_name));
+    }
+    if !host.user.is_empty() {
+        output.push_str(&format!("  User {}\n", host.user));
+    }
+    output.push_str(&format!("  Port {}\n", host.port));
+    if !host.identity_file.is_empty() {
+        output.push_str(&format!("  IdentityFile {}\n", host.identity_file));
+    }
+    if !host.proxy_jump.is_empty() {
+        output.push_str(&format!("  ProxyJump {}\n", host.proxy_jump));
+    }
+    if !host.proxy_command.is_empty() {
+        output.push_str(&format!("  ProxyCommand {}\n", host.proxy_command));
+    }
+    for line in extra_lines {
+        output.push_str(line);
+        if !line.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    output.push('\n');
+    output
+}
+
 pub fn render_hosts(hosts: &[HostConfig]) -> String {
     let mut output = String::from("# Managed by NoSuckShell\n\n");
     for host in hosts {
-        output.push_str(&format!("Host {}\n", host.host));
-        if !host.host_name.is_empty() {
-            output.push_str(&format!("  HostName {}\n", host.host_name));
-        }
-        if !host.user.is_empty() {
-            output.push_str(&format!("  User {}\n", host.user));
-        }
-        output.push_str(&format!("  Port {}\n", host.port));
-        if !host.identity_file.is_empty() {
-            output.push_str(&format!("  IdentityFile {}\n", host.identity_file));
-        }
-        if !host.proxy_jump.is_empty() {
-            output.push_str(&format!("  ProxyJump {}\n", host.proxy_jump));
-        }
-        if !host.proxy_command.is_empty() {
-            output.push_str(&format!("  ProxyCommand {}\n", host.proxy_command));
-        }
-        output.push('\n');
+        output.push_str(&render_single_host_stanza(host, &[]));
     }
     output
 }
