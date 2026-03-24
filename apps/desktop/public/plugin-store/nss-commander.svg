@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-hidden="true">
+  <title>NSS-Commander</title>
+  <defs>
+    <linearGradient id="nss-commander-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="55%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#nss-commander-grad)" />
+  <path
+    fill="none"
+    stroke="#f8fafc"
+    stroke-width="2.15"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    d="M8 17V7 M8 7l9 10 M17 7v10"
+  />
+  <path
+    fill="none"
+    stroke="#f8fafc"
+    stroke-width="1.35"
+    stroke-linecap="round"
+    d="M7.5 19.25h9"
+    opacity="0.9"
+  />
+</svg>

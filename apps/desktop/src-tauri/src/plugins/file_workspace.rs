@@ -11,7 +11,7 @@ impl NssPlugin for FileWorkspacePlugin {
         PluginManifest {
             id: FILE_WORKSPACE_PLUGIN_ID.to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            display_name: "File workspace".to_string(),
+            display_name: "NSS-Commander".to_string(),
             capabilities: vec![PluginCapability::SettingsUi],
         }
     }

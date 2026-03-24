@@ -27,3 +27,5 @@ Cursor (and similar) may load rules under [`.cursor/rules/`](.cursor/rules/) —
 ## Contributing workflow
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, screenshots, PR checklist, and security reporting.
+
+**Cutting a release:** Use the **Release preparation** section in [`.agents/skills/nosuckshell_ops/SKILL.md`](.agents/skills/nosuckshell_ops/SKILL.md) together with [docs/CHANGELOG.md](docs/CHANGELOG.md) and [docs/releases.md](docs/releases.md).

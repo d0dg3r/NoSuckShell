@@ -10,3 +10,4 @@ services/license-server/target
 apps/desktop/src-tauri/gen
 Cargo.lock
 # .cursor/ is no longer ignored because it contains shared rules for agents
+.cursor/debug-*.log

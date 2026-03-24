@@ -36,6 +36,8 @@ export type ProxmoxQemuVncSessionTab = {
   /** Cluster GUI base URL for "Open in app window" fallback (deep link). */
   proxmoxBaseUrl: string;
   allowInsecureTls?: boolean;
+  /** PEM trusted for TLS (PROXMUX cluster); used with the local WebSocket bridge. */
+  tlsTrustedCertPem?: string;
 };
 /** Pane-native LXC console using PROXMUX termproxy ticket + API WebSocket. */
 export type ProxmoxLxcTermSessionTab = {
@@ -47,6 +49,7 @@ export type ProxmoxLxcTermSessionTab = {
   vmid: string;
   proxmoxBaseUrl: string;
   allowInsecureTls?: boolean;
+  tlsTrustedCertPem?: string;
 };
 export type SessionTab =
   | SavedSshSessionTab

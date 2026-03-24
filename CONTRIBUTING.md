@@ -61,7 +61,7 @@ For security-sensitive reports, use the process in [SECURITY.md](SECURITY.md), n
 
 ## Releases (maintainers)
 
-Process and tagging: [docs/releases.md](docs/releases.md). User-facing notes: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Process and tagging: [docs/releases.md](docs/releases.md). User-facing notes: [docs/CHANGELOG.md](docs/CHANGELOG.md). Checklist (versions, lockfiles, doc sync): [`.agents/skills/nosuckshell_ops/SKILL.md`](.agents/skills/nosuckshell_ops/SKILL.md) § Release preparation.
 
 ## Community standards
 

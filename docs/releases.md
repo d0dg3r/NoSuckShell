@@ -5,7 +5,7 @@ This repository publishes desktop releases from Git tags via GitHub Actions.
 ## Tag convention
 
 - Final release: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v0.1.0-beta.7`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<prerelease>` (example: `v1.2.3-rc.1`, `v0.1.0-beta.11`)
 - Accepted prerelease token format: dot-separated `[0-9A-Za-z-]+` parts.
 
 Validation regex in workflow:
@@ -47,6 +47,7 @@ For each platform:
    - `apps/desktop/package.json`
    - `apps/desktop/src-tauri/tauri.conf.json`
    - `apps/desktop/src-tauri/Cargo.toml`
+   - (Not rewritten by CI — keep in sync locally when you prepare a release PR: `apps/desktop/package-lock.json` top-level `version` fields, and `apps/desktop/src-tauri/Cargo.lock` `[[package]] name = "src-tauri"` version line.)
 6. Run `npm run tauri:build` with optional **`NOSUCKSHELL_LICENSE_PUBKEY_HEX`** (64 hex chars) in the environment so the binary **embeds** your production Ed25519 verify key at compile time (`option_env!` in `apps/desktop/src-tauri/src/license.rs`).
 7. Upload generated bundles as build artifacts.
 
@@ -86,16 +87,17 @@ git push origin v0.2.0
 git tag v0.3.0-rc.1
 git push origin v0.3.0-rc.1
 
-# beta prerelease (current line)
-git tag v0.1.0-beta.11
-git push origin v0.1.0-beta.11
+# stable release (example: current product line)
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-## Current beta (planned)
+## Current release (0.2.x)
 
-- **Target tag:** `v0.1.0-beta.11` — push when you are ready; in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` match this prerelease.
-- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.1.0-beta.11`.
+- **Target tag:** `v0.2.1` — push when you are ready; in-repo versions in `apps/desktop/package.json`, `apps/desktop/package-lock.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `apps/desktop/src-tauri/Cargo.toml` must match **before** you tag (see [CHANGELOG.md](CHANGELOG.md)).
+- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.2.1`.
 - The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
+- **Working-tree drift:** if `package.json` is bumped ahead of `Cargo.toml` / `tauri.conf.json` (or the reverse), realign before you cut a release so local `tauri dev` and CI agree on the product version.
 
 ## Common pitfalls checklist
 

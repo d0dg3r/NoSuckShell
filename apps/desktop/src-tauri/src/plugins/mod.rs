@@ -1,5 +1,4 @@
 //! Built-in plugin registry and host-config enrichment hooks.
-mod demo;
 mod file_workspace;
 mod proxmux;
 
@@ -51,7 +50,6 @@ static REGISTRY: OnceLock<Vec<&'static dyn NssPlugin>> = OnceLock::new();
 pub fn register_builtin_plugins() {
     let _ = REGISTRY.set(vec![
         &file_workspace::FileWorkspacePlugin as &dyn NssPlugin,
-        &demo::DemoPlugin as &dyn NssPlugin,
         &proxmux::ProxmuxPlugin as &dyn NssPlugin,
     ]);
 }

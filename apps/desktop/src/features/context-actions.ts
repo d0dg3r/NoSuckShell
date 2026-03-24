@@ -31,7 +31,7 @@ type BuildArgs = {
   paneSessionId: string | null;
   paneSessionKind: PaneContextSessionKind;
   paneFileView: "terminal" | "remote" | "local";
-  /** When false, remote/local file browser toggles are hidden (File workspace plugin off). */
+  /** When false, remote/local file browser toggles are hidden (NSS-Commander plugin off). */
   fileWorkspaceEnabled?: boolean;
   canClosePane?: boolean;
   broadcastModeEnabled: boolean;

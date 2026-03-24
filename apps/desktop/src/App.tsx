@@ -169,7 +169,7 @@ import {
 } from "./features/host-metadata-policy";
 import { createId } from "./features/app-id";
 import { validateExternalHttpUrl } from "./features/external-http-url";
-import { isProxmoxConsoleDeepLinkUrl } from "./features/proxmox-console-urls";
+import { buildProxmoxConsoleUrl, isProxmoxConsoleDeepLinkUrl } from "./features/proxmox-console-urls";
 import {
   computeProxmuxWarmupDelayMs,
   selectProxmuxWarmupClusterId,
@@ -697,6 +697,8 @@ export function App() {
   const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
   const sessionTerminalCwdRef = useRef<Record<string, string>>({});
   const [sessionTerminalCwdEpoch, setSessionTerminalCwdEpoch] = useState(0);
+  const [proxmoxQemuVncReconnectNonces, setProxmoxQemuVncReconnectNonces] = useState<Record<number, number>>({});
+  const [proxmoxLxcReconnectNonces, setProxmoxLxcReconnectNonces] = useState<Record<number, number>>({});
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
@@ -3312,6 +3314,7 @@ export function App() {
             vmid: sourceSession.vmid,
             proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
             ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+            ...(sourceSession.tlsTrustedCertPem ? { tlsTrustedCertPem: sourceSession.tlsTrustedCertPem } : {}),
           },
         ]);
       } else {
@@ -3326,6 +3329,7 @@ export function App() {
             vmid: sourceSession.vmid,
             proxmoxBaseUrl: sourceSession.proxmoxBaseUrl,
             ...(sourceSession.allowInsecureTls ? { allowInsecureTls: true } : {}),
+            ...(sourceSession.tlsTrustedCertPem ? { tlsTrustedCertPem: sourceSession.tlsTrustedCertPem } : {}),
           },
         ]);
       }
@@ -4661,6 +4665,7 @@ export function App() {
       label: string;
       allowInsecureTls: boolean;
       proxmoxBaseUrl: string;
+      tlsTrustedCertPem?: string;
     }) => {
       setError("");
       const base = ctx.proxmoxBaseUrl.trim();
@@ -4680,6 +4685,7 @@ export function App() {
           vmid: ctx.vmid,
           proxmoxBaseUrl: base,
           ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+          ...(ctx.tlsTrustedCertPem?.trim() ? { tlsTrustedCertPem: ctx.tlsTrustedCertPem.trim() } : {}),
         },
       ]);
       const autoSplitDirection: "right" | "bottom" =
@@ -4702,6 +4708,7 @@ export function App() {
       label: string;
       allowInsecureTls: boolean;
       proxmoxBaseUrl: string;
+      tlsTrustedCertPem?: string;
     }) => {
       setError("");
       const base = ctx.proxmoxBaseUrl.trim();
@@ -4721,6 +4728,7 @@ export function App() {
           vmid: ctx.vmid,
           proxmoxBaseUrl: base,
           ...(ctx.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+          ...(ctx.tlsTrustedCertPem?.trim() ? { tlsTrustedCertPem: ctx.tlsTrustedCertPem.trim() } : {}),
         },
       ]);
       const autoSplitDirection: "right" | "bottom" =
@@ -5043,6 +5051,7 @@ export function App() {
           paneTitle: session.label,
           proxmoxBaseUrl: session.proxmoxBaseUrl,
           ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+          ...(session.tlsTrustedCertPem ? { tlsTrustedCertPem: session.tlsTrustedCertPem } : {}),
         };
       }
       if (session.kind === "proxmoxLxcTerm") {
@@ -5054,11 +5063,148 @@ export function App() {
           paneTitle: session.label,
           proxmoxBaseUrl: session.proxmoxBaseUrl,
           ...(session.allowInsecureTls ? { allowInsecureTls: true as const } : {}),
+          ...(session.tlsTrustedCertPem ? { tlsTrustedCertPem: session.tlsTrustedCertPem } : {}),
         };
       }
       return null;
     },
     [splitSlots, sessions],
+  );
+
+  const proxmoxQemuVncForPane = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxNativeConsoleForPane(paneIndex);
+      return px?.kind === "qemu-vnc" ? px : null;
+    },
+    [proxmoxNativeConsoleForPane],
+  );
+
+  const proxmoxQemuVncReconnectNonceForPane = useCallback(
+    (paneIndex: number): number => proxmoxQemuVncReconnectNonces[paneIndex] ?? 0,
+    [proxmoxQemuVncReconnectNonces],
+  );
+
+  const requestProxmoxQemuVncReconnect = useCallback((paneIndex: number) => {
+    setProxmoxQemuVncReconnectNonces((prev) => ({
+      ...prev,
+      [paneIndex]: (prev[paneIndex] ?? 0) + 1,
+    }));
+  }, []);
+
+  const openProxmoxQemuVncInAppWindow = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxQemuVncForPane(paneIndex);
+      if (!px) {
+        return;
+      }
+      setError("");
+      const consoleUrl = buildProxmoxConsoleUrl(px.proxmoxBaseUrl, {
+        kind: "qemu",
+        node: px.node,
+        vmid: px.vmid,
+      });
+      void openProxmoxInAppWebviewWindow({
+        title: px.paneTitle,
+        consoleUrl,
+        allowInsecureTls: px.allowInsecureTls === true,
+      })
+        .then((result) => {
+          if (result.loginFirst && !result.reused) {
+            setProxmoxWebLoginAssist({ label: result.label, consoleUrl });
+          }
+        })
+        .catch((e) => {
+          setError(String(e));
+        });
+    },
+    [proxmoxQemuVncForPane],
+  );
+
+  const openProxmoxQemuVncInBrowser = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxQemuVncForPane(paneIndex);
+      if (!px) {
+        return;
+      }
+      setError("");
+      const consoleUrl = buildProxmoxConsoleUrl(px.proxmoxBaseUrl, {
+        kind: "qemu",
+        node: px.node,
+        vmid: px.vmid,
+      });
+      void openExternalUrl(consoleUrl).catch((e) => {
+        setError(String(e));
+      });
+    },
+    [proxmoxQemuVncForPane],
+  );
+
+  const proxmoxLxcForPane = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxNativeConsoleForPane(paneIndex);
+      return px?.kind === "lxc-term" ? px : null;
+    },
+    [proxmoxNativeConsoleForPane],
+  );
+
+  const proxmoxLxcReconnectNonceForPane = useCallback(
+    (paneIndex: number): number => proxmoxLxcReconnectNonces[paneIndex] ?? 0,
+    [proxmoxLxcReconnectNonces],
+  );
+
+  const requestProxmoxLxcReconnect = useCallback((paneIndex: number) => {
+    setProxmoxLxcReconnectNonces((prev) => ({
+      ...prev,
+      [paneIndex]: (prev[paneIndex] ?? 0) + 1,
+    }));
+  }, []);
+
+  const openProxmoxLxcInAppWindow = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxLxcForPane(paneIndex);
+      if (!px) {
+        return;
+      }
+      setError("");
+      const consoleUrl = buildProxmoxConsoleUrl(px.proxmoxBaseUrl, {
+        kind: "lxc",
+        node: px.node,
+        vmid: px.vmid,
+      });
+      void openProxmoxInAppWebviewWindow({
+        title: px.paneTitle,
+        consoleUrl,
+        allowInsecureTls: px.allowInsecureTls === true,
+      })
+        .then((result) => {
+          if (result.loginFirst && !result.reused) {
+            setProxmoxWebLoginAssist({ label: result.label, consoleUrl });
+          }
+        })
+        .catch((e) => {
+          setError(String(e));
+        });
+    },
+    [proxmoxLxcForPane],
+  );
+
+  const openProxmoxLxcInBrowser = useCallback(
+    (paneIndex: number) => {
+      const px = proxmoxLxcForPane(paneIndex);
+      if (!px) {
+        return;
+      }
+      setError("");
+      const consoleUrl = buildProxmoxConsoleUrl(px.proxmoxBaseUrl, {
+        kind: "lxc",
+        node: px.node,
+        vmid: px.vmid,
+      });
+      void openExternalUrl(consoleUrl).catch((e) => {
+        setError(String(e));
+      });
+    },
+    [proxmoxLxcForPane],
   );
 
   const getFileExportDestPath = useCallback(async () => {
@@ -5120,6 +5266,14 @@ export function App() {
     fileWorkspacePluginEnabled,
     webPanePayloadForPane,
     proxmoxNativeConsoleForPane,
+    proxmoxQemuVncReconnectNonceForPane,
+    requestProxmoxQemuVncReconnect,
+    openProxmoxQemuVncInAppWindow,
+    openProxmoxQemuVncInBrowser,
+    proxmoxLxcReconnectNonceForPane,
+    requestProxmoxLxcReconnect,
+    openProxmoxLxcInAppWindow,
+    openProxmoxLxcInBrowser,
     onWebPaneOpenInAppWindowError: setError,
     onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,

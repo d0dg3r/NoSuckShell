@@ -1,7 +1,11 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "Starting NoSuckShell Project Validation..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+cd "$REPO_ROOT"
+
+echo "Starting NoSuckShell Project Validation (repo root: $REPO_ROOT)..."
 
 # Monorepo root checks
 echo "Checking frontend dependencies and running tsc..."
@@ -12,7 +16,7 @@ npm run desktop:test
 
 # Rust checks
 echo "Checking Rust code..."
-cd apps/desktop/src-tauri
+cd "$REPO_ROOT/apps/desktop/src-tauri"
 cargo check
 cargo test
 

@@ -15,9 +15,16 @@ describe("plugin-store-catalog", () => {
     expect(catalogItemUnlocked(["other"], item)).toBe(false);
   });
 
-  it("storeItemAccessGranted treats free catalog items as always granted", () => {
-    const demo = PLUGIN_STORE_CATALOG.find((i) => i.id === "demo-plugin")!;
-    expect(storeItemAccessGranted([], demo)).toBe(true);
+  it("storeItemAccessGranted treats manually defined free items as always granted", () => {
+    expect(
+      storeItemAccessGranted([], {
+        id: "free-item",
+        title: "Free item",
+        description: "free",
+        requiredEntitlements: [],
+        isFree: true,
+      }),
+    ).toBe(true);
   });
 
   it("formatLicenseExpSummary", () => {
@@ -40,6 +47,11 @@ describe("plugin-store-catalog", () => {
       "gitea-sync",
       "hashicorp-vault-integration",
       "proxmox-integration",
+      "aws-integration",
+      "azure-integration",
+      "hetzner-integration",
+      "gcp-integration",
+      "digitalocean-integration",
     ];
     for (const id of ids) {
       const item = PLUGIN_STORE_CATALOG.find((i) => i.id === id);

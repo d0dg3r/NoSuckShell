@@ -4,11 +4,9 @@ import {
   clearLicense,
   licenseStatus,
   listPlugins,
-  pluginInvoke,
   setPluginEnabled,
 } from "../../../tauri-api";
 import type { LicenseStatus, PluginListEntry } from "../../../types";
-import { DEMO_PLUGIN_ID } from "../../../features/builtin-plugin-ids";
 import {
   PLUGIN_STORE_CATALOG,
   formatLicenseExpSummary,
@@ -50,19 +48,6 @@ export function AppSettingsPluginsTab() {
     try {
       await setPluginEnabled(pluginId, enabled);
       await refresh();
-    } catch (e) {
-      setActionMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onPingDemo = async () => {
-    setActionMessage("");
-    setBusy(true);
-    try {
-      const out = await pluginInvoke(DEMO_PLUGIN_ID, "ping", { hello: "from-ui" });
-      setActionMessage(typeof out === "object" ? JSON.stringify(out) : String(out));
     } catch (e) {
       setActionMessage(e instanceof Error ? e.message : String(e));
     } finally {
@@ -276,11 +261,6 @@ export function AppSettingsPluginsTab() {
                 </li>
               ))}
             </ul>
-            <div className="settings-actions-row">
-              <button type="button" className="btn btn-settings-tool" onClick={() => void onPingDemo()} disabled={busy}>
-                Ping demo plugin
-              </button>
-            </div>
             {actionMessage ? (
               <p className="settings-card-lead plugins-tab-last-result">
                 <strong>Last result:</strong> {actionMessage}

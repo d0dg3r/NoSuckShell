@@ -6,7 +6,7 @@ Operator guide for pairing the desktop **Plugin store** tab with [`services/lice
 
 | Component | Role |
 | --- | --- |
-| Desktop app | Verifies Ed25519-signed tokens, stores `nosuckshell.license.json`, checks **entitlements** for gated plugins (e.g. file workspace → `dev.nosuckshell.addon.file-workspace`). |
+| Desktop app | Verifies Ed25519-signed tokens, stores `nosuckshell.license.json`, checks **entitlements** for gated plugins (e.g. NSS-Commander / file-workspace add-on → `dev.nosuckshell.addon.file-workspace`). |
 | `services/license-server` | Holds the **private** signing seed; mints tokens via `POST /admin/issue-license` or Ko-fi **`POST /webhooks/kofi`**. |
 | Ko-fi | Shop, memberships, donations; webhook hits your deployed license server. |
 
@@ -66,7 +66,7 @@ Buyer-facing scope for paid add-ons: [terms-of-sale.md](terms-of-sale.md).
 
 ## Local development (contributors)
 
-Without an activated license, **file workspace** is off until the license includes `dev.nosuckshell.addon.file-workspace`. With the dev license server from [`services/license-server`](../services/license-server/README.md):
+Without an activated license, **NSS-Commander** (file panes add-on) is off until the license includes `dev.nosuckshell.addon.file-workspace`. With the dev license server from [`services/license-server`](../services/license-server/README.md):
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8787/admin/issue-license \

@@ -90,19 +90,23 @@ Details: [docs/backup-security.md](docs/backup-security.md)
 
 ## Release process (maintainers)
 
-GitHub releases are created by pushing a SemVer tag:
+GitHub releases are created by pushing a SemVer tag. Full checklist: [docs/releases.md](docs/releases.md). User-facing history: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-- Final: `vMAJOR.MINOR.PATCH` (example: `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v0.1.0-beta.7`)
+- Final: `vMAJOR.MINOR.PATCH` (example: `v0.2.1`, `v1.2.3`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v1.2.4-rc.1`, `v0.1.0-beta.11`)
 
-**Current pre-release line:** `v0.1.0-beta.7` (push the tag when you want CI to publish binaries). Changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md).
+**Before tagging**, use the same version string in:
+
+- `apps/desktop/package.json`
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/tauri.conf.json`
+
+The [release workflow](.github/workflows/release.yml) still overwrites those files from the tag at build time; keeping them aligned locally avoids drift while developing.
 
 ```bash
-git tag v0.1.0-beta.7
-git push origin v0.1.0-beta.7
+git tag v0.2.1
+git push origin v0.2.1
 ```
-
-Full checklist: [docs/releases.md](docs/releases.md)
 
 If the workflow rejects the tag, use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-prerelease` (example: `v2.0.0` or `v2.0.0-rc.1`).
 
