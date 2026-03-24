@@ -6,7 +6,7 @@ pkgdesc="Cross-platform SSH manager desktop app"
 arch=('x86_64')
 url="https://github.com/d0dg3r/NoSuckShell"
 license=('MIT')
-depends=('gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator-gtk3' 'librsvg' 'libsoup3' 'openssl')
+depends=('gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator' 'librsvg' 'libsoup3' 'openssl')
 options=('!strip')
 
 package() {

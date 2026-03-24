@@ -138,7 +138,7 @@ jobs:
           (cd "$out" && zip -r -q ../marketing-screenshots.zip .)
 
       - name: Upload marketing screenshots
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: marketing-screenshots
           if-no-files-found: error
@@ -292,13 +292,13 @@ jobs:
             -v "$(pwd):/package" \
             -w /package \
             archlinux:latest \
-            bash -c "pacman -Sy --noconfirm base-devel binutils && \
+            bash -c "pacman -Sy --noconfirm base-devel binutils gtk3 webkit2gtk-4.1 libayatana-appindicator librsvg libsoup3 openssl && \
                      useradd -m builduser && \
                      chown -R builduser:builduser /package && \
                      sudo -u builduser makepkg --noconfirm"
 
       - name: Upload platform bundles
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.artifact_name }}
           if-no-files-found: warn
@@ -314,7 +314,7 @@ jobs:
 
       - name: Upload Arch Linux package
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.artifact_name }}-arch
           if-no-files-found: error
@@ -329,14 +329,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           pattern: bundle-*
           merge-multiple: true
           path: release-artifacts
 
       - name: Download marketing screenshots
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: marketing-screenshots
           path: marketing-screenshots-artifact
