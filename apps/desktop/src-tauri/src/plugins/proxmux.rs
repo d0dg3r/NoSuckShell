@@ -762,9 +762,6 @@ fn http_client(allow_insecure_tls: bool, state: &ProxmuxState, cluster: Option<&
     let mut b = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("NoSuckShell-PROXMUX/", env!("CARGO_PKG_VERSION")));
-    if allow_insecure_tls {
-        b = b.danger_accept_invalid_certs(true);
-    }
     let proxy_url = cluster
         .and_then(|c| resolve_proxy_http_url(state, c))
         .map(|s| s.trim().to_string())
