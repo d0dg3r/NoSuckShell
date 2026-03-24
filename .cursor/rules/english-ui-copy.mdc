@@ -1,0 +1,11 @@
+---
+description: English for UI, user-facing text, and all repo documentation
+alwaysApply: true
+---
+
+# English project language
+
+- All **user-visible strings** in the app (labels, buttons, tooltips, banners, dialogs, errors shown to users) must be **English**, even when the author or user writes requirements in another language.
+- **All repository documentation** must be **English**: `README.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `docs/**/*.md`, in-app copy, release/changelog text committed to the repo, and similar. Do not commit German (or other non-English) project docs unless the user explicitly asks for a localized fork or a dedicated `docs/translations/` file.
+- Translate German (or other) prompts into natural English for the codebase; chat with the user may stay in their language if they prefer.
+- **Developer-facing** comments should be concise **English**; avoid German in code comments unless quoting external specs.

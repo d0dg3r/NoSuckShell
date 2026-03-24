@@ -1,0 +1,15 @@
+---
+description: Canonical code and style guides for NoSuckShell
+alwaysApply: true
+---
+
+# Project guides
+
+Follow the repository’s canonical documents:
+
+- **[docs/CODE_GUIDE.md](docs/CODE_GUIDE.md)** — TypeScript/React, Rust/Tauri, tests, validation, scope, AI workflow.
+- **[docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)** — English user-visible strings and documentation tone.
+
+Also read **[AGENTS.md](AGENTS.md)** for the overview. English UI and repo docs are required; see `english-ui-copy.mdc` in this folder.
+
+When conventions change, **propose** updates to those guides and obtain **maintainer approval** before merging doc-only policy changes.

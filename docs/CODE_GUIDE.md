@@ -1,6 +1,11 @@
 # NoSuckShell code guide
 
-This guide defines **how to implement changes** in this repository. For UI and documentation tone, see [STYLE_GUIDE.md](STYLE_GUIDE.md).
+This guide defines **how to implement changes** in this repository. For more context on specific guides, see:
+
+| Guide | Purpose |
+|---|---|
+| [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md) | User-visible copy and documentation: English-only, tone, terminology. |
+| [.agents/skills/nosuckshell_ops/SKILL.md](.agents/skills/nosuckshell_ops/SKILL.md) | Operations: Common commands and validation for agentic automation. |
 
 ## Repository layout
 
@@ -43,6 +48,7 @@ cargo check
 - **Playwright** for e2e and screenshot generation (see [CONTRIBUTING.md](../CONTRIBUTING.md) and [docs/media/screenshots/README.md](media/screenshots/README.md)).
 
 There is **no ESLint/Prettier** in the repo today; **`tsc` (via `npm run build`) and `cargo check`** are the baseline. If formatters are added later, follow the repo configuration.
+A validation script is available at `.agents/skills/nosuckshell_ops/scripts/validate_project.sh` to run these checks in one go.
 
 ## AI-assisted editors and agents
 

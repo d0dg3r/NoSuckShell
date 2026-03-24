@@ -12,6 +12,7 @@ This file orients **human contributors**, **IDE assistants**, and **automation**
 | --- | --- |
 | [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md) | Implementation: TypeScript/React, Rust/Tauri, tests, validation commands, scope. |
 | [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md) | User-visible copy and documentation: English-only, tone, terminology. |
+| [.agents/skills/nosuckshell_ops/SKILL.md](.agents/skills/nosuckshell_ops/SKILL.md) | Operations: Common commands and validation for agentic automation. |
 
 ## Machine-enforced snippets
 
