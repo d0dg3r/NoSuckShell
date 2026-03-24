@@ -11,7 +11,7 @@ type Props = {
   allowInsecureTls?: boolean;
   /** Incrementing nonce from pane toolbar to trigger reconnect. */
   reconnectRequestNonce?: number;
-  /** PEM trusted for upstream TLS (local WS bridge); if set, verification uses this anchor instead of skipping checks. */
+  /** PEM of the upstream cert (local WS bridge); if non-empty, TLS certificate verification is skipped entirely (same effect as allowInsecureTls). The PEM is not used as a trust anchor. */
   tlsTrustedCertPem?: string;
   onError?: (message: string) => void;
 };
