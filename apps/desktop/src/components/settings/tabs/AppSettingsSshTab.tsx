@@ -9,6 +9,7 @@ export type AppSettingsSshTabProps = {
   setSshConfigRaw: React.Dispatch<React.SetStateAction<string>>;
   sshConfigRaw: string;
   onSaveSshConfig: () => Promise<void>;
+  onExportResolvedOpensshConfig: (includeStrictHostKey: boolean) => Promise<void>;
   sshDirInfo: SshDirInfo | null;
   sshDirOverrideDraft: string;
   setSshDirOverrideDraft: (value: string) => void;
@@ -21,6 +22,7 @@ export function AppSettingsSshTab({
   setSshConfigRaw,
   sshConfigRaw,
   onSaveSshConfig,
+  onExportResolvedOpensshConfig,
   sshDirInfo,
   sshDirOverrideDraft,
   setSshDirOverrideDraft,
@@ -32,6 +34,7 @@ export function AppSettingsSshTab({
   const [sshHostStarTcpKeepAlive, setSshHostStarTcpKeepAlive] = useState<"" | "yes" | "no">("");
   const [sshHostStarIdentityFile, setSshHostStarIdentityFile] = useState("");
   const [sshHostStarUser, setSshHostStarUser] = useState("");
+  const [exportIncludeStrictHostKey, setExportIncludeStrictHostKey] = useState(true);
 
   const applyHostStarBlockToBuffer = () => {
     const lines: string[] = [];
@@ -128,6 +131,38 @@ export function AppSettingsSshTab({
         <div className="action-row">
           <button type="button" className="btn btn-settings-commit" onClick={() => void onSaveSshConfig()}>
             Save SSH config
+          </button>
+        </div>
+      </section>
+      <section className="settings-card">
+        <header className="settings-card-head">
+          <div className="settings-card-head-row">
+            <h3>Export resolved config</h3>
+            <SettingsHelpHint
+              topic="Export resolved SSH config"
+              description="Writes a new file with Host stanzas for each host in your parsed list, using the same Identity Store resolution as connections. Path-based keys appear as IdentityFile; encrypted keys and runtime paths are omitted or commented. Optional StrictHostKeyChecking lines come from host metadata (not from raw config unless you added them manually)."
+            />
+          </div>
+          <p className="settings-card-lead">
+            Portable snapshot for tools that read OpenSSH config files. Does not replace your on-disk config.
+          </p>
+        </header>
+        <label className="field checkbox-field">
+          <input
+            type="checkbox"
+            className="checkbox-input"
+            checked={exportIncludeStrictHostKey}
+            onChange={(event) => setExportIncludeStrictHostKey(event.target.checked)}
+          />
+          <span className="field-label field-label-inline-hint">Include StrictHostKeyChecking per host (from app metadata)</span>
+        </label>
+        <div className="action-row">
+          <button
+            type="button"
+            className="btn btn-settings-tool"
+            onClick={() => void onExportResolvedOpensshConfig(exportIncludeStrictHostKey)}
+          >
+            Export to file…
           </button>
         </div>
       </section>

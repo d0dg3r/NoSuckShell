@@ -27,7 +27,9 @@ export type HostMetadataStore = {
   hosts: Record<string, HostMetadata>;
 };
 
-export type StoreSchemaVersion = 1;
+/** Must match `ENTITY_STORE_SCHEMA_VERSION` in `store_models.rs`. */
+export const ENTITY_STORE_SCHEMA_VERSION = 3 as const;
+export type StoreSchemaVersion = typeof ENTITY_STORE_SCHEMA_VERSION;
 export type KeyKdf = "argon2id";
 
 export type HostKeyRef = {

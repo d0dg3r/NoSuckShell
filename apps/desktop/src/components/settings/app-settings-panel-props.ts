@@ -184,6 +184,8 @@ export type AppSettingsPanelProps = {
   sshConfigRaw: string;
   setSshConfigRaw: React.Dispatch<React.SetStateAction<string>>;
   onSaveSshConfig: () => Promise<void>;
+  /** Writes resolved OpenSSH host stanzas via save dialog (Identity Store + on-disk hosts). */
+  onExportResolvedOpensshConfig: (includeStrictHostKey: boolean) => Promise<void>;
   sshDirInfo: SshDirInfo | null;
   sshDirOverrideDraft: string;
   setSshDirOverrideDraft: (value: string) => void;

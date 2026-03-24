@@ -38,6 +38,7 @@ import {
   createEncryptedKey,
   unlockKeyMaterial,
   deleteKeyById,
+  exportResolvedOpensshConfigToPath,
   startLocalSession,
   startQuickSshSession,
   startSession,

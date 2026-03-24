@@ -188,6 +188,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     sshConfigRaw,
     setSshConfigRaw,
     onSaveSshConfig,
+    onExportResolvedOpensshConfig,
     sshDirInfo,
     sshDirOverrideDraft,
     setSshDirOverrideDraft,
@@ -447,6 +448,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               setSshConfigRaw={setSshConfigRaw}
               sshConfigRaw={sshConfigRaw}
               onSaveSshConfig={onSaveSshConfig}
+              onExportResolvedOpensshConfig={onExportResolvedOpensshConfig}
               sshDirInfo={sshDirInfo}
               sshDirOverrideDraft={sshDirOverrideDraft}
               setSshDirOverrideDraft={setSshDirOverrideDraft}
