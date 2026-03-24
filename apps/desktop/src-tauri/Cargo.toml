@@ -1,6 +1,6 @@
 [package]
 name = "src-tauri"
-version = "0.1.0-beta.7"
+version = "0.1.0-beta.11"
 edition = "2024"
 license = "MIT"
 build = "build.rs"
