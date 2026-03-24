@@ -362,5 +362,11 @@ jobs:
 
             **Marketing screenshots** (Flathub + Microsoft Store / Snap sizes): `marketing-screenshots.zip` in the assets below. Unzip and copy into `docs/media/screenshots/` if you want the repo to match the release visuals.
           files: |
-            release-artifacts/**
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.msi
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.pkg.tar.zst
             marketing-screenshots-artifact/marketing-screenshots.zip
