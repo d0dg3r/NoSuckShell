@@ -64,9 +64,9 @@ async fn connect_upstream_wss(
 
     let tcp = TcpStream::connect((host, port)).await?;
     let mut tls_builder = native_tls::TlsConnector::builder();
-    // Certificate validation remains enabled; `allow_insecure_tls` is intentionally ignored
-    // to avoid disabling TLS security. If self-signed certificates must be supported, configure
-    // a proper trust store instead of calling `danger_accept_invalid_certs(true)`.
+    if allow_insecure_tls {
+        tls_builder.danger_accept_invalid_certs(true);
+    }
     let cx = tls_builder.build()?;
     let cx = tokio_native_tls::TlsConnector::from(cx);
     let tls = cx.connect(host, tcp).await?;

@@ -761,6 +761,7 @@ fn profile_no_proxy_extra_line(state: &ProxmuxState, cluster: &StoredCluster) ->
 fn http_client(allow_insecure_tls: bool, state: &ProxmuxState, cluster: Option<&StoredCluster>) -> Result<reqwest::blocking::Client> {
     let mut b = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
+        .danger_accept_invalid_certs(allow_insecure_tls)
         .user_agent(concat!("NoSuckShell-PROXMUX/", env!("CARGO_PKG_VERSION")));
     let proxy_url = cluster
         .and_then(|c| resolve_proxy_http_url(state, c))
