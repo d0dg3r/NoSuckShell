@@ -12,6 +12,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   closeSession,
   deleteHost,
@@ -2682,6 +2683,30 @@ export function App() {
     }
   };
 
+  const handleExportResolvedOpensshConfig = useCallback(
+    async (includeStrictHostKey: boolean) => {
+      setError("");
+      try {
+        const picked = await saveDialog({
+          title: "Export resolved SSH config",
+          defaultPath: "nosuckshell-resolved.conf",
+          filters: [{ name: "SSH config", extensions: ["conf", "config"] }],
+        });
+        if (picked === null || picked === undefined) {
+          return;
+        }
+        const targetPath = Array.isArray(picked) ? picked[0] : picked;
+        if (!targetPath) {
+          return;
+        }
+        await exportResolvedOpensshConfigToPath(targetPath, includeStrictHostKey);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [setError],
+  );
+
   const onDelete = async (hostAlias: string) => {
     const normalizedAlias = hostAlias.trim();
     if (!normalizedAlias) {
@@ -2717,10 +2742,18 @@ export function App() {
     }
     setError("");
     try {
-      await saveHost(hostSettingsDraftHost);
+      const synced = syncSidebarHostWithStore(
+        hostSettingsDraftHost,
+        hostSettingsDraftBinding,
+        storeKeys,
+        storeUsers,
+        hosts,
+        metadataStore.hosts,
+      );
+      await saveHost(synced.host);
       await persistEntityStore({
         ...entityStore,
-        hostBindings: { ...entityStore.hostBindings, [alias]: hostSettingsDraftBinding },
+        hostBindings: { ...entityStore.hostBindings, [alias]: synced.binding },
         updatedAt: Date.now(),
       });
       await saveHostTagsAndKeyPolicy(alias, hostSettingsTagDraft, hostSettingsKeyPolicy);
@@ -2730,8 +2763,12 @@ export function App() {
     }
   }, [
     hostSettingsDraftHost,
-    entityStore,
     hostSettingsDraftBinding,
+    storeKeys,
+    storeUsers,
+    hosts,
+    metadataStore.hosts,
+    entityStore,
     hostSettingsTagDraft,
     hostSettingsKeyPolicy,
     persistEntityStore,
@@ -2829,11 +2866,19 @@ export function App() {
   const createHost = async () => {
     setError("");
     try {
-      const alias = newHostDraft.host.trim();
-      await saveHost(newHostDraft);
+      const synced = syncSidebarHostWithStore(
+        newHostDraft,
+        addHostBindingDraft,
+        storeKeys,
+        storeUsers,
+        hosts,
+        metadataStore.hosts,
+      );
+      const alias = synced.host.host.trim();
+      await saveHost(synced.host);
       await persistEntityStore({
         ...entityStore,
-        hostBindings: { ...entityStore.hostBindings, [alias]: addHostBindingDraft },
+        hostBindings: { ...entityStore.hostBindings, [alias]: synced.binding },
         updatedAt: Date.now(),
       });
       await load();
@@ -5467,6 +5512,7 @@ export function App() {
           sshConfigRaw={sshConfigRaw}
           setSshConfigRaw={setSshConfigRaw}
           onSaveSshConfig={handleSaveSshConfig}
+          onExportResolvedOpensshConfig={handleExportResolvedOpensshConfig}
           sshDirInfo={sshDirInfo}
           sshDirOverrideDraft={sshDirOverrideDraft}
           setSshDirOverrideDraft={setSshDirOverrideDraft}

@@ -150,10 +150,12 @@ export function AppSettingsHostsTab({
                   <h3>Identity Store bindings</h3>
                   <SettingsHelpHint
                     topic="Identity Store bindings"
-                    description="Per-host overrides: SSH keys (first selected = primary), groups, and tags from the Identity Store. If no keys are set here, the linked user's keys apply when a user is selected."
+                    description="SSH keys: first selected is primary; if none are set here, the linked user's keys apply when a user is selected. Groups and store tags are for organization and filtering in this app only—they are not written to OpenSSH config or used for connection defaults today."
                   />
                 </div>
-                <p className="settings-card-lead">Keys, groups, and tags for this host.</p>
+                <p className="settings-card-lead">
+                  Keys for SSH; groups and tags help you organize this host in the sidebar and views.
+                </p>
               </div>
               <div className="host-form-card-fields">
                 <div className="field">

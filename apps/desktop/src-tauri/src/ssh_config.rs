@@ -202,7 +202,7 @@ pub fn delete_host_from_file(alias: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_hosts, render_hosts, HostConfig};
+    use super::{parse_hosts, render_hosts, render_single_host_stanza, HostConfig};
 
     #[test]
     fn parses_basic_ssh_host_block() {
@@ -246,5 +246,22 @@ Host prod
         let rendered = render_hosts(&hosts);
         let reparsed = parse_hosts(&rendered);
         assert_eq!(reparsed, hosts);
+    }
+
+    #[test]
+    fn render_single_host_stanza_appends_extra_lines() {
+        let host = HostConfig {
+            host: "x".to_string(),
+            host_name: "10.0.0.1".to_string(),
+            user: "u".to_string(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        let extras = vec!["  StrictHostKeyChecking accept-new\n".to_string()];
+        let out = render_single_host_stanza(&host, &extras);
+        assert!(out.contains("Host x"));
+        assert!(out.contains("StrictHostKeyChecking accept-new"));
     }
 }

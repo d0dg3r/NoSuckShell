@@ -23,6 +23,7 @@ This guide defines **how to implement changes** in this repository. For UI and d
 ## Rust and Tauri (`apps/desktop/src-tauri`)
 
 - **Edition**: Rust 2024 as declared in `Cargo.toml`.
+- **Identity store schema**: `ENTITY_STORE_SCHEMA_VERSION` in `store_models.rs` must stay in sync with `ENTITY_STORE_SCHEMA_VERSION` in `apps/desktop/src/types.ts` when bumping persisted JSON.
 - Use **serde** for structured payloads; prefer **explicit errors** (`thiserror` / `anyhow`) as used elsewhere in the crate.
 - **Security-sensitive paths** (crypto, file I/O, SSH): follow [SECURITY.md](../SECURITY.md) and avoid logging secrets.
 
