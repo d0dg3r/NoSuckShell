@@ -12,10 +12,11 @@ options=('!strip')
 package() {
   # The Tauri build for Debian creates a directory structure we can reuse.
   # In a Cargo workspace, we find the data directory within the workspace root's target folder.
-  _deb_bundle_dir=$(find ../../../target/release/bundle/deb -maxdepth 1 -type d -name "*${_REALVER}*" | head -n 1)
+  # Tauri sanitizes versions (e.g., stripping pre-release tags for DEB), so we find the first dir.
+  _deb_bundle_dir=$(find ../../../target/release/bundle/deb -maxdepth 1 -mindepth 1 -type d | head -n 1)
   
   if [ -z "$_deb_bundle_dir" ]; then
-    echo "Error: Could not find Debian bundle directory for version ${_REALVER}"
+    echo "Error: Could not find any Debian bundle directory"
     echo "Searched in: ../../../target/release/bundle/deb"
     exit 1
   fi
