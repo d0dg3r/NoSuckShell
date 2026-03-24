@@ -790,7 +790,7 @@ fn fetch_peer_chain_pem_and_leaf_sha256(base_url: &str) -> Result<(String, Strin
     };
     let u = url::Url::parse(&with_scheme).context("parse Proxmox URL")?;
     let host = u.host_str().ok_or_else(|| anyhow::anyhow!("URL missing host"))?;
-    let port = u.port_or_known_default().unwrap_or(8006);
+    let port = u.port().unwrap_or(8006);
 
     let tcp = TcpStream::connect((host, port)).context("TCP connect")?;
 
