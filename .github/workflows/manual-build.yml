@@ -7,6 +7,18 @@ on:
         description: 'Version string (e.g., 1.2.3 or 1.2.3-beta.1)'
         required: true
         default: '0.0.0-manual'
+      linux:
+        description: 'Build for Linux'
+        type: boolean
+        default: true
+      macos:
+        description: 'Build for macOS'
+        type: boolean
+        default: true
+      windows:
+        description: 'Build for Windows'
+        type: boolean
+        default: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -19,8 +31,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: Setup Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_targets: ${{ steps.set-matrix.outputs.has_targets }}
+    steps:
+      - id: set-matrix
+        shell: bash
+        run: |
+          MATRIX='{"include":[]}'
+          HAS_TARGETS="false"
+          if [ "${{ github.event.inputs.linux }}" == "true" ]; then
+            MATRIX=$(echo $MATRIX | jq -c '.include += [{"os":"ubuntu-latest","artifact_name":"linux"}]')
+            HAS_TARGETS="true"
+          fi
+          if [ "${{ github.event.inputs.macos }}" == "true" ]; then
+            MATRIX=$(echo $MATRIX | jq -c '.include += [{"os":"macos-latest","artifact_name":"macos"}]')
+            HAS_TARGETS="true"
+          fi
+          if [ "${{ github.event.inputs.windows }}" == "true" ]; then
+            MATRIX=$(echo $MATRIX | jq -c '.include += [{"os":"windows-latest","artifact_name":"windows"}]')
+            HAS_TARGETS="true"
+          fi
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "has_targets=$HAS_TARGETS" >> $GITHUB_OUTPUT
+
   test:
     name: Test (Ubuntu)
+    needs: setup
+    if: needs.setup.outputs.has_targets == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -61,18 +102,11 @@ jobs:
 
   build:
     name: Build ${{ matrix.artifact_name }}
-    needs: test
+    needs: [setup, test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: linux
-          - os: macos-latest
-            artifact_name: macos
-          - os: windows-latest
-            artifact_name: windows
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
     env:
       RELEASE_VERSION: ${{ github.event.inputs.version }}
     steps:
