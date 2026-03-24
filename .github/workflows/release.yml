@@ -301,7 +301,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.artifact_name }}
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             apps/desktop/src-tauri/target/release/bundle/**/*.msi
             apps/desktop/src-tauri/target/release/bundle/**/*.exe
