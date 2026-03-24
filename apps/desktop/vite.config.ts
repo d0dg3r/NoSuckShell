@@ -30,6 +30,17 @@ export default defineConfig(({ mode }) => {
           }
         : {}),
     },
+    build: {
+      // Tauri supports es2021
+      // Modernize target to safari15 for color-mix() and other modern CSS features
+      target: process.platform === "win32" ? "chrome105" : "safari15",
+      // Don't minify in debug builds
+      minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
+      // Sourcemaps for debug
+      sourcemap: !!process.env.TAURI_DEBUG,
+      // Ensure the output directory is cleared before building
+      emptyOutDir: true,
+    },
     test: {
       environment: "jsdom",
       setupFiles: "./src/test/setup.ts",
