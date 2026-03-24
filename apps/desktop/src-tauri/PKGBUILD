@@ -13,6 +13,13 @@ package() {
   # The Tauri build for Debian creates a directory structure we can reuse.
   # In a Cargo workspace, we find the data directory within the workspace root's target folder.
   _deb_bundle_dir=$(find ../../../target/release/bundle/deb -maxdepth 1 -type d -name "*${_REALVER}*" | head -n 1)
+  
+  if [ -z "$_deb_bundle_dir" ]; then
+    echo "Error: Could not find Debian bundle directory for version ${_REALVER}"
+    echo "Searched in: ../../../target/release/bundle/deb"
+    exit 1
+  fi
+
   _src_dir="${_deb_bundle_dir}/data"
   
   if [ ! -d "$_src_dir" ]; then

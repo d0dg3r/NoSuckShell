@@ -295,7 +295,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bundle-linux
-          path: .
+          path: target/release/bundle/
 
       - name: Build Arch Linux package
         shell: bash
