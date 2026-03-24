@@ -21,13 +21,10 @@ jobs:
     name: Desktop E2E (Playwright)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
