@@ -1,0 +1,231 @@
+name: Manual Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (e.g., 1.2.3 or 1.2.3-beta.1)'
+        required: true
+        default: '0.0.0-manual'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install npm dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Run frontend unit tests
+        working-directory: apps/desktop
+        run: npm test
+
+      - name: Run Rust tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+  build:
+    name: Build ${{ matrix.artifact_name }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: linux
+          - os: macos-latest
+            artifact_name: macos
+          - os: windows-latest
+            artifact_name: windows
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install npm dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Sync app version
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("fs");
+          const version = process.env.RELEASE_VERSION;
+          if (!version) {
+            throw new Error("RELEASE_VERSION is missing");
+          }
+
+          const packageJsonPath = "apps/desktop/package.json";
+          const tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json";
+          const cargoTomlPath = "apps/desktop/src-tauri/Cargo.toml";
+
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+          packageJson.version = version;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
+          tauriConfig.version = version;
+          tauriConfig.bundle = tauriConfig.bundle || {};
+          tauriConfig.bundle.icon = [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+          ];
+          fs.writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`);
+
+          const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+          let hasPackageVersion = false;
+          const updatedCargoToml = cargoToml.replace(
+            /(\[package\][\s\S]*?^version\s*=\s*")[^"]+(")/m,
+            (_match, prefix, suffix) => {
+              hasPackageVersion = true;
+              return `${prefix}${version}${suffix}`;
+            }
+          );
+          if (!hasPackageVersion) {
+            throw new Error("Could not update version in Cargo.toml");
+          }
+          fs.writeFileSync(cargoTomlPath, updatedCargoToml);
+          NODE
+
+      - name: Build square icon source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip pillow
+          python <<'PY'
+          from PIL import Image
+
+          source = Image.open("img/logo_terminal.png").convert("RGBA")
+          side = max(source.width, source.height)
+          canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+          offset = ((side - source.width) // 2, (side - source.height) // 2)
+          canvas.paste(source, offset, source)
+          canvas.save("apps/desktop/src-tauri/icons/icon-source-square.png")
+          PY
+
+      - name: Generate platform icons
+        working-directory: apps/desktop
+        run: npx @tauri-apps/cli icon src-tauri/icons/icon-source-square.png --output src-tauri/icons
+
+      - name: Build Tauri app bundles
+        working-directory: apps/desktop
+        env:
+          NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
+        run: npm run tauri:build
+
+      - name: Build Arch Linux package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_VERSION}"
+          # Arch versions cannot have hyphens
+          PKGVER="${VERSION//-/.}"
+          
+          cd apps/desktop/src-tauri
+          
+          # Inject version into PKGBUILD
+          sed -i "s/pkgver=\${_PKGVER}/pkgver=${PKGVER}/" PKGBUILD
+          sed -i "s/\${_REALVER}/${VERSION}/" PKGBUILD
+
+          # Use a Docker container to run makepkg since Ubuntu doesn't have it natively
+          docker run --rm \
+            -v "$(pwd):/package" \
+            -w /package \
+            archlinux:latest \
+            bash -c "pacman -Sy --noconfirm base-devel binutils && \
+                     useradd -m builduser && \
+                     chown -R builduser:builduser /package && \
+                     sudo -u builduser makepkg --noconfirm"
+
+      - name: Upload platform bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-bundle-${{ matrix.artifact_name }}-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/release/bundle/**/*.app
+            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/release/bundle/**/*.tar.gz
+
+      - name: Upload Arch Linux package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-bundle-${{ matrix.artifact_name }}-arch-${{ github.run_id }}
+          if-no-files-found: error
+          path: apps/desktop/src-tauri/*.pkg.tar.zst
