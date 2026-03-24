@@ -29,7 +29,10 @@ use layout_profiles::{
 use quick_ssh::QuickSshSessionRequest;
 use secure_store::{
     assign_host_binding as assign_host_binding_backend, create_encrypted_key as create_encrypted_key_backend,
-    delete_key as delete_key_backend, list_groups as list_groups_backend, list_store_objects as list_store_objects_backend,
+    delete_key as delete_key_backend, ensure_ssh_session_identity_ready,
+    export_resolved_openssh_config as export_resolved_openssh_config_backend,
+    export_resolved_openssh_config_to_path as export_resolved_openssh_config_to_path_backend,
+    list_groups as list_groups_backend, list_store_objects as list_store_objects_backend,
     list_tags as list_tags_backend, list_users as list_users_backend, resolve_host_config_for_session,
     save_store_objects as save_store_objects_backend, unlock_key_material as unlock_key_material_backend,
 };
@@ -575,6 +578,7 @@ fn start_session(
     sessions: State<'_, SessionState>,
     host: HostConfig,
 ) -> Result<SessionStarted, String> {
+    ensure_ssh_session_identity_ready(&host).map_err(|err| err.to_string())?;
     let resolved_host = resolve_host_config_for_session(&host).map_err(|err| err.to_string())?;
     let session_id = sessions
         .start(app, resolved_host, None)
@@ -824,6 +828,17 @@ fn export_backup(args: BackupIpcArgs) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn export_resolved_openssh_config(include_strict_host_key: bool) -> Result<String, String> {
+    export_resolved_openssh_config_backend(include_strict_host_key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_resolved_openssh_config_to_path(path: String, include_strict_host_key: bool) -> Result<(), String> {
+    let p = std::path::PathBuf::from(path);
+    export_resolved_openssh_config_to_path_backend(&p, include_strict_host_key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn import_backup(args: BackupIpcArgs) -> Result<(), String> {
     let payload = import_encrypted_backup(&args.path, &args.secret).map_err(|err| err.to_string())?;
     write_ssh_config_raw(&payload.ssh_config).map_err(|err| err.to_string())?;
@@ -952,6 +967,8 @@ fn main() {
             unlock_key_material,
             delete_key,
             export_backup,
+            export_resolved_openssh_config,
+            export_resolved_openssh_config_to_path,
             import_backup,
             list_layout_profiles,
             save_layout_profile,
