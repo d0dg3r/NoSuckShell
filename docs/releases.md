@@ -87,14 +87,14 @@ git tag v0.3.0-rc.1
 git push origin v0.3.0-rc.1
 
 # beta prerelease (current line)
-git tag v0.1.0-beta.7
-git push origin v0.1.0-beta.7
+git tag v0.1.0-beta.11
+git push origin v0.1.0-beta.11
 ```
 
 ## Current beta (planned)
 
-- **Target tag:** `v0.1.0-beta.7` — push when you are ready; in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` match this prerelease.
-- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.1.0-beta.7`.
+- **Target tag:** `v0.1.0-beta.11` — push when you are ready; in-repo versions in `package.json`, `tauri.conf.json`, and `Cargo.toml` match this prerelease.
+- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.1.0-beta.11`.
 - The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
 
 ## Common pitfalls checklist

@@ -2,6 +2,30 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.1.0-beta.11] - 2026-03-24
+
+### Added
+- **Version bump** — Official beta 11 release.
+- **Documentation** — Updated changelog with missing version details from beta 8, 9, and 10; synchronized `releases.md`.
+- **Marketing screenshots** — Updated high-resolution screenshots for Proxmox, SFTP, and local files; added Proxmox VNC view.
+
+## [0.1.0-beta.10] - 2026-03-24
+
+### Added
+- **Screenshots automation** — GitHub Actions workflow for automated store screenshot generation (`screenshots.yml`).
+- **Visuals** — Refined marketing screenshots with hybrid Proxmox views (terminal + noVNC).
+
+## [0.1.0-beta.9] - 2026-03-23
+
+### Added
+- **Manual builds** — `manual-build.yml` workflow with platform selection (Linux, macOS, Windows) for targeted testing outside the release cycle.
+
+## [0.1.0-beta.8] - 2026-03-23
+
+### Fixed
+- **Arch Linux build** — Corrected file paths and dependencies in the CI workflow for Arch Linux workspace builds.
+- **Security** — Addressed code scanning alerts related to TLS certificate checks in development/test utilities.
+
 ## [0.1.0-beta.7] - 2026-03-23
 
 **Pre-release.** Binaries are published after you push tag [`v0.1.0-beta.7`][v0.1.0-beta.7] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -106,3 +130,7 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.1.0-beta.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.5
 [v0.1.0-beta.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.6
 [v0.1.0-beta.7]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.7
+[v0.1.0-beta.8]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.8
+[v0.1.0-beta.9]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.9
+[v0.1.0-beta.10]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.10
+[v0.1.0-beta.11]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.11
