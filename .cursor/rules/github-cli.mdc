@@ -1,0 +1,16 @@
+---
+description: Use GitHub CLI (gh) for GitHub data in this repo
+alwaysApply: true
+---
+
+# GitHub-Zugriff
+
+In dieser Umgebung ist die **GitHub CLI (`gh`)** verfügbar und authentifiziert. Für Actions-Logs, Runs, PRs, Issues, Releases und Repo-Metadaten: **`gh` bevorzugen** statt nur die öffentliche Web-UI zu raten.
+
+Beispiele:
+
+- `gh run view <run-id> --log-failed` / `gh run view --job <job-id> --log`
+- `gh api repos/:owner/:repo/actions/runs/...`
+- `gh pr view`, `gh issue list`, etc.
+
+Wenn GitHub-Informationen für die Aufgabe nötig sind, Befehle **selbst ausführen** und die Ausgabe auswerten.
