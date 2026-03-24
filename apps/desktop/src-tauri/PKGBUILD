@@ -11,8 +11,8 @@ options=('!strip')
 
 package() {
   # The Tauri build for Debian creates a directory structure we can reuse.
-  # We find the data directory within the deb bundle folder.
-  _deb_bundle_dir=$(find target/release/bundle/deb -maxdepth 1 -type d -name "*${_REALVER}*" | head -n 1)
+  # In a Cargo workspace, we find the data directory within the workspace root's target folder.
+  _deb_bundle_dir=$(find ../../../target/release/bundle/deb -maxdepth 1 -type d -name "*${_REALVER}*" | head -n 1)
   _src_dir="${_deb_bundle_dir}/data"
   
   if [ ! -d "$_src_dir" ]; then
@@ -31,3 +31,7 @@ package() {
   cp -r "${_src_dir}/usr/share/applications" "${pkgdir}/usr/share/"
   cp -r "${_src_dir}/usr/share/icons" "${pkgdir}/usr/share/"
 }
+
+# Add a step to move the package to the target bundle folder if needed, 
+# but usually makepkg outputs to the current directory.
+# We'll handle the upload path in the workflow.

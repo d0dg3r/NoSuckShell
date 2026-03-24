@@ -233,13 +233,15 @@ jobs:
 
           # Use a Docker container to run makepkg since Ubuntu doesn't have it natively
           docker run --rm \
-            -v "$(pwd):/package" \
-            -w /package \
+            -v "$(pwd)/../../..:/repo" \
+            -w /repo/apps/desktop/src-tauri \
             archlinux:latest \
-            bash -c "pacman -Sy --noconfirm base-devel binutils && \
+            bash -c "pacman -Sy --noconfirm base-devel binutils gtk3 webkit2gtk-4.1 libayatana-appindicator-gtk3 librsvg libsoup3 openssl && \
                      useradd -m builduser && \
-                     chown -R builduser:builduser /package && \
-                     sudo -u builduser makepkg --noconfirm"
+                     chown -R builduser:builduser /repo && \
+                     sudo -u builduser makepkg --noconfirm && \
+                     mkdir -p ../../../target/release/bundle/nosuckshell-arch && \
+                     cp *.pkg.tar.zst ../../../target/release/bundle/nosuckshell-arch/"
 
       - name: Upload platform bundles
         uses: actions/upload-artifact@v7
@@ -247,14 +249,14 @@ jobs:
           name: manual-bundle-${{ matrix.artifact_name }}-${{ github.run_id }}
           if-no-files-found: warn
           path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/release/bundle/**/*.app
-            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/release/bundle/**/*.rpm
-            apps/desktop/src-tauri/target/release/bundle/**/*.tar.gz
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.app
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.rpm
+            target/release/bundle/**/*.tar.gz
 
       - name: Upload Arch Linux package
         if: runner.os == 'Linux'
@@ -262,4 +264,4 @@ jobs:
         with:
           name: manual-bundle-${{ matrix.artifact_name }}-arch-${{ github.run_id }}
           if-no-files-found: error
-          path: apps/desktop/src-tauri/*.pkg.tar.zst
+          path: target/release/bundle/nosuckshell-arch/*.pkg.tar.zst
