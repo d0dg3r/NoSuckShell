@@ -165,6 +165,7 @@ fn resolve_local_shell_path(explicit_shell: Option<&str>) -> String {
 
 pub fn build_local_shell_command(explicit_shell: Option<&str>) -> CommandBuilder {
     let shell = resolve_local_shell_path(explicit_shell);
+    #[allow(unused_mut)]
     let mut command = CommandBuilder::new(&shell);
     // `-l` (login shell) is a POSIX convention; PowerShell and cmd.exe do not support it.
     #[cfg(not(target_os = "windows"))]

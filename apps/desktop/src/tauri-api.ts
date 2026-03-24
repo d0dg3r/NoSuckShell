@@ -138,6 +138,14 @@ export const exportBackup = (path: string, password: string): Promise<void> =>
 export const importBackup = (path: string, password: string): Promise<void> =>
   invoke("import_backup", { path, password });
 
+export const exportResolvedOpensshConfig = (includeStrictHostKey: boolean): Promise<string> =>
+  invoke("export_resolved_openssh_config", { includeStrictHostKey });
+
+export const exportResolvedOpensshConfigToPath = (
+  path: string,
+  includeStrictHostKey: boolean,
+): Promise<void> => invoke("export_resolved_openssh_config_to_path", { path, includeStrictHostKey });
+
 export const listLayoutProfiles = (): Promise<LayoutProfile[]> =>
   invoke("list_layout_profiles");
 

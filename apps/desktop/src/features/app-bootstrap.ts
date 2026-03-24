@@ -1,4 +1,5 @@
 import type { EntityStore, HostBinding, HostConfig, HostMetadata, HostMetadataStore } from "../types";
+import { ENTITY_STORE_SCHEMA_VERSION } from "../types";
 
 export const createDefaultHostBinding = (): HostBinding => ({
   userId: undefined,
@@ -26,7 +27,7 @@ export const emptyHost = (): HostConfig => ({
 export const createDefaultMetadataStore = (): HostMetadataStore => ({ defaultUser: "", hosts: {} });
 
 export const createDefaultEntityStore = (): EntityStore => ({
-  schemaVersion: 3,
+  schemaVersion: ENTITY_STORE_SCHEMA_VERSION,
   updatedAt: 0,
   users: {},
   groups: {},
