@@ -138,7 +138,7 @@ jobs:
           (cd "$out" && zip -r -q ../marketing-screenshots.zip .)
 
       - name: Upload marketing screenshots
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: marketing-screenshots
           if-no-files-found: error
@@ -272,8 +272,32 @@ jobs:
           NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
         run: npm run tauri:build
 
+      - name: Upload platform bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.artifact_name }}
+          if-no-files-found: warn
+          path: target/release/bundle/
+
+  build-arch:
+    name: Build Arch Linux package
+    needs:
+      - validate-tag
+      - build
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Linux bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-linux
+          path: .
+
       - name: Build Arch Linux package
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -288,35 +312,20 @@ jobs:
           sed -i "s/\${_REALVER}/${VERSION}/" PKGBUILD
 
           # Use a Docker container to run makepkg since Ubuntu doesn't have it natively
+          # Pre-install dependencies as root
           docker run --rm \
-            -v "$(pwd):/package" \
-            -w /package \
+            -v "$(pwd)/../../..:/repo" \
+            -w /repo/apps/desktop/src-tauri \
             archlinux:latest \
-            bash -c "pacman -Sy --noconfirm base-devel binutils && \
+            bash -c "pacman -Sy --noconfirm base-devel binutils gtk3 webkit2gtk-4.1 libayatana-appindicator librsvg libsoup3 openssl && \
                      useradd -m builduser && \
-                     chown -R builduser:builduser /package && \
+                     chown -R builduser:builduser /repo && \
                      sudo -u builduser makepkg --noconfirm"
 
-      - name: Upload platform bundles
-        uses: actions/upload-artifact@v7
-        with:
-          name: bundle-${{ matrix.artifact_name }}
-          if-no-files-found: warn
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/release/bundle/**/*.app
-            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/release/bundle/**/*.rpm
-            apps/desktop/src-tauri/target/release/bundle/**/*.tar.gz
-
       - name: Upload Arch Linux package
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: bundle-${{ matrix.artifact_name }}-arch
+          name: bundle-linux-arch
           if-no-files-found: error
           path: apps/desktop/src-tauri/*.pkg.tar.zst
 
@@ -325,18 +334,19 @@ jobs:
     needs:
       - validate-tag
       - build
+      - build-arch
       - marketing-screenshots
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           pattern: bundle-*
           merge-multiple: true
           path: release-artifacts
 
       - name: Download marketing screenshots
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: marketing-screenshots
           path: marketing-screenshots-artifact
