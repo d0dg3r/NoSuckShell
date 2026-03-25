@@ -25,14 +25,44 @@ Cross-platform **SSH manager** desktop app (**Tauri** + **React**) focused on fa
 
 ## Screenshots
 
+### Main Interface
 <p align="center">
   <img src="docs/media/screenshots/store-ms-snap/01-main.png" alt="NoSuckShell host list with an embedded SSH session" width="780" />
 </p>
 
+### Layouts & Workspaces
 <p align="center">
   <img src="docs/media/screenshots/store-ms-snap/02-split.png" alt="Split workspace with SSH and local terminal panes" width="380" />
   &nbsp;
   <img src="docs/media/screenshots/store-ms-snap/03-layout-profiles.png" alt="Layout command center for saved layouts" width="380" />
+</p>
+
+### Proxmox & Virtualization
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/08-proxmox.png" alt="Proxmox cluster resource management" width="380" />
+  &nbsp;
+  <img src="docs/media/screenshots/store-ms-snap/11-proxmox-vnc.png" alt="Embedded Proxmox noVNC console" width="380" />
+</p>
+
+### Files & SFTP
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/09-sftp.png" alt="SFTP file browser with drag-and-drop support" width="380" />
+  &nbsp;
+  <img src="docs/media/screenshots/store-ms-snap/10-local-files.png" alt="Local file browser and explorer integration" width="380" />
+</p>
+
+### Tools & Organization
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/04-quick-connect.png" alt="Quick connect and session toolbar" width="250" />
+  &nbsp;
+  <img src="docs/media/screenshots/store-ms-snap/06-organization.png" alt="Favorites, tags, and sidebar organization" width="250" />
+  &nbsp;
+  <img src="docs/media/screenshots/store-ms-snap/07-broadcast.png" alt="Multi-session broadcast input" width="250" />
+</p>
+
+### Security
+<p align="center">
+  <img src="docs/media/screenshots/store-ms-snap/05-backup.png" alt="Password-protected encrypted backup system" width="500" />
 </p>
 
 More sizes (Flathub downscales, Microsoft/Snap 1920×1080), captions for AppStream, video notes, and regeneration commands: [docs/media/screenshots/README.md](docs/media/screenshots/README.md).
