@@ -15,9 +15,12 @@ import type { LayoutSplitTreeNode, PaneLayoutItem } from "../types";
 
 export const DEFAULT_WORKSPACE_ID = "workspace-main";
 
+export type WorkspaceKind = "default" | "nss-commander";
+
 export type WorkspaceSnapshot = {
   id: string;
   name: string;
+  kind?: WorkspaceKind;
   preferVerticalNewPanes: boolean;
   splitSlots: Array<string | null>;
   paneLayouts: PaneLayoutItem[];
@@ -94,6 +97,36 @@ export const appendSessionToWorkspaceSnapshot = (
   };
 };
 
+/** Creates a dual-pane (side-by-side) NSS-Commander workspace ready for two local file sessions. */
+export const createNssCommanderWorkspaceSnapshot = (
+  id: string,
+  name: string,
+  sessionIdLeft: string,
+  sessionIdRight: string,
+): WorkspaceSnapshot => {
+  const splitSlots: Array<string | null> = [sessionIdLeft, sessionIdRight];
+  const paneLayouts: PaneLayoutItem[] = [createPaneLayoutItem(), createPaneLayoutItem()];
+  const splitTree: SplitTreeNode = {
+    id: `split-nss-${createId()}`,
+    type: "split",
+    axis: "horizontal",
+    ratio: 0.5,
+    first: createLeafNode(0),
+    second: createLeafNode(1),
+  };
+  return {
+    id,
+    name,
+    kind: "nss-commander",
+    preferVerticalNewPanes: false,
+    splitSlots,
+    paneLayouts,
+    splitTree,
+    activePaneIndex: 0,
+    activeSessionId: sessionIdLeft,
+  };
+};
+
 export const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOrder: number[]): Array<string | null> => {
   if (paneOrder.length === 0) {
     return slots;
@@ -117,6 +150,7 @@ export const compactSplitSlotsByPaneOrder = (slots: Array<string | null>, paneOr
 type LooseSnapshot = {
   id?: string;
   name?: string;
+  kind?: unknown;
   preferVerticalNewPanes?: unknown;
   splitSlots?: unknown;
   paneLayouts?: unknown;
@@ -160,16 +194,23 @@ export const normalizePersistedWorkspacesPayload = (
     if (!snapshot) {
       return acc;
     }
+    const kind: WorkspaceKind | undefined = snapshot.kind === "nss-commander" ? "nss-commander" : undefined;
+    const normalizedSplitTree = snapshot.splitTree ? cloneSplitTree(snapshot.splitTree as SplitTreeNode) : createLeafNode(0);
+    if (kind === "nss-commander" && normalizedSplitTree.type === "split" && normalizedSplitTree.axis !== "horizontal") {
+      normalizedSplitTree.axis = "horizontal";
+    }
+
     acc[workspaceId] = {
       ...snapshot,
       id: snapshot.id || workspaceId,
       name: snapshot.name || workspaceId,
-      preferVerticalNewPanes: snapshot.preferVerticalNewPanes === true,
+      kind,
+      preferVerticalNewPanes: kind === "nss-commander" ? false : snapshot.preferVerticalNewPanes === true,
       splitSlots: Array.isArray(snapshot.splitSlots) ? [...snapshot.splitSlots] : createInitialPaneState(),
       paneLayouts: Array.isArray(snapshot.paneLayouts)
         ? (snapshot.paneLayouts as PaneLayoutItem[]).map((entry) => ({ ...entry }))
         : createPaneLayoutsFromSlots(createInitialPaneState()),
-      splitTree: snapshot.splitTree ? cloneSplitTree(snapshot.splitTree as SplitTreeNode) : createLeafNode(0),
+      splitTree: normalizedSplitTree,
       activePaneIndex: Number.isInteger(snapshot.activePaneIndex) ? (snapshot.activePaneIndex as number) : 0,
       activeSessionId: typeof snapshot.activeSessionId === "string" ? snapshot.activeSessionId : "",
     };

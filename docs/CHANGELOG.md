@@ -2,6 +2,27 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.2.2] - 2026-03-25
+
+**Stable release.** Binaries are published after you push tag [`v0.2.2`][v0.2.2] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Added
+
+- **File Pane** — Persistent **column sizing** for the file browser; **RemoteFilePane** component for Proxmox/SFTP views; enhanced **SFTP** and **Proxmox** file management.
+- **Documentation** — New **User Help** (`docs/USER_HELP.md`) and in-app **Help** tab updates; updated **Architecture**, **Roadmap**, and **Licensing** documentation.
+- **Utility** — New **repo links** feature for quick access to project resources.
+
+### Changed
+
+- **Settings** — Major UI overhaul of the **Proxmox** tab with better layout and confirmation flows.
+- **Visuals** — Refined **CSS** polish for modals, toolbars, and file pane components for a more premium look.
+- **Core** — Re-implemented table resizing to use centralized column width persistence.
+
+### Fixed
+
+- **Stability** — Improved **workspace snapshot** reliability and saved state persistence.
+- **UI** — Fixed terminal dock layout and general CSS refinements.
+
 ## [0.2.1] - 2026-03-24
 
 **Stable release.** Binaries are published after you push tag [`v0.2.1`][v0.2.1] and the [release workflow](../.github/workflows/release.yml) completes (`prerelease: false`).
@@ -103,8 +124,8 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ### Added
 
-- **PROXMUX integration** — Built-in plugin `dev.nosuckshell.plugin.proxmux`: Proxmox cluster configuration, guest/resource browsing in the sidebar when entitled, **Integrations** → **PROXMUX** for credentials and options (including opening Proxmox web consoles in an embedded pane vs the system browser), adaptive polling and startup warmup behavior.
-- **App settings** — Restructured **Settings** with clearer sub-tabs; **Integrations** groups PROXMUX and **Plugins & license**; **Visual style** reset for appearance.
+- **PROXMUX integration** — Built-in plugin `dev.nosuckshell.plugin.proxmox`: Proxmox cluster configuration, guest/resource browsing in the sidebar when entitled, **Connection** → **PROXMUX** for credentials and options (including opening Proxmox web consoles in an embedded pane vs the system browser), adaptive polling and startup warmup behavior.
+- **App settings** — Restructured **Settings** with clearer sub-tabs; **Plugins** for built-in plugins and license; **Visual style** reset for appearance.
 - **Contributor documentation** — [STYLE_GUIDE.md](STYLE_GUIDE.md), [CODE_GUIDE.md](CODE_GUIDE.md), and [AGENTS.md](../AGENTS.md); linked from [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ### Changed
@@ -124,7 +145,7 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 - **Keyboard:** Settings → **Keyboard** to record shortcuts (physical `KeyboardEvent.code`); configurable **leader key** and follow-up bindings; conflict hints; persisted in `localStorage`. Global shortcuts respect terminal focus (modifier chords and Escape when a modal is open).
 - **Help:** In-app Help includes a **Keyboard shortcuts** table (from the same source as runtime) and replaces static “-” keys for mapped actions when opened from Settings.
-- **Plugins & license:** **Plugin store** section with a static catalog (paid **NSS-Commander** add-on via entitlement `dev.nosuckshell.addon.file-workspace`, plus planned integrations). Reference **license server** at [`services/license-server`](../services/license-server/) and operator guide [`license-server-runbook.md`](license-server-runbook.md).
+- **Plugins:** **Plugin store** section with a static catalog (paid **NSS-Commander** add-on via entitlement `dev.nosuckshell.addon.file-workspace`, plus planned integrations). Reference **license server** at [`services/license-server`](../services/license-server/) and operator guide [`license-server-runbook.md`](license-server-runbook.md).
 - **SSH / host keys:** Per-host **host key policy** in the sidebar host settings (interactive, auto-accept new keys, or accept any key with warning). OpenSSH `StrictHostKeyChecking` is set from app metadata on session start so ProxyJump hops do not stall on unseen yes/no prompts.
 - **Metadata:** `trustHostDefault` and `strictHostKeyPolicy` are persisted end-to-end in Rust (no silent loss on `save_host_metadata`).
 - **Quick Connect:** Optional `strictHostKeyPolicy`; **Auto-trust** in settings maps to `accept-new` for quick sessions.
@@ -206,3 +227,4 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.1.0-beta.10]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.10
 [v0.1.0-beta.11]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.11
 [v0.2.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.1
+[v0.2.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.2

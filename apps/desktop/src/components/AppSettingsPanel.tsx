@@ -3,7 +3,6 @@ import {
   APP_SETTINGS_TABS,
   CONNECTION_SUBTABS,
   HELP_ABOUT_SUBTABS,
-  INTEGRATIONS_SUBTABS,
   INTERFACE_SUBTABS,
   WORKSPACE_SUBTABS,
 } from "./settings/app-settings-constants";
@@ -34,7 +33,6 @@ export type {
   FrameModePreset,
   HelpAboutSubTab,
   IdentityStoreSubTab,
-  IntegrationsSubTab,
   InterfaceSubTab,
   LayoutMode,
   ListTonePreset,
@@ -70,8 +68,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setConnectionSubTab,
     workspaceSubTab,
     setWorkspaceSubTab,
-    integrationsSubTab,
-    setIntegrationsSubTab,
     interfaceSubTab,
     setInterfaceSubTab,
     helpAboutSubTab,
@@ -298,14 +294,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             onSelect={setWorkspaceSubTab}
           />
         )}
-        {activeAppSettingsTab === "integrations" && (
-          <SettingsSubtabRow
-            ariaLabel="Integrations sections"
-            tabs={INTEGRATIONS_SUBTABS}
-            activeTab={integrationsSubTab}
-            onSelect={setIntegrationsSubTab}
-          />
-        )}
         {activeAppSettingsTab === "interface" && (
           <SettingsSubtabRow
             ariaLabel="Interface sections"
@@ -456,6 +444,12 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               onResetSshDirOverride={onResetSshDirOverride}
             />
           )}
+          {activeAppSettingsTab === "connection" && connectionSubTab === "proxmux" && (
+            <AppSettingsProxmuxTab
+              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
+              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
+            />
+          )}
           {activeAppSettingsTab === "store" && (
             <AppSettingsStoreTabContent
               identityStoreSubTab={identityStoreSubTab}
@@ -505,13 +499,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               removeStoreKey={removeStoreKey}
             />
           )}
-          {activeAppSettingsTab === "integrations" && integrationsSubTab === "plugins" && <AppSettingsPluginsTab />}
-          {activeAppSettingsTab === "integrations" && integrationsSubTab === "proxmux" && (
-            <AppSettingsProxmuxTab
-              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
-              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
-            />
-          )}
+          {activeAppSettingsTab === "integrations" && <AppSettingsPluginsTab />}
           {activeAppSettingsTab === "help" && helpAboutSubTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}

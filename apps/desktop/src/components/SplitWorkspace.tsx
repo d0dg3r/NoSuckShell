@@ -115,6 +115,11 @@ export type SplitPaneRendererBridge = {
   paneContextSessionKindForPane: (paneIndex: number) => PaneContextSessionKind;
   remoteSshSpecForPane: (paneIndex: number) => RemoteSshSpec | null;
   onLocalFilePanePathChange: (paneIndex: number, pathKey: string) => void;
+  onRemoteFilePanePathChange?: (paneIndex: number, path: string) => void;
+  onLocalFilePaneF5Copy?: (paneIndex: number, sourcePath: string, selectedNames: string[]) => void;
+  onLocalFilePaneTabSwitch?: (paneIndex: number) => void;
+  onRemoteFilePaneF5Copy?: (paneIndex: number, sourcePath: string, selectedNames: string[]) => void;
+  onRemoteFilePaneTabSwitch?: (paneIndex: number) => void;
   getFileExportDestPath: () => Promise<string | null>;
   fileExportArchiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
@@ -789,11 +794,14 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                   <RemoteFilePane
                     paneIndex={paneIndex}
                     spec={remoteSpec}
+                    onPathChange={b.onRemoteFilePanePathChange ? (path) => b.onRemoteFilePanePathChange!(paneIndex, path) : undefined}
                     getExportDestPath={b.getFileExportDestPath}
                     archiveFormat={b.fileExportArchiveFormat}
                     onBack={() => void b.handleContextAction("pane.toggleRemoteFiles", paneIndex)}
                     onFilePaneTitleChange={b.onFilePaneTitleChange}
                     semanticFileNameColors={b.semanticFileNameColors}
+                    onF5Copy={b.onRemoteFilePaneF5Copy ? (src, names) => b.onRemoteFilePaneF5Copy!(paneIndex, src, names) : undefined}
+                    onTabSwitchPane={b.onRemoteFilePaneTabSwitch ? () => b.onRemoteFilePaneTabSwitch!(paneIndex) : undefined}
                   />
                 </Suspense>
               ) : paneFileView === "local" ? (
@@ -808,6 +816,8 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     onBack={() => void b.handleContextAction("pane.toggleLocalFiles", paneIndex)}
                     onFilePaneTitleChange={b.onFilePaneTitleChange}
                     semanticFileNameColors={b.semanticFileNameColors}
+                    onF5Copy={b.onLocalFilePaneF5Copy ? (src, names) => b.onLocalFilePaneF5Copy!(paneIndex, src, names) : undefined}
+                    onTabSwitchPane={b.onLocalFilePaneTabSwitch ? () => b.onLocalFilePaneTabSwitch!(paneIndex) : undefined}
                   />
                 </Suspense>
               ) : (

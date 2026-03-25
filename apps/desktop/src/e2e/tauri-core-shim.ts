@@ -312,7 +312,7 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return [
         {
           manifest: {
-            id: "dev.nosuckshell.plugin.file-workspace",
+            id: "dev.nosuckshell.plugin.nss-commander",
             version: "0.0.0-e2e",
             displayName: "NSS-Commander",
             capabilities: ["settingsUi"],

@@ -15,6 +15,19 @@ type Props = {
   optimalWidthsDisabled?: boolean;
 };
 
+function OptimalWidthsIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M3 7h18" strokeLinecap="round" />
+      <path d="M3 17h18" strokeLinecap="round" />
+      <path d="M7 4L4 7l3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17 4l3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 14l-3 3 3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17 14l3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function FilePaneTableHead({
   variant: _variant,
   nameWidth,
@@ -96,7 +109,7 @@ export function FilePaneTableHead({
                   onOptimalColumnWidths();
                 }}
               >
-                Optimal width
+                <OptimalWidthsIcon />
               </button>
             </div>
           </th>

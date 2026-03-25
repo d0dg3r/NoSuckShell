@@ -6,6 +6,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  FILE_PANE_RESIZABLE_HEADERS,
+  resolveOptimalResizableWidths,
+} from "../features/file-pane-column-sizing";
 
 const STORAGE_PREFIX = "NoSuckShell.filePane.cols.";
 
@@ -20,11 +24,14 @@ export const FILE_PANE_TABLE_DEFAULT_WIDTHS = {
   size: 88,
 } as const;
 
-const HEADER_LABELS = ["Name", "Rechte", "Size"] as const;
 const COL_KEYS = ["name", "perm", "size"] as const;
 
 type Widths = { name: number; perm: number; size: number };
 type ColKey = (typeof COL_KEYS)[number];
+
+function widthsEqual(a: Widths, b: Widths): boolean {
+  return a.name === b.name && a.perm === b.perm && a.size === b.size;
+}
 
 function clampCol(n: number): number {
   return Math.min(2000, Math.max(MIN_COL, Math.round(n)));
@@ -180,7 +187,7 @@ function readWrapContentWidth(wrap: HTMLDivElement | null): number {
 export type FilePaneTailColWidths = { modified: number; actions: number };
 
 /**
- * Name, Rechte, Size: resizable + persisted. User/Gruppe: measured from listing. Order: Name | Rechte | User | Gruppe | Size | Modified | Actions.
+ * Name, Permissions, Size: resizable + persisted. User/Group: measured from listing. Order: Name | Permissions | User | Group | Size | Modified | Actions.
  */
 export function useFilePaneTableResize(
   storageKey: string,
@@ -216,6 +223,29 @@ export function useFilePaneTableResize(
       /* ignore quota */
     }
   }, [storageKey]);
+
+  const measureIdealResizableWidths = useCallback(
+    (tableWidth: number): Widths => {
+      const font = resolveFontFromTableWrap(tableWrapRef.current);
+      const measured = COL_KEYS.reduce(
+        (acc, key, index) => {
+          const header = FILE_PANE_RESIZABLE_HEADERS[index];
+          const textWidth = measureTextColumnWidth(header, samplesRef.current[key], font);
+          const headerMin = headerMinColumnWidth(header, font);
+          acc[key] = Math.max(headerMin, textWidth);
+          return acc;
+        },
+        { name: MIN_COL, perm: MIN_COL, size: MIN_COL } as Widths,
+      );
+      return resolveOptimalResizableWidths({
+        tableWidth,
+        fixedExtra: fixedExtraRef.current,
+        minTailRestPx,
+        measured,
+      });
+    },
+    [minTailRestPx],
+  );
 
   const applyResize = useCallback((d: SessionState, dx: number) => {
     const tw = d.tableW;
@@ -263,7 +293,7 @@ export function useFilePaneTableResize(
   const fitOneColumn = useCallback(
     (grip: 0 | 1 | 2) => {
       const key = COL_KEYS[grip];
-      const header = HEADER_LABELS[grip];
+      const header = FILE_PANE_RESIZABLE_HEADERS[grip];
       const tw = readWrapContentWidth(tableWrapRef.current);
       const font = resolveFontFromTableWrap(tableWrapRef.current);
       const measured = measureTextColumnWidth(header, samplesRef.current[key], font);
@@ -291,24 +321,12 @@ export function useFilePaneTableResize(
   );
 
   const applyOptimalColumnWidths = useCallback(() => {
-    let cur = { ...widthsRef.current };
-    for (const grip of [0, 1, 2] as const) {
-      const key = COL_KEYS[grip];
-      const header = HEADER_LABELS[grip];
-      const tw = readWrapContentWidth(tableWrapRef.current);
-      const font = resolveFontFromTableWrap(tableWrapRef.current);
-      const measured = measureTextColumnWidth(header, samplesRef.current[key], font);
-      const hMin = headerMinColumnWidth(header, font);
-      const maxTriple = tw - fixedExtraRef.current - ACTION_COL_PX - minTailRestPx;
-      const otherSum = cur.name + cur.perm + cur.size - cur[key];
-      const cap = Math.max(MIN_COL, maxTriple - otherSum);
-      const nextVal = clampCol(Math.max(hMin, Math.min(measured, cap)));
-      cur = { ...cur, [key]: nextVal };
-    }
+    const tw = readWrapContentWidth(tableWrapRef.current);
+    const cur = measureIdealResizableWidths(tw);
     widthsRef.current = cur;
     setWidths(cur);
     persist();
-  }, [minTailRestPx, persist]);
+  }, [measureIdealResizableWidths, persist]);
 
   const onGripPointerDown = useCallback(
     (grip: 0 | 1 | 2) => (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -393,11 +411,11 @@ export function useFilePaneTableResize(
         table.style.width = `${inner}px`;
         table.style.maxWidth = `${inner}px`;
 
-        if (!isDragging && inner >= MIN_COL * 3 + fe + ACTION_COL_PX + minTailRestPx) {
-          const clamped = clampThreeColumnsToTable(inner, minTailRestPx, fe, widthsRef.current);
-          if (clamped) {
-            widthsRef.current = clamped;
-            setWidths(clamped);
+        if (!isDragging) {
+          const optimal = measureIdealResizableWidths(inner);
+          if (!widthsEqual(widthsRef.current, optimal)) {
+            widthsRef.current = optimal;
+            setWidths(optimal);
             persist();
           }
         }
@@ -428,14 +446,14 @@ export function useFilePaneTableResize(
     ro.observe(el);
     run();
     return () => ro.disconnect();
-  }, [widths, storageKey, minTailRestPx, fixedLeadingExtraPx, persist, autoFitSamples, isDragging]);
+  }, [widths, fixedLeadingExtraPx, persist, isDragging, measureIdealResizableWidths]);
 
   useEffect(() => {
     const measure = () => {
       const font = resolveFontFromTableWrap(tableWrapRef.current);
       setOwnerColWidths({
         user: measureFilePaneOwnerColumnWidth("User", userColSamplesRef.current, font),
-        group: measureFilePaneOwnerColumnWidth("Gruppe", groupColSamplesRef.current, font),
+        group: measureFilePaneOwnerColumnWidth("Group", groupColSamplesRef.current, font),
       });
     };
     measure();

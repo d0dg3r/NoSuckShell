@@ -75,10 +75,10 @@ curl -sS -X POST http://127.0.0.1:8787/admin/issue-license \
   -d '{"entitlements":["dev.nosuckshell.addon.file-workspace"],"licenseId":"dev-local"}'
 ```
 
-Paste the returned token into **Settings → Plugins & license → Activate**.
+Paste the returned token into **Settings → Plugins** (Activate).
 
 ## Quick health checks
 
 - `GET /health` on the license server.
-- Desktop: **Settings → Plugins & license** shows license status, entitlements, and **Expires** when `exp` is set.
+- Desktop: **Settings → Plugins** shows license status, entitlements, and **Expires** when `exp` is set.
 - Issue a dev token with the **same** pubkey the app uses, paste into **License token → Activate**.

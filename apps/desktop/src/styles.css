@@ -2225,6 +2225,25 @@ input.input[type="checkbox"] {
   gap: var(--space-3);
 }
 
+.nss-commander-action-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(129, 182, 153, 0.25);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(11, 18, 22, 0.82), rgba(9, 14, 19, 0.72));
+}
+
+.nss-commander-action-rail-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .workspace-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -3443,6 +3462,13 @@ input.input[type="checkbox"] {
   text-overflow: ellipsis;
 }
 
+.file-pane-selection-count {
+  flex: 0 0 auto;
+  color: #a4e9c2;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
 .file-pane-banner {
   padding: var(--space-2, 8px) var(--space-3, 12px);
   font-size: var(--font-md);
@@ -3586,13 +3612,13 @@ input.input[type="checkbox"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  min-height: 24px;
-  padding: 2px 8px;
+  width: 28px;
+  min-width: 28px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
   margin: 0;
-  font-size: var(--font-sm);
-  font-weight: 600;
-  line-height: var(--leading-snug);
+  line-height: var(--leading-none);
   color: rgba(232, 238, 234, 0.7);
 }
 
@@ -4955,6 +4981,53 @@ input.input[type="checkbox"] {
   gap: var(--space-4);
 }
 
+/* Settings -> Help tab width preset controls */
+.settings-help-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-help-card-head h3 {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.settings-help-width-controls {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.app-settings-content.app-settings-panel-body .settings-card.settings-help-wrap.is-help-fit {
+  max-width: 72rem;
+}
+
+.app-settings-content.app-settings-panel-body .settings-card.settings-help-wrap.is-help-wide {
+  max-width: none;
+}
+
+/*
+ * Help tables use min-width: 620px. Flex/grid children default to min-width: auto, so the card
+ * grows to the table’s intrinsic width; the modal body uses overflow-x: hidden and clips the
+ * right side — users only see the first column. Shrink the card and scroll inside .help-table-wrap.
+ */
+.app-settings-content.app-settings-panel-body .settings-stack .settings-card.settings-help-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-settings-content.app-settings-panel-body .settings-help-wrap .help-panel {
+  min-width: 0;
+}
+
+.app-settings-content.app-settings-panel-body .settings-help-wrap .help-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 /* Header + scroll body: flex-basis 0 so the body gets a bounded height and overflow-y can scroll (flex: 1 1 auto alone can leave scrollHeight === clientHeight). */
 .app-settings-modal:not(.add-host-modal):not(.trust-host-modal) > .panel-header.app-settings-header {
   flex: 0 0 auto;
@@ -5546,6 +5619,92 @@ input.input[type="checkbox"] {
   font-size: var(--font-md);
   font-weight: 650;
   color: rgba(220, 235, 226, 0.95);
+}
+
+/* PROXMUX settings: page chrome + cluster split layout */
+.settings-stack--proxmux {
+  gap: var(--space-3);
+}
+
+.proxmux-settings-page-head {
+  margin-bottom: var(--space-1);
+}
+
+.proxmux-settings-page-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.proxmux-settings-page-title {
+  margin: 0;
+  font-size: var(--font-lg);
+  font-weight: 650;
+  color: rgba(248, 252, 250, 0.96);
+}
+
+.proxmux-settings-page-sub {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: rgba(200, 215, 208, 0.82);
+}
+
+.proxmux-settings-status {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  font-size: var(--font-sm);
+  background: rgba(var(--settings-accent-rgb), 0.1);
+  border: 1px solid rgba(var(--settings-accent-rgb), 0.22);
+  color: rgba(230, 245, 236, 0.92);
+}
+
+.proxmux-settings-banner {
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  font-size: var(--font-sm);
+  line-height: var(--leading-snug);
+  margin: 0 0 var(--space-3);
+}
+
+.proxmux-settings-banner--warn {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  color: rgba(254, 243, 199, 0.95);
+}
+
+.proxmux-settings-clusters-split {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 960px) {
+  .proxmux-settings-clusters-split {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.proxmux-settings-clusters-col {
+  min-width: 0;
+}
+
+.proxmux-settings-col-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(180, 198, 190, 0.88);
+}
+
+.proxmux-settings-subheading:has(.settings-help-hint-wrap) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 /* PROXMUX settings tab: sub-panels + network proxy profile cards */
@@ -6551,6 +6710,18 @@ input.input[type="checkbox"] {
   border: 1px solid rgba(150, 170, 161, 0.18);
 }
 
+.about-version {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.about-links-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 .help-panel {
   display: grid;
   gap: var(--space-5);
@@ -6640,6 +6811,23 @@ input.input[type="checkbox"] {
   table-layout: fixed;
 }
 
+/* Two-column cheatsheet (Action + Shortcut) — overrides three-column widths below */
+.help-table--shortcuts {
+  min-width: 480px;
+}
+
+.help-table--shortcuts th:nth-child(1),
+.help-table--shortcuts td:nth-child(1) {
+  width: 55%;
+}
+
+.help-table--shortcuts th:nth-child(2),
+.help-table--shortcuts td:nth-child(2) {
+  width: 45%;
+  text-align: left;
+  white-space: normal;
+}
+
 .help-table th,
 .help-table td {
   padding: var(--space-3) var(--space-4);
@@ -6709,6 +6897,18 @@ input.input[type="checkbox"] {
 
 .help-note {
   margin: 0;
+}
+
+.help-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.help-loading {
+  padding: var(--space-4);
+  text-align: center;
 }
 
 .terminal-root {

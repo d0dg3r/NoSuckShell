@@ -3,7 +3,7 @@
 Small HTTP service that:
 
 - Answers Ko-fi’s webhook **verification** handshake (`verification_token`).
-- On supported Ko-fi event types (`Donation`, `Subscription`, `Shop Order`, `Commission`), builds a **signed license token** in the same format the desktop app accepts in **Settings → Plugins & license → Activate**.
+- On supported Ko-fi event types (`Donation`, `Subscription`, `Shop Order`, `Commission`), builds a **signed license token** in the same format the desktop app accepts in **Settings → Plugins** (Activate).
 
 ## Configuration
 

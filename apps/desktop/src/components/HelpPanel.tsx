@@ -1,3 +1,11 @@
+import {
+  REPO_ISSUES_URL,
+  REPO_SECURITY_URL,
+  REPO_URL,
+  REPO_CHANGELOG_URL,
+} from "../features/repo-links";
+import { APP_ONE_LINE, HELP_SUPPORT_INTRO } from "../features/help-app-copy";
+
 type HelpRow = {
   action: string;
   mouse: string;
@@ -16,195 +24,203 @@ type HelpChapter = {
   sections: HelpSection[];
 };
 
-const interactionSections: HelpSection[] = [
+/** Where to find major settings (balanced reference). */
+const welcomeSections: HelpSection[] = [
   {
-    title: "Host list",
+    title: "Finding settings",
     rows: [
       {
-        action: "Select host (for editing)",
-        mouse: "Single-click host row",
+        action: "Connection",
+        mouse: "Hosts, SSH directory and raw config, PROXMUX clusters.",
         keys: "-",
       },
       {
-        action: "Open SSH in a new pane",
-        mouse: "Double-click host row",
-        keys: "When the host row is focused: Enter or Space",
-      },
-      {
-        action: "Drag host into the grid",
-        mouse: "Drag host row onto pane drop zones (see Drag & drop)",
+        action: "Identity Store",
+        mouse: "Users, keys, groups, tags, and per-host bindings.",
         keys: "-",
       },
       {
-        action: "Toggle favorite",
-        mouse: "Star button on the row",
+        action: "Workspace",
+        mouse: "Views, layout and navigation (splits, broadcast, quick connect), files and export.",
         keys: "-",
       },
       {
-        action: "Edit host, tags, favorite, SSH options",
-        mouse: "⋮ button on the row",
+        action: "Plugins",
+        mouse: "Built-in plugins, store catalog, license token.",
         keys: "-",
       },
       {
-        action: "Connect in a specific workspace",
-        mouse: "Right-click host row → workspace (when multiple workspaces exist)",
-        keys: "-",
-      },
-    ],
-  },
-  {
-    title: "Pane, terminal & context menu",
-    rows: [
-      { action: "Focus pane", mouse: "Click pane", keys: "-" },
-      { action: "Pane context menu", mouse: "Right-click pane", keys: "-" },
-      { action: "Split pane", mouse: "Split buttons on pane toolbar or context menu", keys: "-" },
-      { action: "Resize splits", mouse: "Drag split divider", keys: "-" },
-      { action: "New local terminal / Quick connect", mouse: "Context menu on pane", keys: "-" },
-      { action: "Pause or resume auto-arrange", mouse: "Context menu (manual layout / restore)", keys: "-" },
-      { action: "Close session / close pane", mouse: "Toolbar icons or context menu", keys: "-" },
-      { action: "Open Settings", mouse: "Context menu on pane", keys: "-" },
-      {
-        action: "Type in terminal",
-        mouse: "Focus terminal",
-        keys: "Keystrokes go to the shell (no global key capture)",
-      },
-    ],
-  },
-  {
-    title: "Broadcast input",
-    rows: [
-      {
-        action: "Enable / disable broadcast",
-        mouse: "Broadcast icon on pane toolbar, or Settings → Layout & Navigation",
+        action: "Interface",
+        mouse: "Appearance and keyboard (shortcuts, leader key).",
         keys: "-",
       },
       {
-        action: "Target this pane / all visible",
-        mouse: "Target and “all panes” icons on pane toolbar, or context menu",
+        action: "Data & Backup",
+        mouse: "Encrypted backup export and import.",
         keys: "-",
       },
       {
-        action: "Clear targets / stop broadcast",
-        mouse: "Context menu entries when broadcast is on",
-        keys: "-",
-      },
-      {
-        action: "See status",
-        mouse: "Session footer shows enabled/disabled and target count",
-        keys: "-",
-      },
-    ],
-  },
-  {
-    title: "Drag & drop",
-    rows: [
-      {
-        action: "Open host on empty pane",
-        mouse: "Drag host onto empty pane (drop to open)",
-        keys: "-",
-      },
-      {
-        action: "Split with host",
-        mouse: "Drag host onto Top / Left / Right / Bottom zone",
-        keys: "-",
-      },
-      {
-        action: "Replace session",
-        mouse: "Drag host onto center (replace) on a pane that already has a session",
-        keys: "-",
-      },
-      {
-        action: "Move or duplicate session",
-        mouse: "Drag session from toolbar; drop zone chooses pane / split; same-pane center duplicates",
-        keys: "-",
-      },
-      {
-        action: "Send session to another workspace",
-        mouse: "Right-click pane → Send to … (when multiple workspaces)",
-        keys: "-",
-      },
-    ],
-  },
-  {
-    title: "File browser",
-    rows: [
-      {
-        action: "What the colors mean",
-        mouse:
-          "Folder and file names use soft tints (archives, scripts, executables, media, code, text, data). Same idea as many terminal listings—quick visual scan, not a security label.",
-        keys: "-",
-      },
-      {
-        action: "Folders",
-        mouse: "Directories use a distinct link color so they read separately from files.",
-        keys: "-",
-      },
-      {
-        action: "Executables",
-        mouse:
-          "Unix +x bits (or .exe / .bin / …) use the executable tint. Shell scripts (.sh, .ps1, …) stay in the script tint even when executable.",
-        keys: "-",
-      },
-      {
-        action: "Turn off or customize",
-        mouse: "Settings → Files & export: toggle semantic colors and pick per-category colors; this page explains the groups.",
-        keys: "-",
-      },
-    ],
-  },
-  {
-    title: "Layouts & navigation",
-    rows: [
-      {
-        action: "Layout command center",
-        mouse: "Footer “Layouts” — saved layouts, templates, session cleanup",
-        keys: "-",
-      },
-      {
-        action: "Close all / close all + reset layout",
-        mouse: "Layout command center (second click confirms)",
-        keys: "-",
-      },
-      {
-        action: "Sidebar views",
-        mouse: "Tabs: All, Favorites, custom views (filter/sort from Settings → Views)",
-        keys: "-",
-      },
-      {
-        action: "Narrow / stacked UI",
-        mouse: "Hosts | Terminal tab bar; terminal pager ‹ › for multiple panes",
+        action: "Help & info",
+        mouse: "This Help page and About (version and links).",
         keys: "-",
       },
     ],
   },
 ];
 
-const sshSections: HelpSection[] = [
+const interactionSections: HelpSection[] = [
   {
-    title: "Host key verification (saved hosts)",
+    title: "Host list",
+    rows: [
+      { action: "Select a host", mouse: "Single-click a row to select it for editing or actions.", keys: "-" },
+      {
+        action: "Open SSH in a pane",
+        mouse: "Double-click a row, or press Enter / Space when the row is focused.",
+        keys: "Enter or Space when focused",
+      },
+      {
+        action: "Drag a host into the grid",
+        mouse: "Drag from the list onto pane drop zones (see Drag and drop).",
+        keys: "-",
+      },
+      { action: "Favorite", mouse: "Use the star on the row.", keys: "-" },
+      { action: "Edit host details", mouse: "Use the row menu (⋮).", keys: "-" },
+      {
+        action: "Connect in another workspace",
+        mouse: "Right-click the row → choose a workspace when multiple workspaces exist.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "Panes, terminal, and menus",
+    rows: [
+      { action: "Focus a pane", mouse: "Click inside the pane.", keys: "-" },
+      { action: "Pane menu", mouse: "Right-click the pane.", keys: "-" },
+      { action: "Split / resize", mouse: "Toolbar or context menu; drag split dividers.", keys: "-" },
+      {
+        action: "New local terminal / Quick connect",
+        mouse: "Pane context menu (same as the global shortcut when configured).",
+        keys: "-",
+      },
+      { action: "Open Settings", mouse: "Pane context menu (same as the global shortcut when configured).", keys: "-" },
+      {
+        action: "Type in the terminal",
+        mouse: "With focus in the terminal, keys go to the shell unless a chord is handled globally.",
+        keys: "—",
+      },
+    ],
+  },
+  {
+    title: "Broadcast",
     rows: [
       {
-        action: "Interactive prompt (default)",
+        action: "Turn broadcast on or off",
+        mouse: "Pane toolbar icon, or Settings → Layout & navigation.",
+        keys: "-",
+      },
+      {
+        action: "Choose targets",
+        mouse: "Target and “all panes” controls on the toolbar or context menu.",
+        keys: "-",
+      },
+      { action: "Status", mouse: "Session footer shows on/off and target count.", keys: "-" },
+    ],
+  },
+  {
+    title: "Drag and drop",
+    rows: [
+      { action: "Open on empty pane", mouse: "Drop a host onto an empty pane.", keys: "-" },
+      { action: "Split", mouse: "Drop onto Top / Left / Right / Bottom zones.", keys: "-" },
+      {
+        action: "Replace session",
+        mouse: "Drop onto the center of a pane that already has a session.",
+        keys: "-",
+      },
+      {
+        action: "Move or duplicate session",
+        mouse: "Drag from the session toolbar; center drop on same pane can duplicate.",
+        keys: "-",
+      },
+      {
+        action: "Send to another workspace",
+        mouse: "Right-click pane → Send to … when multiple workspaces exist.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "File browser (semantic colors)",
+    rows: [
+      {
+        action: "Color groups",
         mouse:
-          "OpenSSH may ask to confirm new or changed host keys. A modal can offer “Trust host” and optional “Save as default”.",
+          "File and folder names use soft tints (archives, scripts, executables, media, code, text, data). This is a visual aid, not a security label.",
+        keys: "-",
+      },
+      {
+        action: "Customize",
+        mouse: "Settings → Files & export: toggle semantic colors and adjust per category.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "File browser (NSS-Commander)",
+    rows: [
+      {
+        action: "Copy to other pane (file browser)",
+        mouse: "When the file workspace plugin is enabled, copy selection to the paired pane where supported.",
+        keys: "-",
+      },
+      {
+        action: "Switch file pane (file browser)",
+        mouse: "Move focus between local and remote file panes in the workspace.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "Layouts and navigation",
+    rows: [
+      { action: "Saved layouts", mouse: "Footer “Layouts” — templates and cleanup options.", keys: "-" },
+      { action: "Sidebar views", mouse: "All, Favorites, and custom views from Settings → Views.", keys: "-" },
+      {
+        action: "Narrow / stacked layout",
+        mouse: "Hosts | Terminal tab bar; pager controls when many panes.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+/** SSH + Identity merged: host keys, proxies, then store concepts. */
+const sshIdentitySections: HelpSection[] = [
+  {
+    title: "SSH sessions (terminal)",
+    rows: [
+      {
+        action: "How sessions start",
+        mouse:
+          "The app launches the system OpenSSH client in a PTY. Options come from the resolved host (SSH config + app metadata + Identity Store + plugins).",
+        keys: "-",
+      },
+      {
+        action: "Host key trust",
+        mouse:
+          "OpenSSH may prompt for new or changed keys. The app can show a trust modal. Per-host policy lives in host settings and metadata.",
         keys: "-",
       },
       {
         action: "Auto-accept new keys",
         mouse:
-          "Host settings (⋮) → Host key verification → “Auto-accept new keys”. Uses StrictHostKeyChecking=accept-new so new keys are stored without a yes/no prompt—important for ProxyJump where prompts can be easy to miss.",
+          "Host menu → Host key verification → Auto-accept new keys (StrictHostKeyChecking=accept-new). Useful behind ProxyJump where prompts are easy to miss.",
         keys: "-",
       },
       {
-        action: "Accept any key (insecure)",
+        action: "Quick connect trust",
         mouse:
-          "Same dropdown, last option—disables meaningful host-key checks (MITM risk). Only for broken or lab setups.",
-        keys: "-",
-      },
-      {
-        action: "Quick connect",
-        mouse:
-          "Layout & Navigation → “Auto-trust host keys for quick connect” sends accept-new for one-off sessions (no saved host entry).",
+          "Settings → Layout & navigation: optional auto-trust for one-off Quick connect sessions.",
         keys: "-",
       },
     ],
@@ -213,59 +229,55 @@ const sshSections: HelpSection[] = [
     title: "ProxyJump and ProxyCommand",
     rows: [
       {
-        action: "Jump via another saved host",
+        action: "Jump via saved host",
         mouse:
-          "Host form → Proxy section: “Jump shortcut” lists host aliases; you can still type any ProxyJump string (comma-separated hops supported by OpenSSH). The bastion is a normal host entry, not a separate tab.",
+          "Host form → Proxy: Jump shortcut lists aliases; you can still type full ProxyJump (multi-hop supported by OpenSSH).",
         keys: "-",
       },
       {
-        action: "Jump hosts (bastions)",
+        action: "Bastion tag",
         mouse:
-          "Host settings → check “Jump host (bastion)” to add the jumphost tag and include that alias in the shortcut list once at least one host is marked (until then, all aliases stay listed).",
+          "Mark a host as bastion so it appears in jump shortcuts once configured.",
         keys: "-",
       },
       {
         action: "ProxyCommand presets",
-        mouse:
-          "Preset dropdown fills common patterns (e.g. ssh -W %h:%p bastion, SOCKS via nc). Edit the command line to match your environment.",
+        mouse: "Pick a preset or edit the command for your environment.",
         keys: "-",
       },
       {
-        action: "Identity Store → Hosts",
+        action: "SFTP limitation",
         mouse:
-          "Per-host binding: same jump shortcut + ProxyJump field, optional ProxyCommand preset and command line. Binding overrides win over store-user defaults where applicable.",
-        keys: "-",
-      },
-      {
-        action: "Identity Store → Users",
-        mouse:
-          "Optional default ProxyJump when a user is linked and the host binding leaves ProxyJump empty.",
+          "The file browser uses direct TCP (libssh2), not ProxyJump/ProxyCommand. Use a reachable address or work through a terminal session over a bastion.",
         keys: "-",
       },
     ],
   },
-];
-
-const identitySections: HelpSection[] = [
   {
-    title: "What the Identity Store does",
+    title: "Identity Store",
     rows: [
       {
-        action: "Users, keys, groups, tags",
+        action: "Purpose",
         mouse:
-          "Central place for SSH identities (path or encrypted keys), people-shaped records, and taxonomy. Linked on each host binding.",
+          "Central users, SSH keys (path or encrypted material), groups, and tags — linked through per-host bindings.",
         keys: "-",
       },
       {
         action: "Host bindings",
         mouse:
-          "Settings → Identity Store → Hosts: pick a config host, optional store user, keys, groups/tags, ProxyJump / ProxyCommand overrides, then Save host binding.",
+          "Settings → Identity Store → Hosts: choose the config host, optional store user, keys, tags, and proxy overrides, then save.",
         keys: "-",
       },
       {
-        action: "Session resolution",
+        action: "Resolution order",
         mouse:
-          "When you connect, the app merges ~/.ssh/config host fields with the binding and store user (user, HostName, keys, ProxyJump, ProxyCommand, etc.).",
+          "At connect time, the app merges OpenSSH config for the host with the binding and linked user (user, HostName, keys, ProxyJump, ProxyCommand, etc.).",
+        keys: "-",
+      },
+      {
+        action: "Passphrase-protected keys",
+        mouse:
+          "Decrypted in memory for the session; plaintext key material is not written back to disk by the app.",
         keys: "-",
       },
     ],
@@ -274,112 +286,183 @@ const identitySections: HelpSection[] = [
 
 const proxmuxSections: HelpSection[] = [
   {
-    title: "PROXMUX (Proxmox)",
+    title: "PROXMUX basics",
     rows: [
       {
         action: "What it is",
         mouse:
-          "Optional built-in integration for Proxmox VE: one or more clusters, guest/resource listing in the sidebar when the plugin is enabled and entitled, and Proxmox web consoles.",
+          "Built-in Proxmox VE integration: clusters, inventory in the sidebar when the plugin is enabled and entitled, and guest consoles.",
         keys: "-",
       },
       {
-        action: "Configure",
-        mouse:
-          "Settings → Integrations → PROXMUX: cluster URLs, credentials, TLS options. Use Plugins & license if the feature is gated by a license entitlement.",
+        action: "Enable",
+        mouse: "Settings → Plugins: enable the PROXMUX plugin. Some builds require a license entitlement.",
         keys: "-",
       },
       {
-        action: "Sidebar",
+        action: "Clusters",
         mouse:
-          "When PROXMUX is available, a sidebar section lists clusters and guests; open consoles or SSH from the row actions where supported.",
-        keys: "-",
-      },
-      {
-        action: "Web console",
-        mouse:
-          "Choose whether Proxmox noVNC/SPICE/HTML5 consoles open inside an app pane or in your default browser (toggle on the PROXMUX settings tab).",
-        keys: "-",
-      },
-      {
-        action: "TLS and embedded consoles",
-        mouse:
-          "For private CA or self-signed HTTPS, use Allow insecure TLS and/or paste a trusted certificate PEM (confirm fingerprint changes when the leaf rotates). Embedded QEMU noVNC and LXC shells use a local WebSocket bridge to the cluster; the same TLS policy applies to Proxmox API calls.",
+          "Settings → Connection → PROXMUX: add cluster URL, credentials, TLS options. Plaintext cluster secrets can be encrypted with NOSUCKSHELL_MASTER_KEY or nosuckshell.master.key — see UI on that tab.",
         keys: "-",
       },
     ],
   },
-];
-
-const settingsSections: HelpSection[] = [
   {
-    title: "Settings tabs (reference)",
+    title: "TLS and consoles",
     rows: [
       {
-        action: "Connection",
-        mouse: "Hosts (SSH config + host list) and SSH (SSH directory override and raw config editor).",
+        action: "Certificate issues",
+        mouse:
+          "For self-signed or private CA: Allow insecure TLS and/or paste a trusted PEM; confirm when the leaf fingerprint changes.",
         keys: "-",
       },
       {
-        action: "Identity Store",
-        mouse: "Overview, Users, SSH keys, Groups, Tags — including per-host bindings (see Identity Store chapter).",
+        action: "Where consoles open",
+        mouse:
+          "Choose embedded pane vs system browser for HTML5 / noVNC / SPICE-style consoles on the PROXMUX settings tab.",
         keys: "-",
       },
       {
-        action: "Workspace",
-        mouse: "Views (filters/sort), Layout & navigation (splits, broadcast, quick connect), Files & export.",
+        action: "Embedded path",
+        mouse:
+          "Embedded QEMU noVNC and LXC views use a local WebSocket bridge; TLS policy matches API calls.",
         keys: "-",
       },
-      {
-        action: "Integrations",
-        mouse: "PROXMUX (Proxmox) and Plugins & license (built-in plugins, license token).",
-        keys: "-",
-      },
-      {
-        action: "Interface",
-        mouse: "Appearance (density, fonts, list tone, visual style reset) and Keyboard (shortcuts and leader key).",
-        keys: "-",
-      },
-      { action: "Data & Backup", mouse: "Encrypted backup export/import.", keys: "-" },
-      { action: "Help & info", mouse: "This Help page and About (version and links).", keys: "-" },
     ],
   },
 ];
 
-const dataSections: HelpSection[] = [
+const dataPrivacySections: HelpSection[] = [
   {
-    title: "Where data lives",
+    title: "On-disk and config data",
     rows: [
       {
         action: "SSH config",
         mouse:
-          "Managed host blocks live in your effective SSH config file (see Settings → SSH). The app can read/write Host entries it manages.",
+          "Managed Host blocks live in your effective SSH config (Settings → SSH). The app only edits entries it owns.",
         keys: "-",
       },
       {
-        action: "App metadata",
-        mouse:
-          "Favorites, tags, last used, host key policy, default SSH user name—stored alongside your SSH directory (e.g. nosuckshell.metadata.json).",
+        action: "nosuckshell.metadata.json",
+        mouse: "Favorites, tags, last used, host-key policy, default user — next to the active SSH directory.",
         keys: "-",
       },
       {
-        action: "Entity store",
-        mouse: "Encrypted-at-rest JSON for Identity Store objects (location under the app’s data dir; use Backup to export safely).",
+        action: "Identity Store file",
+        mouse: "Encrypted JSON under the app data area; use Backup to export safely.",
         keys: "-",
       },
       {
-        action: "Layouts & views",
-        mouse: "Saved layout profiles and view profiles as separate persisted files.",
+        action: "Layouts and views",
+        mouse: "Separate JSON files for layout and sidebar view profiles.",
+        keys: "-",
+      },
+      {
+        action: "nosuckshell.plugins.json / nosuckshell.license.json",
+        mouse: "Plugin toggles and verified license payload next to the active SSH directory.",
+        keys: "-",
+      },
+      {
+        action: "PROXMUX config",
+        mouse: "nosuckshell.proxmux.v1.json — see PROXMUX settings for encryption options.",
         keys: "-",
       },
     ],
   },
   {
-    title: "Backups",
+    title: "Privacy and logs",
     rows: [
       {
-        action: "Encrypted backup",
+        action: "Passwords",
         mouse:
-          "Settings → Data & Backup: export packs SSH config, metadata, store, layouts, and view profiles. Keep the password safe; see project docs for the threat model.",
+          "Interactive SSH passwords go to the PTY; the app does not log them. Backup passwords exist only in memory for the current import/export.",
+        keys: "-",
+      },
+      {
+        action: "Backups",
+        mouse:
+          "Exports are encrypted (Argon2id + authenticated encryption). Keep the password safe; it cannot be recovered by the app.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const pluginsLicenseSections: HelpSection[] = [
+  {
+    title: "Plugins",
+    rows: [
+      {
+        action: "Built-in plugins",
+        mouse:
+          "Ship in the desktop binary (e.g. NSS-Commander file workspace, PROXMUX). Toggle under Settings → Plugins.",
+        keys: "-",
+      },
+      {
+        action: "Entitlements",
+        mouse:
+          "Some features require entitlement strings carried in a signed license token. The signature is verified offline.",
+        keys: "-",
+      },
+    ],
+  },
+  {
+    title: "License token",
+    rows: [
+      {
+        action: "Activate",
+        mouse: "Settings → Plugins: paste the token, then activate. Stored as nosuckshell.license.json when valid.",
+        keys: "-",
+      },
+      {
+        action: "“Waiting on entitlement”",
+        mouse:
+          "The plugin is on but your token does not include the required entitlement. Compare with Settings → Plugins and your purchase.",
+        keys: "-",
+      },
+      {
+        action: "Clear",
+        mouse: "Clear the license from the Plugins tab to remove the local token file.",
+        keys: "-",
+      },
+    ],
+  },
+];
+
+const faqSections: HelpSection[] = [
+  {
+    title: "Common questions",
+    rows: [
+      {
+        action: "Quick connect vs saved host",
+        mouse:
+          "Quick connect is ephemeral unless you save the host. Saved hosts live in the sidebar and SSH config.",
+        keys: "-",
+      },
+      {
+        action: "Why SFTP ignores my bastion",
+        mouse:
+          "File browser uses direct TCP, not OpenSSH ProxyJump. Use a direct route or use the terminal over the bastion.",
+        keys: "-",
+      },
+      {
+        action: "Restore backup",
+        mouse: "Settings → Data & Backup → Import with the file path and export password.",
+        keys: "-",
+      },
+      {
+        action: "PROXMUX TLS errors",
+        mouse: "Adjust Allow insecure TLS or trusted PEM on the PROXMUX connection tab.",
+        keys: "-",
+      },
+      {
+        action: "Sidebar empty after enabling PROXMUX",
+        mouse: "Add at least one cluster under Settings → Connection → PROXMUX with valid URL and credentials.",
+        keys: "-",
+      },
+      {
+        action: "Reset appearance",
+        mouse: "Settings → Interface → Appearance → Reset visual style.",
         keys: "-",
       },
     ],
@@ -391,14 +474,13 @@ const limitationsSections: HelpSection[] = [
     title: "Known limitations",
     rows: [
       {
-        action: "SFTP file browser",
-        mouse:
-          "Uses a direct TCP connection (libssh2). ProxyJump / ProxyCommand are not applied—use a reachable HostName or open files via a terminal session through a bastion.",
+        action: "SFTP and proxies",
+        mouse: "No ProxyJump/ProxyCommand on the SFTP path; see FAQ.",
         keys: "-",
       },
       {
-        action: "Signing",
-        mouse: "Installers are not code-signed by default; your OS may show a security prompt.",
+        action: "Installers",
+        mouse: "Installers may be unsigned; the OS may show a security prompt.",
         keys: "-",
       },
     ],
@@ -407,57 +489,50 @@ const limitationsSections: HelpSection[] = [
 
 const helpChapters: HelpChapter[] = [
   {
-    id: "help-overview",
-    title: "Overview",
-    intro: [
-      "NoSuckShell is a workspace for saved SSH hosts, split terminals, drag-and-drop, optional input broadcast, a dual-pane file browser, and optional PROXMUX (Proxmox) integration. Use the links below to jump between chapters.",
-      "While a terminal pane is focused, keystrokes go to the shell—use the toolbar, context menus, footer, or Settings for app actions.",
-    ],
-    sections: [],
+    id: "help-welcome",
+    title: "Welcome",
+    intro: [APP_ONE_LINE, "Open Settings from any pane menu or the sidebar. Use the table of contents below to jump to a topic."],
+    sections: welcomeSections,
   },
   {
     id: "help-interactions",
-    title: "Interactions cheatsheet",
+    title: "Interactions",
     intro: [
-      "Quick reference for mouse and keyboard behavior. For trust prompts, see SSH and host keys.",
+      "Mouse-first actions for hosts, panes, drag-and-drop, broadcast, and the file browser. Keyboard shortcuts are listed under Keyboard shortcuts and in Settings → Keyboard.",
     ],
     sections: interactionSections,
   },
   {
-    id: "help-ssh",
-    title: "SSH, proxies, and host keys",
+    id: "help-ssh-identity",
+    title: "SSH and Identity",
     intro: [
-      "Terminal SSH is spawned by the system OpenSSH client with options derived from each host’s saved settings and app metadata.",
+      "Terminal SSH uses OpenSSH with merged configuration. The Identity Store adds structured users, keys, and bindings on top of your config.",
     ],
-    sections: sshSections,
-  },
-  {
-    id: "help-identity",
-    title: "Identity Store",
-    intro: [
-      "Optional but powerful: link store users and keys to hosts so sessions pick up the right credentials and proxy defaults.",
-    ],
-    sections: identitySections,
+    sections: sshIdentitySections,
   },
   {
     id: "help-proxmux",
     title: "PROXMUX",
-    intro: [
-      "Optional Proxmox VE integration: clusters, guest lists, and web consoles. Requires the built-in PROXMUX plugin and, where applicable, license entitlements.",
-    ],
+    intro: ["Optional Proxmox VE integration when the plugin is enabled, configured, and entitled."],
     sections: proxmuxSections,
   },
   {
-    id: "help-settings",
-    title: "Settings",
-    intro: ["All panels open from the context menu on a terminal pane (or the sidebar gear where available)."],
-    sections: settingsSections,
+    id: "help-data",
+    title: "Data, secrets, and privacy",
+    intro: ["Where files live, what is encrypted, and what the app avoids logging."],
+    sections: dataPrivacySections,
   },
   {
-    id: "help-data",
-    title: "Data, files, and backups",
+    id: "help-plugins",
+    title: "Plugins and license",
+    intro: ["Built-in plugins and how license tokens unlock entitlements in release builds."],
+    sections: pluginsLicenseSections,
+  },
+  {
+    id: "help-faq",
+    title: "FAQ",
     intro: [],
-    sections: dataSections,
+    sections: faqSections,
   },
   {
     id: "help-limits",
@@ -503,36 +578,38 @@ function renderSectionTable(
 }
 
 /**
- * In-app help: chapters + cheatsheet tables.
- * Keep in sync with App.tsx, context-actions.ts, features/file-pane-name-kind.ts,
- * host metadata / session SSH flags, Identity Store UI, app settings tabs, and PROXMUX.
+ * In-app Help: TOC, chapters, shortcuts cheatsheet, support.
+ * Content is English-only. Update with product changes; see docs/USER_HELP.md.
  */
 export type HelpPanelProps = {
   resolveHelpShortcutLabel?: (action: string) => string | undefined;
   shortcutCheatsheetLines?: Array<{ label: string; keys: string }>;
+  onOpenUrl?: (url: string) => void | Promise<void>;
 };
 
 export function HelpPanel(props: HelpPanelProps = {}) {
-  const { resolveHelpShortcutLabel, shortcutCheatsheetLines } = props;
+  const { resolveHelpShortcutLabel, shortcutCheatsheetLines, onOpenUrl } = props;
+
   return (
     <section className="help-panel">
       <header className="help-panel-header">
         <h3>Help</h3>
         <p className="muted-copy">
-          Full in-app reference: interactions, SSH and trust behavior, Identity Store, settings, and data locations.
+          Reference for shortcuts, workflows, data locations, PROXMUX, plugins, and support. Topic tables have three
+          columns; if the panel is narrow, scroll horizontally inside each table to see Details and Keyboard.
         </p>
       </header>
 
       {shortcutCheatsheetLines && shortcutCheatsheetLines.length > 0 ? (
-        <section className="help-section" aria-label="Keyboard shortcuts overview">
-          <h4>Keyboard shortcuts</h4>
+        <section id="help-shortcuts" className="help-chapter" aria-label="Keyboard shortcuts">
+          <h3 className="help-chapter-title">Keyboard shortcuts</h3>
           <p className="muted-copy help-chapter-intro">
-            Rebind shortcuts in Settings → Keyboard. Use the leader key, then <strong>K</strong> (default) to jump back
-            here. Chords use physical keys (layout-independent). In a focused terminal, only modified shortcuts and
-            Escape (when a modal is open) are handled by the app.
+            Chords are physical keys (layout-independent). Rebind under Settings → Keyboard. The leader chord opens a
+            second step (default: open this Help’s shortcut list via <strong>K</strong> after leader). With focus in a
+            terminal, most keys go to the shell; global chords and Escape (overlays) still apply.
           </p>
           <div className="help-table-wrap">
-            <table className="help-table">
+            <table className="help-table help-table--shortcuts">
               <thead>
                 <tr>
                   <th>Action</th>
@@ -552,12 +629,20 @@ export function HelpPanel(props: HelpPanelProps = {}) {
         </section>
       ) : null}
 
-      <nav className="help-toc" aria-label="Help chapters">
+      <nav className="help-toc" aria-label="Help contents">
+        {shortcutCheatsheetLines && shortcutCheatsheetLines.length > 0 ? (
+          <a className="help-toc-link" href="#help-shortcuts">
+            Keyboard shortcuts
+          </a>
+        ) : null}
         {helpChapters.map((ch) => (
           <a key={ch.id} className="help-toc-link" href={`#${ch.id}`}>
             {ch.title}
           </a>
         ))}
+        <a className="help-toc-link" href="#help-support">
+          Get support
+        </a>
       </nav>
 
       {helpChapters.map((chapter) => (
@@ -572,9 +657,34 @@ export function HelpPanel(props: HelpPanelProps = {}) {
         </section>
       ))}
 
+      <section id="help-support" className="help-chapter">
+        <h3 className="help-chapter-title">Get support</h3>
+        <p className="muted-copy help-chapter-intro">{HELP_SUPPORT_INTRO}</p>
+        <p className="muted-copy help-chapter-intro">
+          Repository: <code className="inline-code">{REPO_URL}</code> · Changelog:{" "}
+          <code className="inline-code">{REPO_CHANGELOG_URL}</code>
+        </p>
+        <div className="help-support-actions">
+          {onOpenUrl ? (
+            <>
+              <button type="button" className="btn" onClick={() => void onOpenUrl(REPO_ISSUES_URL)}>
+                Open GitHub Issues
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={() => void onOpenUrl(REPO_SECURITY_URL)}>
+                Report a security issue
+              </button>
+            </>
+          ) : (
+            <p className="muted-copy">
+              Issues: <code>{REPO_ISSUES_URL}</code>
+            </p>
+          )}
+        </div>
+      </section>
+
       <p className="muted-copy help-note">
-        For release notes and security details about backups, see the documentation shipped with the repository
-        (CHANGELOG, architecture, backup-security).
+        For cryptographic details and architecture, see the repository docs (architecture, backup-security,
+        licensing).
       </p>
     </section>
   );

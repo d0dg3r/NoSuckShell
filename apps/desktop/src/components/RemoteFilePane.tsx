@@ -41,10 +41,15 @@ type Props = {
   paneIndex: number;
   spec: RemoteSshSpec;
   onBack: () => void;
+  onPathChange?: (path: string) => void;
   getExportDestPath: () => Promise<string | null>;
   archiveFormat: FileExportArchiveFormat;
   onFilePaneTitleChange: (paneIndex: number, payload: { short: string; full: string } | null) => void;
   semanticFileNameColors: boolean;
+  /** F5 in the pane triggers a copy of selected files to the paired pane. */
+  onF5Copy?: (sourcePath: string, selectedNames: string[]) => void;
+  /** Tab in an NSS-Commander workspace moves focus to the other file pane. */
+  onTabSwitchPane?: () => void;
 };
 
 function SaveRowIcon() {
@@ -61,10 +66,13 @@ export function RemoteFilePane({
   paneIndex,
   spec,
   onBack,
+  onPathChange,
   getExportDestPath,
   archiveFormat,
   onFilePaneTitleChange,
   semanticFileNameColors,
+  onF5Copy,
+  onTabSwitchPane,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [path, setPath] = useState(".");
@@ -86,6 +94,10 @@ export function RemoteFilePane({
     setActiveName(null);
     setLastRangeIndex(null);
   }, [path, spec]);
+
+  useEffect(() => {
+    onPathChange?.(path);
+  }, [onPathChange, path]);
 
   useEffect(() => {
     const full = remotePathFullDisplay(path);
@@ -214,6 +226,19 @@ export function RemoteFilePane({
     setSelectedNames(new Set([name]));
     setActiveName(name);
     setLastRangeIndex(index);
+  };
+
+  const handleDirectoryActivate = (name: string, index: number, event: React.MouseEvent) => {
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      handleRowClick(name, index, event);
+      return;
+    }
+    // Total-Commander-like flow: first click selects, second click enters.
+    if (activeName === name && selectedNames.size === 1 && selectedNames.has(name)) {
+      openDir(name);
+      return;
+    }
+    handleRowClick(name, index, event);
   };
 
   const dropTarget: FileDropTarget = { kind: "remote", spec, parentPath: path };
@@ -371,6 +396,16 @@ export function RemoteFilePane({
       event.preventDefault();
       void pasteFromClipboard();
     }
+    if (event.key === "F5" && onF5Copy && selectedNames.size > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      onF5Copy(path, Array.from(selectedNames));
+    }
+    if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey && onTabSwitchPane) {
+      event.preventDefault();
+      event.stopPropagation();
+      onTabSwitchPane();
+    }
   };
 
   const pathTitle = remotePathFullDisplay(path);
@@ -417,6 +452,11 @@ export function RemoteFilePane({
         <span className="file-pane-path" title={pathTitle}>
           {path}
         </span>
+        {selectedNames.size > 0 ? (
+          <span className="file-pane-selection-count" aria-live="polite">
+            {selectedNames.size} selected
+          </span>
+        ) : null}
       </div>
       {error ? (
         <div className="file-pane-banner file-pane-banner--error" role="alert">
@@ -465,6 +505,10 @@ export function RemoteFilePane({
                         type="button"
                         className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
                         onClick={(e) => {
+                          e.stopPropagation();
+                          handleDirectoryActivate(row.name, index, e);
+                        }}
+                        onDoubleClick={(e) => {
                           e.stopPropagation();
                           openDir(row.name);
                         }}
