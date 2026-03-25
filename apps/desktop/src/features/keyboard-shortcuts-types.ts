@@ -17,7 +17,9 @@ export type KeyboardShortcutCommandId =
   | "focusPreviousPane"
   | "dismissPrimaryOverlay"
   | "openSettingsKeyboardTab"
-  | "leaderArm";
+  | "leaderArm"
+  | "nssCommanderCopy"
+  | "nssCommanderSwitchPane";
 
 /**
  * - globalChord: works from terminal too if chord uses a non-letter modifier stack (enforced: any globalChord must include ctrl/meta/alt).

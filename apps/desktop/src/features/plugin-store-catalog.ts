@@ -1,4 +1,4 @@
-import { FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
+import { NSS_COMMANDER_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
 
 /** Replace with your Ko-fi shop, membership, or donation page URL. */
 export const PLUGIN_STORE_DEFAULT_KOFI_URL = "https://ko-fi.com/";
@@ -34,7 +34,7 @@ export const PLUGIN_STORE_CATALOG: readonly PluginStoreCatalogItem[] = [
       "NSS-Commander: remote and local SFTP-style file panes in the split workspace. In official builds, unlock with a signed token (small add-on purchase) that includes the entitlement below; source remains MIT. After purchase, paste the license token under License in this tab.",
     requiredEntitlements: ["dev.nosuckshell.addon.file-workspace"],
     purchaseUrl: PLUGIN_STORE_DEFAULT_KOFI_URL,
-    relatedPluginId: FILE_WORKSPACE_PLUGIN_ID,
+    relatedPluginId: NSS_COMMANDER_PLUGIN_ID,
     trialHint:
       "Trials use a time-limited token: the license server can set `exp` (Unix seconds). When it expires, the app rejects the license until you activate a new token.",
   },

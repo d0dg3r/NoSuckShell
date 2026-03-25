@@ -14,6 +14,7 @@ export type WorkspaceBootstrapDeps = {
   setSplitTree: Dispatch<SetStateAction<SplitTreeNode>>;
   setActivePaneIndex: Dispatch<SetStateAction<number>>;
   setActiveSession: Dispatch<SetStateAction<string>>;
+  setSessionFileViews: Dispatch<SetStateAction<Record<string, "terminal" | "remote" | "local">>>;
 };
 
 /** One-shot restore of workspace tabs from localStorage on mount. */
@@ -28,6 +29,7 @@ export function useWorkspaceBootstrapFromStorage(deps: WorkspaceBootstrapDeps): 
     setSplitTree,
     setActivePaneIndex,
     setActiveSession,
+    setSessionFileViews,
   } = deps;
 
   useEffect(() => {
@@ -54,6 +56,13 @@ export function useWorkspaceBootstrapFromStorage(deps: WorkspaceBootstrapDeps): 
       setSplitTree(cloneSplitTree(nextActiveSnapshot.splitTree));
       setActivePaneIndex(nextActiveSnapshot.activePaneIndex);
       setActiveSession(nextActiveSnapshot.activeSessionId);
+      if (nextActiveSnapshot.kind === "nss-commander") {
+        const fileViews: Record<string, "terminal" | "remote" | "local"> = {};
+        for (const sid of nextActiveSnapshot.splitSlots) {
+          if (sid) fileViews[sid] = "local";
+        }
+        setSessionFileViews(fileViews);
+      }
       window.setTimeout(() => {
         isApplyingWorkspaceSnapshotRef.current = false;
       }, 0);
@@ -70,6 +79,7 @@ export function useWorkspaceBootstrapFromStorage(deps: WorkspaceBootstrapDeps): 
     setSplitTree,
     setActivePaneIndex,
     setActiveSession,
+    setSessionFileViews,
   ]);
 }
 

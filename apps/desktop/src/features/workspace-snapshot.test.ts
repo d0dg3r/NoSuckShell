@@ -5,6 +5,7 @@ import {
   appendSessionToWorkspaceSnapshot,
   cloneWorkspaceSnapshot,
   createEmptyWorkspaceSnapshot,
+  createNssCommanderWorkspaceSnapshot,
   findFirstFreePaneInOrder,
   normalizePersistedWorkspacesPayload,
 } from "./workspace-snapshot";
@@ -100,5 +101,85 @@ describe("workspace-snapshot", () => {
     source.preferVerticalNewPanes = true;
     const cloned = cloneWorkspaceSnapshot(source);
     expect(cloned.preferVerticalNewPanes).toBe(true);
+  });
+
+  it("createNssCommanderWorkspaceSnapshot produces dual-pane split with kind", () => {
+    const snap = createNssCommanderWorkspaceSnapshot("nss-1", "NSS-Commander", "left-sess", "right-sess");
+    expect(snap.kind).toBe("nss-commander");
+    expect(snap.preferVerticalNewPanes).toBe(false);
+    expect(snap.splitSlots).toEqual(["left-sess", "right-sess"]);
+    expect(snap.paneLayouts).toHaveLength(2);
+    expect(snap.splitTree.type).toBe("split");
+    if (snap.splitTree.type === "split") {
+      expect(snap.splitTree.ratio).toBe(0.5);
+      expect(snap.splitTree.axis).toBe("horizontal");
+    }
+    expect(snap.activePaneIndex).toBe(0);
+    expect(snap.activeSessionId).toBe("left-sess");
+  });
+
+  it("normalizePersistedWorkspacesPayload preserves nss-commander kind", () => {
+    const snap = createNssCommanderWorkspaceSnapshot("nss-ws", "NSS-Commander", "s1", "s2");
+    const payload = {
+      order: ["nss-ws"],
+      activeWorkspaceId: "nss-ws",
+      snapshots: {
+        "nss-ws": {
+          ...snap,
+          splitTree: serializeSplitTree(snap.splitTree),
+        },
+      },
+    };
+    const norm = normalizePersistedWorkspacesPayload(payload);
+    expect(norm).not.toBeNull();
+    expect(norm!.nextActiveSnapshot.kind).toBe("nss-commander");
+    expect(norm!.nextActiveSnapshot.preferVerticalNewPanes).toBe(false);
+  });
+
+  it("normalizePersistedWorkspacesPayload migrates legacy nss vertical split to horizontal", () => {
+    const snap = createNssCommanderWorkspaceSnapshot("nss-legacy", "NSS-Commander", "s1", "s2");
+    if (snap.splitTree.type === "split") {
+      snap.splitTree.axis = "vertical";
+    }
+    const payload = {
+      order: ["nss-legacy"],
+      activeWorkspaceId: "nss-legacy",
+      snapshots: {
+        "nss-legacy": {
+          ...snap,
+          splitTree: serializeSplitTree(snap.splitTree),
+        },
+      },
+    };
+    const norm = normalizePersistedWorkspacesPayload(payload);
+    expect(norm).not.toBeNull();
+    expect(norm!.nextActiveSnapshot.kind).toBe("nss-commander");
+    expect(norm!.nextActiveSnapshot.splitTree.type).toBe("split");
+    if (norm!.nextActiveSnapshot.splitTree.type === "split") {
+      expect(norm!.nextActiveSnapshot.splitTree.axis).toBe("horizontal");
+    }
+  });
+
+  it("normalizePersistedWorkspacesPayload drops unknown kind values", () => {
+    const snap = createEmptyWorkspaceSnapshot("ws-bad", "Bad");
+    const payload = {
+      order: ["ws-bad"],
+      activeWorkspaceId: "ws-bad",
+      snapshots: {
+        "ws-bad": {
+          ...snap,
+          kind: "unknown-kind",
+          splitTree: serializeSplitTree(snap.splitTree),
+        },
+      },
+    };
+    const norm = normalizePersistedWorkspacesPayload(payload);
+    expect(norm).not.toBeNull();
+    expect(norm!.nextActiveSnapshot.kind).toBeUndefined();
+  });
+
+  it("createEmptyWorkspaceSnapshot has no kind by default", () => {
+    const s = createEmptyWorkspaceSnapshot("x", "X");
+    expect(s.kind).toBeUndefined();
   });
 });

@@ -24,7 +24,6 @@ import type {
   FrameModePreset,
   HelpAboutSubTab,
   IdentityStoreSubTab,
-  IntegrationsSubTab,
   InterfaceSubTab,
   LayoutMode,
   ListTonePreset,
@@ -59,8 +58,6 @@ export type AppSettingsPanelProps = {
   setConnectionSubTab: (tab: ConnectionSubTab) => void;
   workspaceSubTab: WorkspaceSubTab;
   setWorkspaceSubTab: (tab: WorkspaceSubTab) => void;
-  integrationsSubTab: IntegrationsSubTab;
-  setIntegrationsSubTab: (tab: IntegrationsSubTab) => void;
   interfaceSubTab: InterfaceSubTab;
   setInterfaceSubTab: (tab: InterfaceSubTab) => void;
   helpAboutSubTab: HelpAboutSubTab;

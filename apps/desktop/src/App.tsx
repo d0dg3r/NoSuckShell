@@ -75,7 +75,6 @@ import {
   type FrameModePreset,
   type HelpAboutSubTab,
   type IdentityStoreSubTab,
-  type IntegrationsSubTab,
   type InterfaceSubTab,
   type LayoutMode,
   type ListTonePreset,
@@ -93,7 +92,7 @@ const LayoutCommandCenter = lazy(async () => {
 });
 
 import { LAYOUT_PRESET_DEFINITIONS } from "./layoutPresets";
-import { FILE_WORKSPACE_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./features/builtin-plugin-ids";
+import { NSS_COMMANDER_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./features/builtin-plugin-ids";
 import { type ContextActionId, type PaneContextSessionKind } from "./features/context-actions";
 import {
   FILE_DND_PAYLOAD_MIME,
@@ -101,6 +100,7 @@ import {
   type FileDragPayload,
 } from "./features/file-pane-dnd";
 import { setFileTransferClipboardFromEvent } from "./features/file-transfer-clipboard";
+import { runFilePaneTransfer } from "./features/file-pane-transfer";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -271,6 +271,7 @@ import {
   cloneWorkspaceSnapshot,
   compactSplitSlotsByPaneOrder,
   createEmptyWorkspaceSnapshot,
+  createNssCommanderWorkspaceSnapshot,
   DEFAULT_WORKSPACE_ID,
   findFirstFreePaneInOrder,
   type WorkspaceSnapshot,
@@ -423,7 +424,6 @@ export function App() {
   const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("connection");
   const [connectionSubTab, setConnectionSubTab] = useState<ConnectionSubTab>("hosts");
   const [workspaceSubTab, setWorkspaceSubTab] = useState<WorkspaceSubTab>("views");
-  const [integrationsSubTab, setIntegrationsSubTab] = useState<IntegrationsSubTab>("proxmux");
   const [interfaceSubTab, setInterfaceSubTab] = useState<InterfaceSubTab>("appearance");
   const [helpAboutSubTab, setHelpAboutSubTab] = useState<HelpAboutSubTab>("help");
   const [identityStoreSubTab, setIdentityStoreSubTab] = useState<IdentityStoreSubTab>("overview");
@@ -461,7 +461,7 @@ export function App() {
   const [splitSlots, setSplitSlots] = useState<Array<string | null>>(() => createInitialPaneState());
   /** Per SSH/local session: file browser vs terminal (keyed by session id so layout changes do not remap views). */
   const [sessionFileViews, setSessionFileViews] = useState<Record<string, "terminal" | "remote" | "local">>({});
-  /** Gated by built-in plugin `dev.nosuckshell.plugin.file-workspace` (Settings → Plugins & license). */
+  /** Gated by built-in plugin `dev.nosuckshell.plugin.nss-commander` (Settings → Plugins). */
   const [fileWorkspacePluginEnabled, setFileWorkspacePluginEnabled] = useState(true);
   const [proxmuxSidebarAvailable, setProxmuxSidebarAvailable] = useState(false);
   const [proxmuxResourceCount, setProxmuxResourceCount] = useState(0);
@@ -693,6 +693,7 @@ export function App() {
   const orphanClosingSessionIdsRef = useRef<Set<string>>(new Set());
   const lastInternalDragPayloadRef = useRef<DragPayload | null>(null);
   const localFilePanePathsRef = useRef<Record<number, string>>({});
+  const remoteFilePanePathsRef = useRef<Record<number, string>>({});
   const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
   const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
   const sessionTerminalCwdRef = useRef<Record<string, string>>({});
@@ -855,7 +856,7 @@ export function App() {
   const refreshLicensedPlugins = useCallback(async () => {
     try {
       const rows = await listPlugins();
-      const fw = rows.find((r) => r.manifest.id === FILE_WORKSPACE_PLUGIN_ID);
+      const fw = rows.find((r) => r.manifest.id === NSS_COMMANDER_PLUGIN_ID);
       setFileWorkspacePluginEnabled(fw ? fw.enabled && fw.entitlementOk : true);
       const px = rows.find((r) => r.manifest.id === PROXMUX_PLUGIN_ID);
       setProxmuxSidebarAvailable(Boolean(px && px.enabled && px.entitlementOk));
@@ -974,11 +975,47 @@ export function App() {
   const isStackedShell = layoutMode === "compact" || (layoutMode === "auto" && viewportStacked);
 
   const verticalStackScrollEnabled = useMemo(
-    () =>
-      Boolean(workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes) &&
-      !(isStackedShell && mobileShellTab === "terminal"),
+    () => {
+      const activeWorkspace = workspaceSnapshots[activeWorkspaceId];
+      if (!activeWorkspace) {
+        return false;
+      }
+      // NSS-Commander workspaces stay side-by-side by design.
+      if (activeWorkspace.kind === "nss-commander") {
+        return false;
+      }
+      return Boolean(activeWorkspace.preferVerticalNewPanes) && !(isStackedShell && mobileShellTab === "terminal");
+    },
     [activeWorkspaceId, isStackedShell, mobileShellTab, workspaceSnapshots],
   );
+
+  useEffect(() => {
+    const activeWorkspace = workspaceSnapshots[activeWorkspaceId];
+    if (!activeWorkspace || activeWorkspace.kind !== "nss-commander") {
+      return;
+    }
+    if (splitTree.type !== "split" || splitTree.axis === "horizontal") {
+      return;
+    }
+    setSplitTree((prev) => (prev.type === "split" ? { ...prev, axis: "horizontal" } : prev));
+    setWorkspaceSnapshots((prev) => {
+      const current = prev[activeWorkspaceId];
+      if (!current || current.kind !== "nss-commander" || current.splitTree.type !== "split") {
+        return prev;
+      }
+      if (current.splitTree.axis === "horizontal") {
+        return prev;
+      }
+      return {
+        ...prev,
+        [activeWorkspaceId]: {
+          ...current,
+          splitTree: { ...cloneSplitTree(current.splitTree), axis: "horizontal" },
+          preferVerticalNewPanes: false,
+        },
+      };
+    });
+  }, [activeWorkspaceId, splitTree, workspaceSnapshots]);
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -1332,6 +1369,7 @@ export function App() {
     setSplitTree,
     setActivePaneIndex,
     setActiveSession,
+    setSessionFileViews,
   });
 
   const storeUsers = useMemo<UserObject[]>(() => Object.values(entityStore.users), [entityStore.users]);
@@ -3908,10 +3946,22 @@ export function App() {
   };
   const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
     isApplyingWorkspaceSnapshotRef.current = true;
-    setSessionFileViews({});
+    const nextSplitTree = cloneSplitTree(snapshot.splitTree);
+    if (snapshot.kind === "nss-commander") {
+      if (nextSplitTree.type === "split" && nextSplitTree.axis !== "horizontal") {
+        nextSplitTree.axis = "horizontal";
+      }
+      const nextFileViews: Record<string, "terminal" | "remote" | "local"> = {};
+      for (const sid of snapshot.splitSlots) {
+        if (sid) nextFileViews[sid] = "local";
+      }
+      setSessionFileViews(nextFileViews);
+    } else {
+      setSessionFileViews({});
+    }
     setSplitSlots([...snapshot.splitSlots]);
     setPaneLayouts(clonePaneLayouts(snapshot.paneLayouts));
-    setSplitTree(cloneSplitTree(snapshot.splitTree));
+    setSplitTree(nextSplitTree);
     setActivePaneIndex(snapshot.activePaneIndex);
     setActiveSession(snapshot.activeSessionId);
     queueMicrotask(() => {
@@ -3926,6 +3976,7 @@ export function App() {
       const currentSnapshot: WorkspaceSnapshot = {
         id: activeWorkspaceId,
         name: workspaceSnapshots[activeWorkspaceId]?.name ?? activeWorkspaceId,
+        kind: workspaceSnapshots[activeWorkspaceId]?.kind,
         preferVerticalNewPanes: workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true,
         splitSlots: [...splitSlots],
         paneLayouts: clonePaneLayouts(paneLayouts),
@@ -3966,6 +4017,37 @@ export function App() {
     setActiveWorkspaceId(workspaceId);
     applyWorkspaceSnapshot(nextSnapshot);
   }, [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree, workspaceOrder.length]);
+  const createNssCommanderWorkspace = useCallback(async () => {
+    setError("");
+    try {
+      const left = await startLocalSession();
+      const right = await startLocalSession();
+      setSessions((prev) => [
+        ...prev,
+        { id: left.session_id, kind: "local", label: "Local (left)" },
+        { id: right.session_id, kind: "local", label: "Local (right)" },
+      ]);
+      const workspaceId = `workspace-nss-${createId()}`;
+      const nextSnapshot = createNssCommanderWorkspaceSnapshot(workspaceId, "NSS-Commander", left.session_id, right.session_id);
+      setWorkspaceSnapshots((prev) => ({
+        ...prev,
+        [workspaceId]: nextSnapshot,
+        [activeWorkspaceId]: {
+          ...(prev[activeWorkspaceId] ?? createEmptyWorkspaceSnapshot(activeWorkspaceId, "Main")),
+          splitSlots: [...splitSlots],
+          paneLayouts: clonePaneLayouts(paneLayouts),
+          splitTree: cloneSplitTree(splitTree),
+          activePaneIndex,
+          activeSessionId: activeSession,
+        },
+      }));
+      setWorkspaceOrder((prev) => [...prev, workspaceId]);
+      setActiveWorkspaceId(workspaceId);
+      applyWorkspaceSnapshot(nextSnapshot);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree]);
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
       if (workspaceOrder.length <= 1) {
@@ -4016,7 +4098,7 @@ export function App() {
   const setWorkspaceVerticalStacking = useCallback((workspaceId: string, enabled: boolean) => {
     setWorkspaceSnapshots((prev) => {
       const snapshot = prev[workspaceId];
-      if (!snapshot || snapshot.preferVerticalNewPanes === enabled) {
+      if (!snapshot || snapshot.kind === "nss-commander" || snapshot.preferVerticalNewPanes === enabled) {
         return prev;
       }
       return {
@@ -4272,7 +4354,6 @@ export function App() {
       case "pane.toggleRemoteFiles": {
         if (!fileWorkspacePluginEnabled) {
           setActiveAppSettingsTab("integrations");
-          setIntegrationsSubTab("plugins");
           setIsAppSettingsOpen(true);
           break;
         }
@@ -4305,7 +4386,6 @@ export function App() {
       case "pane.toggleLocalFiles": {
         if (!fileWorkspacePluginEnabled) {
           setActiveAppSettingsTab("integrations");
-          setIntegrationsSubTab("plugins");
           setIsAppSettingsOpen(true);
           break;
         }
@@ -5013,6 +5093,222 @@ export function App() {
     localFilePanePathsRef.current[paneIndex] = pathKey;
   }, []);
 
+  const onRemoteFilePanePathChange = useCallback((paneIndex: number, path: string) => {
+    remoteFilePanePathsRef.current[paneIndex] = path;
+  }, []);
+
+  const onLocalFilePaneF5Copy = useCallback(
+    async (sourcePaneIndex: number, sourcePath: string, names: string[]) => {
+      if (names.length === 0) return;
+      const otherPaneIndex = paneOrder.find((idx) => {
+        if (idx === sourcePaneIndex) return false;
+        const view = sessionFileViews[splitSlots[idx] ?? ""];
+        return view === "local" || view === "remote";
+      });
+      if (otherPaneIndex === undefined) return;
+      const destView = sessionFileViews[splitSlots[otherPaneIndex] ?? ""];
+      setError("");
+      try {
+        for (const name of names) {
+          if (destView === "remote") {
+            const destSpec = remoteSshSpecForPane(otherPaneIndex);
+            if (!destSpec) {
+              continue;
+            }
+            const destPath = remoteFilePanePathsRef.current[otherPaneIndex] ?? ".";
+            await runFilePaneTransfer(
+              { kind: "local", pathKey: sourcePath, name },
+              { kind: "remote", spec: destSpec, parentPath: destPath },
+            );
+          } else {
+            const destPath = localFilePanePathsRef.current[otherPaneIndex] ?? "";
+            await runFilePaneTransfer({ kind: "local", pathKey: sourcePath, name }, { kind: "local", pathKey: destPath });
+          }
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [paneOrder, remoteSshSpecForPane, sessionFileViews, splitSlots],
+  );
+
+  const onRemoteFilePaneF5Copy = useCallback(
+    async (sourcePaneIndex: number, sourcePath: string, names: string[]) => {
+      if (names.length === 0) {
+        return;
+      }
+      const sourceSpec = remoteSshSpecForPane(sourcePaneIndex);
+      if (!sourceSpec) {
+        return;
+      }
+      const otherPaneIndex = paneOrder.find((idx) => {
+        if (idx === sourcePaneIndex) return false;
+        const view = sessionFileViews[splitSlots[idx] ?? ""];
+        return view === "local" || view === "remote";
+      });
+      if (otherPaneIndex === undefined) {
+        return;
+      }
+      const destView = sessionFileViews[splitSlots[otherPaneIndex] ?? ""];
+      setError("");
+      try {
+        for (const name of names) {
+          if (destView === "remote") {
+            const destSpec = remoteSshSpecForPane(otherPaneIndex);
+            if (!destSpec) {
+              continue;
+            }
+            const destPath = remoteFilePanePathsRef.current[otherPaneIndex] ?? ".";
+            await runFilePaneTransfer(
+              { kind: "remote", spec: sourceSpec, parentPath: sourcePath, name },
+              { kind: "remote", spec: destSpec, parentPath: destPath },
+            );
+          } else {
+            const destPath = localFilePanePathsRef.current[otherPaneIndex] ?? "";
+            await runFilePaneTransfer(
+              { kind: "remote", spec: sourceSpec, parentPath: sourcePath, name },
+              { kind: "local", pathKey: destPath },
+            );
+          }
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [paneOrder, remoteSshSpecForPane, sessionFileViews, splitSlots],
+  );
+
+  const onLocalFilePaneTabSwitch = useCallback(
+    (sourcePaneIndex: number) => {
+      const otherPaneIndex = paneOrder.find((idx) => {
+        if (idx === sourcePaneIndex) return false;
+        const view = sessionFileViews[splitSlots[idx] ?? ""];
+        return view === "local" || view === "remote";
+      });
+      if (otherPaneIndex === undefined) return;
+      setActivePaneIndex(otherPaneIndex);
+      setActiveSession(splitSlots[otherPaneIndex] ?? "");
+      queueMicrotask(() => {
+        const el = document.querySelector(`[data-pane-index="${otherPaneIndex}"] .file-pane`) as HTMLElement | null;
+        el?.focus();
+      });
+    },
+    [paneOrder, sessionFileViews, splitSlots],
+  );
+
+  const commanderPaneIndices = useMemo(() => {
+    if (workspaceSnapshots[activeWorkspaceId]?.kind !== "nss-commander") {
+      return [];
+    }
+    return paneOrder
+      .filter((paneIndex) => {
+        const view = paneFileViewForPane(paneIndex);
+        return view === "local" || view === "remote";
+      })
+      .slice(0, 2);
+  }, [activeWorkspaceId, paneFileViewForPane, paneOrder, workspaceSnapshots]);
+
+  const focusCommanderPane = useCallback(
+    (paneIndex: number | undefined) => {
+      if (paneIndex == null) {
+        return;
+      }
+      setActivePaneIndex(paneIndex);
+      setActiveSession(splitSlots[paneIndex] ?? "");
+      queueMicrotask(() => {
+        const el = document.querySelector(`[data-pane-index="${paneIndex}"] .file-pane`) as HTMLElement | null;
+        el?.focus();
+      });
+    },
+    [splitSlots],
+  );
+
+  const triggerCommanderPaneKey = useCallback((key: "F5" | "Tab") => {
+    const activeFilePane = document.querySelector(
+      `[data-pane-index="${activePaneIndex}"] .file-pane`,
+    ) as HTMLElement | null;
+    if (!activeFilePane) {
+      return;
+    }
+    const ev = new KeyboardEvent("keydown", { key, bubbles: true });
+    activeFilePane.dispatchEvent(ev);
+  }, [activePaneIndex]);
+
+  const commanderActionRail = useMemo(() => {
+    if (workspaceSnapshots[activeWorkspaceId]?.kind !== "nss-commander") {
+      return null;
+    }
+    const leftPane = commanderPaneIndices[0];
+    const rightPane = commanderPaneIndices[1];
+    const hasTwoCommanderPanes = leftPane != null && rightPane != null;
+    return (
+      <div className="nss-commander-action-rail" role="toolbar" aria-label="NSS-Commander actions">
+        <div className="nss-commander-action-rail-group">
+          <button
+            type="button"
+            className={`btn btn-settings-tool ${activePaneIndex === leftPane ? "is-active" : ""}`}
+            onClick={() => focusCommanderPane(leftPane)}
+            disabled={leftPane == null}
+          >
+            Focus left
+          </button>
+          <button
+            type="button"
+            className={`btn btn-settings-tool ${activePaneIndex === rightPane ? "is-active" : ""}`}
+            onClick={() => focusCommanderPane(rightPane)}
+            disabled={rightPane == null}
+          >
+            Focus right
+          </button>
+          <button
+            type="button"
+            className="btn btn-settings-tool"
+            onClick={() => triggerCommanderPaneKey("Tab")}
+            disabled={!hasTwoCommanderPanes}
+            title="Switch pane (Tab)"
+          >
+            Switch pane
+          </button>
+        </div>
+        <div className="nss-commander-action-rail-group">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => triggerCommanderPaneKey("F5")}
+            disabled={!hasTwoCommanderPanes}
+            title="Copy selected files/directories to the other pane (F5)"
+          >
+            Copy selection (F5)
+          </button>
+          <button
+            type="button"
+            className="btn btn-settings-tool"
+            onClick={() => leftPane != null && void handleContextAction("pane.toggleLocalFiles", leftPane)}
+            disabled={leftPane == null}
+          >
+            Left: local files
+          </button>
+          <button
+            type="button"
+            className="btn btn-settings-tool"
+            onClick={() => rightPane != null && void handleContextAction("pane.toggleLocalFiles", rightPane)}
+            disabled={rightPane == null}
+          >
+            Right: local files
+          </button>
+        </div>
+      </div>
+    );
+  }, [
+    activePaneIndex,
+    activeWorkspaceId,
+    commanderPaneIndices,
+    focusCommanderPane,
+    handleContextAction,
+    triggerCommanderPaneKey,
+    workspaceSnapshots,
+  ]);
+
   const webPanePayloadForPane = useCallback(
     (paneIndex: number): { url: string; title: string; allowInsecureTls?: boolean } | null => {
       const sid = splitSlots[paneIndex] ?? null;
@@ -5259,6 +5555,11 @@ export function App() {
     paneContextSessionKindForPane,
     remoteSshSpecForPane,
     onLocalFilePanePathChange,
+    onLocalFilePaneF5Copy,
+    onLocalFilePaneTabSwitch,
+    onRemoteFilePanePathChange,
+    onRemoteFilePaneF5Copy,
+    onRemoteFilePaneTabSwitch: onLocalFilePaneTabSwitch,
     getFileExportDestPath,
     fileExportArchiveFormat,
     onFilePaneTitleChange,
@@ -5506,6 +5807,7 @@ export function App() {
         parseDragPayload={parseDragPayload}
         sendSessionToWorkspace={sendSessionToWorkspace}
         createWorkspace={createWorkspace}
+        createNssCommanderWorkspace={createNssCommanderWorkspace}
         removeWorkspace={removeWorkspace}
         renameWorkspace={renameWorkspace}
         setWorkspaceVerticalStacking={setWorkspaceVerticalStacking}
@@ -5525,6 +5827,7 @@ export function App() {
         onOpenLayoutCommandCenter={() => setIsLayoutCommandCenterOpen(true)}
         isBroadcastModeEnabled={isBroadcastModeEnabled}
         broadcastTargetCount={broadcastTargets.size}
+        commanderActionRail={commanderActionRail}
       />
       {isAppSettingsOpen && (
         <AppSettingsPanel
@@ -5548,8 +5851,6 @@ export function App() {
           setConnectionSubTab={setConnectionSubTab}
           workspaceSubTab={workspaceSubTab}
           setWorkspaceSubTab={setWorkspaceSubTab}
-          integrationsSubTab={integrationsSubTab}
-          setIntegrationsSubTab={setIntegrationsSubTab}
           interfaceSubTab={interfaceSubTab}
           setInterfaceSubTab={setInterfaceSubTab}
           helpAboutSubTab={helpAboutSubTab}

@@ -2,14 +2,14 @@ use super::{HostEnrichContext, NssPlugin, PluginCapability, PluginManifest};
 use crate::ssh_config::HostConfig;
 use anyhow::Result;
 
-pub const FILE_WORKSPACE_PLUGIN_ID: &str = "dev.nosuckshell.plugin.file-workspace";
+pub const NSS_COMMANDER_PLUGIN_ID: &str = "dev.nosuckshell.plugin.nss-commander";
 
 pub struct FileWorkspacePlugin;
 
 impl NssPlugin for FileWorkspacePlugin {
     fn manifest(&self) -> PluginManifest {
         PluginManifest {
-            id: FILE_WORKSPACE_PLUGIN_ID.to_string(),
+            id: NSS_COMMANDER_PLUGIN_ID.to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             display_name: "NSS-Commander".to_string(),
             capabilities: vec![PluginCapability::SettingsUi],

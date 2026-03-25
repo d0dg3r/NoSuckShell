@@ -94,8 +94,8 @@ git push origin v0.2.1
 
 ## Current release (0.2.x)
 
-- **Target tag:** `v0.2.1` — push when you are ready; in-repo versions in `apps/desktop/package.json`, `apps/desktop/package-lock.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `apps/desktop/src-tauri/Cargo.toml` must match **before** you tag (see [CHANGELOG.md](CHANGELOG.md)).
-- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.2.1`.
+- **Target tag:** `v0.2.2` — push when you are ready; in-repo versions in `apps/desktop/package.json`, `apps/desktop/package-lock.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `apps/desktop/src-tauri/Cargo.toml` must match **before** you tag (see [CHANGELOG.md](CHANGELOG.md)).
+- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.2.2`.
 - The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
 - **Working-tree drift:** if `package.json` is bumped ahead of `Cargo.toml` / `tauri.conf.json` (or the reverse), realign before you cut a release so local `tauri dev` and CI agree on the product version.
 

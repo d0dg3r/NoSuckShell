@@ -3,7 +3,9 @@ import type { DragPayload } from "../features/pane-dnd";
 import { createLeafNode, type SplitResizeState, type SplitTreeNode } from "../features/split-tree";
 import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPosition";
 
-export type WorkspaceTabInfo = { id: string; name: string; preferVerticalNewPanes: boolean };
+import type { WorkspaceKind } from "../features/workspace-snapshot";
+
+export type WorkspaceTabInfo = { id: string; name: string; kind?: WorkspaceKind; preferVerticalNewPanes: boolean };
 
 export type TerminalWorkspaceDockProps = {
   workspaceTabs: WorkspaceTabInfo[];
@@ -12,6 +14,7 @@ export type TerminalWorkspaceDockProps = {
   parseDragPayload: (event: ReactDragEvent) => DragPayload | null;
   sendSessionToWorkspace: (sessionId: string, workspaceId: string) => void;
   createWorkspace: () => void;
+  createNssCommanderWorkspace: () => void;
   removeWorkspace: (workspaceId: string) => void;
   renameWorkspace: (workspaceId: string, nextName: string) => void;
   setWorkspaceVerticalStacking: (workspaceId: string, enabled: boolean) => void;
@@ -31,6 +34,7 @@ export type TerminalWorkspaceDockProps = {
   onOpenLayoutCommandCenter: () => void;
   isBroadcastModeEnabled: boolean;
   broadcastTargetCount: number;
+  commanderActionRail?: ReactNode;
 };
 
 export function TerminalWorkspaceDock({
@@ -40,6 +44,7 @@ export function TerminalWorkspaceDock({
   parseDragPayload,
   sendSessionToWorkspace,
   createWorkspace,
+  createNssCommanderWorkspace,
   removeWorkspace,
   renameWorkspace,
   setWorkspaceVerticalStacking,
@@ -59,6 +64,7 @@ export function TerminalWorkspaceDock({
   onOpenLayoutCommandCenter,
   isBroadcastModeEnabled,
   broadcastTargetCount,
+  commanderActionRail,
 }: TerminalWorkspaceDockProps) {
   const [workspaceMenu, setWorkspaceMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   const targetWorkspace = useMemo(
@@ -140,6 +146,9 @@ export function TerminalWorkspaceDock({
         <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
           + Workspace
         </button>
+        <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createNssCommanderWorkspace} title="NSS-Commander: dual file-pane workspace">
+          + NSS-Commander
+        </button>
         {workspaceTabs.length > 1 && (
           <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
             Remove current
@@ -176,21 +185,24 @@ export function TerminalWorkspaceDock({
             >
               Rename workspace
             </button>
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={targetWorkspace.preferVerticalNewPanes}
-              className="context-menu-item separator-above"
-              onClick={() => {
-                setWorkspaceVerticalStacking(targetWorkspace.id, !targetWorkspace.preferVerticalNewPanes);
-                setWorkspaceMenu(null);
-              }}
-            >
-              {targetWorkspace.preferVerticalNewPanes ? "✓ " : ""}Stack new panes vertically
-            </button>
+            {targetWorkspace.kind === "nss-commander" ? null : (
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={targetWorkspace.preferVerticalNewPanes}
+                className="context-menu-item separator-above"
+                onClick={() => {
+                  setWorkspaceVerticalStacking(targetWorkspace.id, !targetWorkspace.preferVerticalNewPanes);
+                  setWorkspaceMenu(null);
+                }}
+              >
+                {targetWorkspace.preferVerticalNewPanes ? "✓ " : ""}Stack new panes vertically
+              </button>
+            )}
           </div>
         )}
       </div>
+      {commanderActionRail}
       <div className="sessions-workspace">
         <div className="sessions-zone">
           <div

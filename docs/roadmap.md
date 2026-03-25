@@ -6,8 +6,8 @@ These items are **planned as built-in plugins** on top of the Phase 1 plugin API
 
 | Plugin | Purpose | Plugin ID |
 | --- | --- | --- |
-| **NSS-Commander** | Per-pane **terminal** vs **remote files (SFTP)** vs **local files**; toolbar + context menu + panes are hidden when the plugin is disabled under **Settings → Plugins & license** (default: on). Plugin ID remains `dev.nosuckshell.plugin.file-workspace`. | `dev.nosuckshell.plugin.file-workspace` |
-| **PROXMUX (Proxmox)** | Cluster config under **Settings → Integrations → PROXMUX**, guest/resource sidebar, Proxmox API via Rust (`plugins/proxmux.rs`), embedded **QEMU noVNC** / **LXC** shells via local WebSocket bridge (`proxmux_ws_proxy.rs`), optional system-browser consoles. Gated by license entitlement where configured. | `dev.nosuckshell.plugin.proxmux` |
+| **NSS-Commander** | Per-pane **terminal** vs **remote files (SFTP)** vs **local files**; toolbar + context menu + panes are hidden when the plugin is disabled under **Settings → Plugins** (default: on). | `dev.nosuckshell.plugin.nss-commander` |
+| **PROXMUX (Proxmox)** | Cluster config under **Settings → Connection → PROXMUX**, guest/resource sidebar, Proxmox API via Rust (`plugins/proxmux.rs`), embedded **QEMU noVNC** / **LXC** shells via local WebSocket bridge (`proxmux_ws_proxy.rs`), optional system-browser consoles. Gated by license entitlement where configured. | `dev.nosuckshell.plugin.proxmux` |
 
 ## Planned plugins
 
@@ -16,7 +16,7 @@ These items are **planned as built-in plugins** on top of the Phase 1 plugin API
 | **GitHub settings sync** | Sync selected app settings and/or host metadata with GitHub (e.g. gist or repo), with explicit user consent and tokens stored securely in Rust. | `dev.nosuckshell.plugin.github-settings-sync` | `dev.nosuckshell.plugin.github-settings-sync` |
 | **Bitwarden** | Use Bitwarden as a credential / secret source for SSH (e.g. inject identity or secrets into `HostConfig` via `enrich_host_config`, plus settings UI in-repo). | `dev.nosuckshell.plugin.bitwarden` | `dev.nosuckshell.plugin.bitwarden` |
 | **HashiCorp Vault** | Read secrets or SSH material from Vault (KV, PKI paths, etc.) and apply during session resolution; configuration and auth handled in the plugin layer. | `dev.nosuckshell.plugin.hashicorp-vault` | `dev.nosuckshell.plugin.hashicorp-vault` |
-| **Command palette** | Deeper command/automation surface for power users (e.g. global command palette, scripted actions, or bridge to external tooling — scope TBD when implementation starts). Distinct from the **NSS-Commander** product name used for the shipped file-workspace add-on. | `dev.nosuckshell.plugin.command-palette` | `dev.nosuckshell.plugin.command-palette` |
+| **Command palette** | Deeper command/automation surface for power users (e.g. global command palette, scripted actions, or bridge to external tooling — scope TBD when implementation starts). Distinct from the shipped **NSS-Commander** plugin (`dev.nosuckshell.plugin.nss-commander`). | `dev.nosuckshell.plugin.command-palette` | `dev.nosuckshell.plugin.command-palette` |
 | **AWS** | Proxmux-style **resource discovery and connect** for Amazon Web Services (e.g. EC2): list resources, power or lifecycle actions where the API allows, **SSH** or provider flows (e.g. SSM). IAM and regions vary; scope TBD. | `dev.nosuckshell.plugin.aws` | `dev.nosuckshell.plugin.aws` |
 | **Azure** | Same pattern for Microsoft Azure VMs and related resources; connect via SSH or Azure-specific paths. | `dev.nosuckshell.plugin.azure` | `dev.nosuckshell.plugin.azure` |
 | **Hetzner Cloud** | Same pattern for Hetzner Cloud servers via their API. | `dev.nosuckshell.plugin.hetzner` | `dev.nosuckshell.plugin.hetzner` |

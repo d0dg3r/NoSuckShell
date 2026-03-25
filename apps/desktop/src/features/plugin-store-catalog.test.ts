@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
+import { NSS_COMMANDER_PLUGIN_ID, PROXMUX_PLUGIN_ID } from "./builtin-plugin-ids";
 import {
   PLUGIN_STORE_CATALOG,
   catalogItemUnlocked,
@@ -32,6 +32,11 @@ describe("plugin-store-catalog", () => {
     const s = formatLicenseExpSummary(1_700_000_000);
     expect(s).toBeTruthy();
     expect(s!.length).toBeGreaterThan(6);
+  });
+
+  it("nss-commander store item references built-in plugin id", () => {
+    const item = PLUGIN_STORE_CATALOG.find((i) => i.id === "file-workspace-addon")!;
+    expect(item.relatedPluginId).toBe(NSS_COMMANDER_PLUGIN_ID);
   });
 
   it("proxmox store item references built-in PROXMUX plugin id", () => {

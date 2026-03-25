@@ -6,7 +6,7 @@ NoSuckShell’s **source code** is under the [MIT License](../LICENSE). **Purcha
 
 ## What you are buying
 
-A **signed license token** (offline Ed25519) that lists **entitlement strings**. When you paste and activate the token in the app (**Settings → Plugins & license**), the desktop verifies the signature and enables matching built-in plugins.
+A **signed license token** (offline Ed25519) that lists **entitlement strings**. When you paste and activate the token in the app (**Settings → Plugins**), the desktop verifies the signature and enables matching built-in plugins.
 
 **Currently sellable entitlement (example — keep in sync with the plugin store catalog):**
 

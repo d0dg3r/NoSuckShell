@@ -3,17 +3,16 @@ import type {
   ConnectionSubTab,
   HelpAboutSubTab,
   IdentityStoreSubTab,
-  IntegrationsSubTab,
   InterfaceSubTab,
   WorkspaceSubTab,
 } from "./app-settings-types";
 
-/** Order: work-first (connection, identity, workspace, integrations) → interface → data → meta. */
+/** Order: work-first (connection, identity, workspace, plugins) → interface → data → meta. */
 export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
   { id: "connection", label: "Connection" },
   { id: "store", label: "Identity Store" },
   { id: "workspace", label: "Workspace" },
-  { id: "integrations", label: "Integrations" },
+  { id: "integrations", label: "Plugins" },
   { id: "interface", label: "Interface" },
   { id: "data", label: "Data & Backup" },
   { id: "help", label: "Help & info" },
@@ -22,17 +21,13 @@ export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
 export const CONNECTION_SUBTABS: Array<{ id: ConnectionSubTab; label: string }> = [
   { id: "hosts", label: "Hosts" },
   { id: "ssh", label: "SSH" },
+  { id: "proxmux", label: "PROXMUX" },
 ];
 
 export const WORKSPACE_SUBTABS: Array<{ id: WorkspaceSubTab; label: string }> = [
   { id: "views", label: "Views" },
   { id: "layout", label: "Layout & navigation" },
   { id: "files", label: "Files & export" },
-];
-
-export const INTEGRATIONS_SUBTABS: Array<{ id: IntegrationsSubTab; label: string }> = [
-  { id: "proxmux", label: "PROXMUX" },
-  { id: "plugins", label: "Plugins & license" },
 ];
 
 export const INTERFACE_SUBTABS: Array<{ id: InterfaceSubTab; label: string }> = [

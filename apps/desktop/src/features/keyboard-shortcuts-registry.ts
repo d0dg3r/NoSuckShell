@@ -9,6 +9,8 @@ export const KEYBOARD_SHORTCUT_COMMAND_IDS: KeyboardShortcutCommandId[] = [
   "focusPreviousPane",
   "dismissPrimaryOverlay",
   "openSettingsKeyboardTab",
+  "nssCommanderCopy",
+  "nssCommanderSwitchPane",
 ];
 
 export const DEFAULT_LEADER_CHORD: KeyChord = {
@@ -67,6 +69,20 @@ export const KEYBOARD_SHORTCUT_DEFINITIONS: KeyboardShortcutDefinition[] = [
     label: "Open keyboard shortcuts (after leader key)",
     defaultChord: { code: "KeyK" },
     scope: "leaderFollowUp",
+  },
+  {
+    id: "nssCommanderCopy",
+    label: "NSS-Commander: copy selection to other pane",
+    defaultChord: { code: "F5" },
+    scope: "appUi",
+    helpAction: "Copy to other pane (file browser)",
+  },
+  {
+    id: "nssCommanderSwitchPane",
+    label: "NSS-Commander: switch to other file pane",
+    defaultChord: { code: "Tab" },
+    scope: "appUi",
+    helpAction: "Switch file pane (file browser)",
   },
 ];
 

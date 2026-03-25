@@ -47,7 +47,7 @@ The reference server returns `licenseToken` in the HTTP response for convenience
 
 Use stable entitlement strings (for example `dev.nosuckshell.plugin.vault`) in `LicensePayload.entitlements`. Built-in plugins can call `required_entitlement()` to gate hooks until the license includes that string.
 
-The **NSS-Commander** add-on (built-in plugin id `dev.nosuckshell.plugin.file-workspace`) uses `dev.nosuckshell.addon.file-workspace` (see the in-app **Plugin store** catalog and `plugin-store-catalog.ts`).
+The **NSS-Commander** add-on (built-in plugin id `dev.nosuckshell.plugin.nss-commander`) uses `dev.nosuckshell.addon.file-workspace` (see the in-app **Plugin store** catalog and `plugin-store-catalog.ts`).
 
 Additional **catalog-only** paid rows (integrations not yet shipped as built-in plugins) use `dev.nosuckshell.addon.bitwarden`, `dev.nosuckshell.addon.github-sync`, `dev.nosuckshell.addon.gitlab-sync`, `dev.nosuckshell.addon.gitea-sync`, `dev.nosuckshell.addon.hashicorp-vault`, `dev.nosuckshell.addon.proxmox`, `dev.nosuckshell.addon.aws`, `dev.nosuckshell.addon.azure`, `dev.nosuckshell.addon.hetzner`, `dev.nosuckshell.addon.gcp`, and `dev.nosuckshell.addon.digitalocean`.
 

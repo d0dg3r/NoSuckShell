@@ -242,7 +242,7 @@ export type ProxmuxSidebarPanelProps = {
   onResourceCountChange: (count: number) => void;
   /** Open an SSH session to the PVE node hostname in a new pane (in-app). */
   onSshToProxmoxNode?: (ctx: { clusterId: string; node: string }) => void | Promise<void>;
-  /** Open a Proxmox web console URL in a pane or the system browser (see Settings → PROXMUX). */
+  /** Open a Proxmox web console URL in a pane or the system browser (see Settings → Connection → PROXMUX). */
   onOpenProxmoxExternalUrl?: (
     url: string,
     label?: string,
@@ -791,7 +791,7 @@ export function ProxmuxSidebarPanel({
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-shell"
-              title="Open Proxmox node shell (app pane or browser — Settings → PROXMUX)"
+              title="Open Proxmox node shell (app pane or browser — Settings → Connection → PROXMUX)"
               aria-label="Open Proxmox node shell"
               onClick={(e) => {
                 stopRowEvent(e);
@@ -821,7 +821,7 @@ export function ProxmuxSidebarPanel({
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-novnc"
-              title="Open noVNC (app pane or browser — Settings → PROXMUX)"
+              title="Open noVNC (app pane or browser — Settings → Connection → PROXMUX)"
               aria-label="Open noVNC console"
               onClick={(e) => {
                 stopRowEvent(e);
@@ -874,7 +874,7 @@ export function ProxmuxSidebarPanel({
             disabled={!running}
             title={
               running
-                ? "Open LXC console (app pane or browser — Settings → PROXMUX)"
+                ? "Open LXC console (app pane or browser — Settings → Connection → PROXMUX)"
                 : "Start the container to open the console"
             }
             aria-label="Open LXC console"
@@ -910,7 +910,7 @@ export function ProxmuxSidebarPanel({
       <div className="proxmux-sidebar-panel">
         <div className="empty-pane">
           <p>No Proxmox clusters</p>
-          <span>Add a cluster under Settings → PROXMUX.</span>
+          <span>Add a cluster under Settings → Connection → PROXMUX.</span>
         </div>
       </div>
     );

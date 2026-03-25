@@ -7,11 +7,9 @@ export type AppSettingsTab =
   | "data"
   | "help";
 
-export type ConnectionSubTab = "hosts" | "ssh";
+export type ConnectionSubTab = "hosts" | "ssh" | "proxmux";
 
 export type WorkspaceSubTab = "views" | "layout" | "files";
-
-export type IntegrationsSubTab = "proxmux" | "plugins";
 
 export type InterfaceSubTab = "appearance" | "keyboard";
 
