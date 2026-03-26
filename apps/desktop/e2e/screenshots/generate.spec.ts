@@ -72,11 +72,12 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
 
   await shot(page, "02-split");
 
-  await page.getByRole("button", { name: "Open layout command center" }).click();
-  await expect(page.getByRole("dialog", { name: "Layout command center" })).toBeVisible();
+  await page.getByTitle("Workspaces and layouts").click();
+  await expect(page.getByRole("dialog", { name: "Workspaces and layouts" })).toBeVisible();
+  await page.getByRole("tab", { name: "Layouts" }).click();
   await shot(page, "03-layout-profiles");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Layout command center" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Workspaces and layouts" })).toBeHidden();
 
   await page.getByRole("button", { name: "Open add menu" }).click();
   await page.getByText("Quick connect terminal").click();
