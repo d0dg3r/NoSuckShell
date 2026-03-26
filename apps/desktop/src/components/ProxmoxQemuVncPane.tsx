@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PROXMUX_PLUGIN_ID } from "../features/builtin-plugin-ids";
 import { buildProxmoxConsoleWebSocketUrl, parseProxmoxConsoleProxyData } from "../features/proxmox-console-ws";
+import { connectTimeoutMs as defaultConnectTimeoutMs } from "../features/connect-timeouts";
 import { pluginInvoke, proxmuxWsProxyStart, proxmuxWsProxyStop } from "../tauri-api";
+import { InlineSpinner } from "./InlineSpinner";
 
 type Props = {
   clusterId: string;
@@ -13,6 +15,7 @@ type Props = {
   reconnectRequestNonce?: number;
   /** PEM of the upstream cert (local WS bridge); if non-empty, TLS certificate verification is skipped entirely (same effect as allowInsecureTls). The PEM is not used as a trust anchor. */
   tlsTrustedCertPem?: string;
+  connectTimeoutMs?: number;
   onError?: (message: string) => void;
 };
 
@@ -44,10 +47,13 @@ export function ProxmoxQemuVncPane({
   allowInsecureTls = false,
   reconnectRequestNonce = 0,
   tlsTrustedCertPem,
+  connectTimeoutMs: connectTimeoutMsProp,
   onError,
 }: Props) {
+  const connectTimeoutMs = connectTimeoutMsProp ?? defaultConnectTimeoutMs(null);
   const screenRef = useRef<HTMLDivElement | null>(null);
   const rfbRef = useRef<{ disconnect: () => void } | null>(null);
+  const rfbConnectWatchdogRef = useRef<number | null>(null);
   const proxyIdRef = useRef<string | null>(null);
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "disconnected">("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting…");
@@ -173,6 +179,10 @@ export function ProxmoxQemuVncPane({
         rfbRef.current = rfb;
 
         const onConnect = () => {
+          if (rfbConnectWatchdogRef.current != null) {
+            window.clearTimeout(rfbConnectWatchdogRef.current);
+            rfbConnectWatchdogRef.current = null;
+          }
           if (!cancelled) {
             setPhase("connected");
             setStatusMessage("");
@@ -210,6 +220,24 @@ export function ProxmoxQemuVncPane({
         rfb.addEventListener("disconnect", onDisconnect);
         rfb.addEventListener("securityfailure", onSecurityFailure);
         rfb.addEventListener("credentialsrequired", onCredentialsRequired);
+
+        if (rfbConnectWatchdogRef.current != null) {
+          window.clearTimeout(rfbConnectWatchdogRef.current);
+        }
+        rfbConnectWatchdogRef.current = window.setTimeout(() => {
+          rfbConnectWatchdogRef.current = null;
+          if (cancelled) {
+            return;
+          }
+          try {
+            rfb.disconnect();
+          } catch {
+            /* ignore */
+          }
+          setPhase("error");
+          setStatusMessage("Connection timed out.");
+          onError?.("Connection timed out.");
+        }, connectTimeoutMs);
       } catch (e) {
         if (!cancelled) {
           const msg = String(e);
@@ -222,15 +250,20 @@ export function ProxmoxQemuVncPane({
 
     return () => {
       cancelled = true;
+      if (rfbConnectWatchdogRef.current != null) {
+        window.clearTimeout(rfbConnectWatchdogRef.current);
+        rfbConnectWatchdogRef.current = null;
+      }
       void teardown();
     };
-  }, [allowInsecureTls, clusterId, node, onError, reconnectRequestNonce, teardown, tlsTrustedCertPem, vmid]);
+  }, [allowInsecureTls, clusterId, connectTimeoutMs, node, onError, reconnectRequestNonce, teardown, tlsTrustedCertPem, vmid]);
 
   return (
     <div className="proxmox-console-pane proxmox-console-pane--novnc terminal-root terminal-host" role="region" aria-label={paneTitle}>
       {phase !== "connected" && statusMessage ? (
-        <div className="proxmox-console-pane-status muted-copy" role="status">
-          {statusMessage}
+        <div className="proxmox-console-pane-status muted-copy proxmox-console-pane-status--row" role="status">
+          {phase === "connecting" ? <InlineSpinner label="Connecting" className="proxmox-console-pane-status-spinner" /> : null}
+          <span>{statusMessage}</span>
         </div>
       ) : null}
       <div ref={screenRef} className="proxmox-console-novnc-screen" />

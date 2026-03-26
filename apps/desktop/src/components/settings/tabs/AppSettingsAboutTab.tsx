@@ -9,7 +9,7 @@ import {
   REPO_RELEASES_URL,
 } from "../../../features/repo-links";
 import { APP_ONE_LINE, ABOUT_SUPPORT_SUMMARY } from "../../../features/help-app-copy";
-import logoTerminal from "../../../../../../img/logo_terminal.png";
+import logoTerminal from "../../../../../../img/logo_terminal_new.png";
 
 function openUrl(url: string) {
   void openExternalUrl(url).catch(() => undefined);

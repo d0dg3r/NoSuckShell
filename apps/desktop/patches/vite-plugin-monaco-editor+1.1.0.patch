@@ -1,0 +1,14 @@
+diff --git a/node_modules/vite-plugin-monaco-editor/dist/workerMiddleware.js b/node_modules/vite-plugin-monaco-editor/dist/workerMiddleware.js
+index dd8681c..77fb8d5 100644
+--- a/node_modules/vite-plugin-monaco-editor/dist/workerMiddleware.js
++++ b/node_modules/vite-plugin-monaco-editor/dist/workerMiddleware.js
+@@ -43,7 +43,8 @@ function workerMiddleware(middlewares, config, options) {
+     const works = index_1.getWorks(options);
+     // clear cacheDir
+     if (fs.existsSync(exports.cacheDir)) {
+-        fs.rmdirSync(exports.cacheDir, { recursive: true, force: true });
++        // Node 22+ removed recursive rmdirSync; use rmSync (see patch in patches/).
++        fs.rmSync(exports.cacheDir, { recursive: true, force: true });
+     }
+     for (const work of works) {
+         middlewares.use(config.base + options.publicPath + '/' + getFilenameByEntry(work.entry), function (req, res, next) {

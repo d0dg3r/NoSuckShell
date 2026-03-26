@@ -24,6 +24,8 @@ export type WebSessionTab = {
   url: string;
   /** Mirrors PROXMUX cluster "Allow insecure TLS" for in-app webview window (Linux/BSD WebKit). */
   allowInsecureTls?: boolean;
+  /** PEM trusted for TLS (PROXMUX cluster). */
+  tlsTrustedCertPem?: string | null;
 };
 /** Pane-native QEMU noVNC using PROXMUX vncproxy ticket + API WebSocket (or local WS proxy if TLS is insecure). */
 export type ProxmoxQemuVncSessionTab = {
@@ -51,13 +53,25 @@ export type ProxmoxLxcTermSessionTab = {
   allowInsecureTls?: boolean;
   tlsTrustedCertPem?: string;
 };
+/** Pane-native Proxmox node host shell (nodes/{node}/termproxy + vncwebsocket). */
+export type ProxmoxNodeTermSessionTab = {
+  id: string;
+  kind: "proxmoxNodeTerm";
+  label: string;
+  clusterId: string;
+  node: string;
+  proxmoxBaseUrl: string;
+  allowInsecureTls?: boolean;
+  tlsTrustedCertPem?: string;
+};
 export type SessionTab =
   | SavedSshSessionTab
   | QuickSshSessionTab
   | LocalSessionTab
   | WebSessionTab
   | ProxmoxQemuVncSessionTab
-  | ProxmoxLxcTermSessionTab;
+  | ProxmoxLxcTermSessionTab
+  | ProxmoxNodeTermSessionTab;
 
 export type QuickConnectDraft = {
   hostName: string;
@@ -78,7 +92,7 @@ export const createQuickConnectDraft = (defaultUser = ""): QuickConnectDraft => 
 export type HostStatusFilter = "all" | "connected" | "disconnected";
 export type QuickConnectWizardStep = 1 | 2;
 export type AutoArrangeActiveMode = "a" | "b" | "c";
-export type SidebarViewId = "builtin:all" | "builtin:favorites" | "builtin:proxmux" | `custom:${string}`;
+export type SidebarViewId = "builtin:all" | "builtin:favorites" | "builtin:proxmux" | "builtin:hetzner" | `custom:${string}`;
 export type SplitMode = "duplicate" | "empty";
 export type ContextMenuState = {
   visible: boolean;

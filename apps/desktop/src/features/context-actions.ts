@@ -38,6 +38,8 @@ type BuildArgs = {
   broadcastCount: number;
   splitMode?: "duplicate" | "empty";
   freeMoveEnabled?: boolean;
+  /** NSS-Commander workspace: hide split, close, file toggles, free-move. */
+  nssCommanderWorkspace?: boolean;
 };
 
 const buildSplitLabels = (splitMode: "duplicate" | "empty") => {
@@ -67,6 +69,7 @@ export const buildPaneContextActions = ({
   broadcastModeEnabled,
   splitMode = "duplicate",
   freeMoveEnabled = false,
+  nssCommanderWorkspace = false,
 }: BuildArgs): ContextAction[] => {
   const hasPaneSession = Boolean(paneSessionId);
   const splitLabels = buildSplitLabels(splitMode);
@@ -110,6 +113,24 @@ export const buildPaneContextActions = ({
           disabled: !hasPaneSession,
         }
       : null;
+
+  if (nssCommanderWorkspace) {
+    return [
+      { id: "pane.newLocal", label: "New local terminal" },
+      { id: "pane.quickConnect", label: "Quick connect" },
+      broadcastModeAction,
+      {
+        id: "broadcast.togglePaneTarget",
+        label: "Target this pane",
+        disabled: !broadcastModeEnabled || !hasPaneSession || paneSessionKind === "web",
+      },
+      {
+        id: "app.openSettings",
+        label: "Open app settings",
+        separatorAbove: true,
+      },
+    ];
+  }
 
   return [
     { id: "pane.newLocal", label: "New local terminal" },

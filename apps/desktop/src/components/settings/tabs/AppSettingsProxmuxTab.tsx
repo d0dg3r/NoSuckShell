@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { licenseStatus, listPlugins, pluginInvoke, setPluginEnabled } from "../../../tauri-api";
+import { InlineSpinner } from "../../InlineSpinner";
 import type { LicenseStatus, PluginListEntry } from "../../../types";
 import { PROXMUX_PLUGIN_ID } from "../../../features/builtin-plugin-ids";
 import { PLUGIN_STORE_CATALOG, storeItemAccessGranted } from "../../../features/plugin-store-catalog";
@@ -543,6 +544,12 @@ export function AppSettingsProxmuxTab({
             Enable PROXMUX
           </button>
         </div>
+        {busy ? (
+          <div className="proxmux-settings-busy-banner" role="status">
+            <InlineSpinner label="Working" />
+            <span>Please wait…</span>
+          </div>
+        ) : null}
         {message ? <p className="proxmux-settings-status">{message}</p> : null}
       </div>
     );
@@ -559,6 +566,12 @@ export function AppSettingsProxmuxTab({
           />
         </div>
         {loadError ? <p className="error-text">{loadError}</p> : null}
+        {busy ? (
+          <div className="proxmux-settings-busy-banner" role="status">
+            <InlineSpinner label="Working" />
+            <span>Please wait…</span>
+          </div>
+        ) : null}
       </header>
 
       <div className="app-settings-subtabs" role="tablist" aria-label="PROXMUX sections">

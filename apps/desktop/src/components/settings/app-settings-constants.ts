@@ -3,6 +3,7 @@ import type {
   ConnectionSubTab,
   HelpAboutSubTab,
   IdentityStoreSubTab,
+  IntegrationsSubTab,
   InterfaceSubTab,
   WorkspaceSubTab,
 } from "./app-settings-types";
@@ -22,6 +23,7 @@ export const CONNECTION_SUBTABS: Array<{ id: ConnectionSubTab; label: string }> 
   { id: "hosts", label: "Hosts" },
   { id: "ssh", label: "SSH" },
   { id: "proxmux", label: "PROXMUX" },
+  { id: "hetzner", label: "HETZNER" },
 ];
 
 export const WORKSPACE_SUBTABS: Array<{ id: WorkspaceSubTab; label: string }> = [
@@ -47,6 +49,11 @@ export const IDENTITY_STORE_SUBTABS: Array<{ id: IdentityStoreSubTab; label: str
   { id: "keys", label: "SSH keys" },
   { id: "groups", label: "Groups" },
   { id: "tags", label: "Tags" },
+];
+
+export const INTEGRATIONS_SUBTABS: Array<{ id: IntegrationsSubTab; label: string }> = [
+  { id: "plugins", label: "Plugins" },
+  { id: "nss-commander", label: "NSS-Commander" },
 ];
 
 export const TERMINAL_FONT_OFFSET_MIN = -3;

@@ -1,0 +1,50 @@
+/** Monaco `language` id from a file name (extension). */
+
+export function monacoLanguageFromFileName(fileName: string): string {
+  const i = fileName.lastIndexOf(".");
+  const ext = i >= 0 ? fileName.slice(i + 1).toLowerCase() : "";
+  const map: Record<string, string> = {
+    md: "markdown",
+    mdx: "markdown",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    json: "json",
+    jsonc: "json",
+    yml: "yaml",
+    yaml: "yaml",
+    html: "html",
+    htm: "html",
+    css: "css",
+    scss: "scss",
+    less: "less",
+    xml: "xml",
+    rs: "rust",
+    py: "python",
+    sh: "shell",
+    bash: "shell",
+    zsh: "shell",
+    toml: "ini",
+    ini: "ini",
+    sql: "sql",
+    cpp: "cpp",
+    cxx: "cpp",
+    cc: "cpp",
+    hpp: "cpp",
+    c: "c",
+    h: "c",
+    go: "go",
+    rb: "ruby",
+    php: "php",
+    java: "java",
+    kt: "kotlin",
+    kts: "kotlin",
+    swift: "swift",
+    vue: "html",
+    dockerfile: "dockerfile",
+  };
+  return map[ext] ?? "plaintext";
+}

@@ -111,6 +111,8 @@ const defaultEntityStore = (): EntityStore => ({
 
 let sessionSeq = 0;
 
+let e2eAppPreferences = { connectTimeoutSecs: 3, httpRequestTimeoutSecs: 30, nssCommanderUseClassicGutter: false };
+
 function nextSessionId(prefix: string): string {
   sessionSeq += 1;
   return `${prefix}-${sessionSeq}`;
@@ -129,6 +131,22 @@ function emitShellBanner(sessionId: string, lines: string): void {
 
 export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
+    case "get_app_preferences":
+      return { ...e2eAppPreferences };
+    case "save_app_preferences": {
+      const p = args?.prefs as Record<string, unknown> | undefined;
+      if (p) {
+        const c = p.connectTimeoutSecs;
+        const h = p.httpRequestTimeoutSecs;
+        const g = p.nssCommanderUseClassicGutter;
+        e2eAppPreferences = {
+          connectTimeoutSecs: typeof c === "number" && Number.isFinite(c) ? c : e2eAppPreferences.connectTimeoutSecs,
+          httpRequestTimeoutSecs: typeof h === "number" && Number.isFinite(h) ? h : e2eAppPreferences.httpRequestTimeoutSecs,
+          nssCommanderUseClassicGutter: typeof g === "boolean" ? g : e2eAppPreferences.nssCommanderUseClassicGutter,
+        };
+      }
+      return { ...e2eAppPreferences };
+    }
     case "list_hosts":
       return e2eHosts;
     case "get_ssh_config_raw":
@@ -175,6 +193,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     }
     case "open_in_app_webview_window":
       return "e2e-webview-window";
+    case "open_proxmox_native_console_window":
+      return undefined;
+    case "take_proxmox_standalone_payload":
+      return null;
     case "save_host_metadata":
     case "touch_host_last_used":
     case "open_external_url":
@@ -304,10 +326,18 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
     case "delete_local_entry":
     case "rename_local_entry":
     case "open_local_entry_in_os":
+    case "write_local_text_file":
+    case "create_local_text_file":
     case "sftp_create_dir":
     case "sftp_delete_entry":
     case "sftp_rename_entry":
+    case "sftp_create_text_file":
+    case "sftp_write_text_file":
       return undefined;
+    case "read_local_text_file":
+      return "# E2E mock local file\n";
+    case "sftp_read_text_file":
+      return "# E2E mock remote file\n";
     case "list_plugins":
       return [
         {
@@ -389,10 +419,11 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
         if (method === "qemuSpiceCapable") {
           return { ok: true, spiceCapable: true };
         }
-        if (method === "fetchQemuVncProxy" || method === "fetchLxcTermProxy") {
+        if (method === "fetchQemuVncProxy" || method === "fetchLxcTermProxy" || method === "fetchNodeTermProxy") {
           return {
             ok: true,
             apiOrigin: "https://127.0.0.1:8006",
+            apiUser: "root@pam",
             data: { port: 5900, ticket: "e2e-test-ticket" },
           };
         }

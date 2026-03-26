@@ -131,6 +131,13 @@ export type SshDirInfo = {
   userProfile: string | null;
 };
 
+/** Persisted under the SSH directory; drives Rust connect and HTTP timeouts. */
+export type AppPreferences = {
+  connectTimeoutSecs: number;
+  httpRequestTimeoutSecs: number;
+  nssCommanderUseClassicGutter: boolean;
+};
+
 export type SessionOutputEvent = {
   session_id: string;
   chunk: string;
@@ -199,6 +206,8 @@ export type LayoutPaneSnapshot = {
   sessionKind?: LayoutPaneSessionKind | null;
   /** Required when sessionKind is sshQuick. */
   quickSsh?: QuickSshSessionRequest | null;
+  /** Proxmox-only: PEM certificate. */
+  tlsTrustedCertPem?: string | null;
 };
 
 export type LayoutSplitTreeNode =
@@ -307,4 +316,23 @@ export type LicenseStatus = {
   licenseId: string | null;
   entitlements: string[];
   exp: number | null;
+};
+
+export type HetznerProjectRow = {
+  id: string;
+  name: string;
+};
+
+export type HetznerListStateResponse = {
+  activeProjectId: string | null;
+  projects: HetznerProjectRow[];
+};
+
+export type HetznerServerRow = {
+  type: "server";
+  id: string;
+  name: string;
+  status: string;
+  ip4: string;
+  ip6: string;
 };

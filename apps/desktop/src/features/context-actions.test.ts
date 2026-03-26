@@ -185,4 +185,26 @@ describe("buildPaneContextActions", () => {
       "app.openSettings",
     ]);
   });
+
+  it("omits splits, closes, file toggles, and free move in NSS-Commander workspace", () => {
+    const actions = buildPaneContextActions({
+      paneSessionId: "pane-1",
+      paneSessionKind: "ssh",
+      paneFileView: "remote",
+      broadcastModeEnabled: false,
+      broadcastCount: 0,
+      nssCommanderWorkspace: true,
+    });
+    const ids = actions.map((item) => item.id);
+    expect(ids).toEqual([
+      "pane.newLocal",
+      "pane.quickConnect",
+      "broadcast.mode.enable",
+      "broadcast.togglePaneTarget",
+      "app.openSettings",
+    ]);
+    expect(ids.some((id) => id.startsWith("layout.split."))).toBe(false);
+    expect(ids).not.toContain("pane.toggleRemoteFiles");
+    expect(ids).not.toContain("layout.freeMove.enable");
+  });
 });

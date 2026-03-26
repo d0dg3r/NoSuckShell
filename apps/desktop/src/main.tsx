@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./App";
+import { ProxmoxStandaloneRoot } from "./components/ProxmoxStandaloneRoot";
 import "./styles.css";
 import "@xterm/xterm/css/xterm.css";
 
@@ -9,6 +9,6 @@ window.addEventListener("unload", () => {});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <ProxmoxStandaloneRoot />
   </React.StrictMode>,
 );

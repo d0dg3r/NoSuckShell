@@ -2,9 +2,21 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.3.0] - 2026-03-26
+
+**Stable release.** Binaries are published after you push tag [`v0.3.0`][v0.3.0] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Added
+
+- **HETZNER** — New built-in plugin `dev.nosuckshell.plugin.hetzner` for Hetzner Cloud resource management; server power actions (on/off/reboot); encrypted API token storage.
+- **NSS Commander** — Enhanced file workspace with `F-Key` bar and dedicated `File Operations` bar; automatic language detection for the text editor.
+- **Workspaces** — New `Workspace Command Bar` and `Workspace Popover` for seamless layout/tab switching.
+- **Proxmox** — Standalone console view support.
+- **Visuals** — Modernized application logos and updated high-resolution screenshots in README.
+- **Core** — Improved connection timeout handling and sensitive data masking in logs.
+
 ## [0.2.2] - 2026-03-25
 
-**Stable release.** Binaries are published after you push tag [`v0.2.2`][v0.2.2] and the [release workflow](../.github/workflows/release.yml) completes.
 
 ### Added
 
@@ -228,3 +240,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.1.0-beta.11]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.1.0-beta.11
 [v0.2.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.1
 [v0.2.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.2
+[v0.3.0]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.0
+

@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+function filePaneDialogPortalTarget(): HTMLElement | null {
+  return typeof document !== "undefined" ? document.body : null;
+}
 
 type TextPromptProps = {
   open: boolean;
@@ -31,7 +36,12 @@ export function FilePaneTextPrompt({
     return null;
   }
 
-  return (
+  const target = filePaneDialogPortalTarget();
+  if (!target) {
+    return null;
+  }
+
+  return createPortal(
     <div
       className="file-pane-dialog-overlay"
       role="presentation"
@@ -77,7 +87,8 @@ export function FilePaneTextPrompt({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    target,
   );
 }
 
@@ -104,9 +115,14 @@ export function FilePaneDoubleDeleteDialog({
     return null;
   }
 
+  const target = filePaneDialogPortalTarget();
+  if (!target) {
+    return null;
+  }
+
   const kind = isDir ? "folder" : "file";
 
-  return (
+  return createPortal(
     <div
       className="file-pane-dialog-overlay"
       role="presentation"
@@ -121,7 +137,10 @@ export function FilePaneDoubleDeleteDialog({
           <>
             <h3 className="file-pane-dialog-title">Delete {kind}?</h3>
             <p className="muted-copy">
-              Remove <strong>{targetLabel}</strong>? Empty folders only; non-empty folders will show an error.
+              Remove <strong>{targetLabel}</strong>
+              {isDir
+                ? "? This deletes the folder and everything inside it."
+                : "?"}
             </p>
             <div className="file-pane-dialog-actions">
               <button type="button" className="btn btn-sm" onClick={onCancel}>
@@ -149,6 +168,93 @@ export function FilePaneDoubleDeleteDialog({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    target,
+  );
+}
+
+export type FilePaneConfirmDialogProps = {
+  open: boolean;
+  title: string;
+  children?: ReactNode;
+  confirmLabel?: string;
+  alternateLabel?: string;
+  cancelLabel?: string;
+  /** When true, confirm button uses danger styling. */
+  confirmDanger?: boolean;
+  onConfirm: () => void;
+  onAlternate?: () => void;
+  onCancel: () => void;
+};
+
+export function FilePaneConfirmDialog({
+  open,
+  title,
+  children,
+  confirmLabel = "OK",
+  alternateLabel,
+  cancelLabel = "Cancel",
+  confirmDanger = false,
+  onConfirm,
+  onAlternate,
+  onCancel,
+}: FilePaneConfirmDialogProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onCancel]);
+
+  if (!open) {
+    return null;
+  }
+
+  const target = filePaneDialogPortalTarget();
+  if (!target) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      className="file-pane-dialog-overlay"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <div className="file-pane-dialog panel" role="alertdialog" aria-modal="true" aria-labelledby="file-pane-confirm-title">
+        <h3 id="file-pane-confirm-title" className="file-pane-dialog-title">
+          {title}
+        </h3>
+        {children ? <div className="file-pane-dialog-body muted-copy">{children}</div> : null}
+        <div className="file-pane-dialog-actions">
+          <button type="button" className="btn btn-sm" onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          {alternateLabel && onAlternate ? (
+            <button type="button" className="btn btn-sm" onClick={onAlternate}>
+              {alternateLabel}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={confirmDanger ? "btn btn-sm action-icon-btn-danger" : "btn btn-sm btn-primary"}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    target,
   );
 }

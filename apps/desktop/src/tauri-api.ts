@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AppPreferences,
   EntityStore,
   GroupObject,
   HostBinding,
@@ -20,6 +21,7 @@ import type {
   UserObject,
   ViewProfile,
 } from "./types";
+import type { ProxmoxStandalonePayload } from "./features/proxmox-standalone-payload";
 
 const sendInputQueueBySession = new Map<string, Array<{ data: string; resolves: Array<() => void>; rejects: Array<(reason?: unknown) => void> }>>();
 const sendInputDrainingSessions = new Set<string>();
@@ -131,6 +133,11 @@ export const saveHostMetadata = (metadata: HostMetadataStore): Promise<void> =>
 
 export const touchHostLastUsed = (hostAlias: string): Promise<void> =>
   invoke("touch_host_last_used", { hostAlias });
+
+export const getAppPreferences = (): Promise<AppPreferences> => invoke("get_app_preferences");
+
+export const saveAppPreferences = (prefs: AppPreferences): Promise<AppPreferences> =>
+  invoke("save_app_preferences", { prefs });
 
 export const exportBackup = (path: string, password: string): Promise<void> =>
   invoke("export_backup", { path, password });
@@ -273,17 +280,35 @@ export const openInAppWebviewWindow = (
   title: string,
   url: string,
   allowInsecureTls = false,
+  tlsTrustedCertPem?: string | null,
   autoConsoleUrl?: string | null,
 ): Promise<string> =>
   invoke<string>("open_in_app_webview_window", {
     title,
     url,
     allowInsecureTls,
+    tlsTrustedCertPem: tlsTrustedCertPem ?? null,
     ...(autoConsoleUrl != null && autoConsoleUrl !== "" ? { autoConsoleUrl } : {}),
   });
 
 export const navigateInAppWebviewWindow = (label: string, url: string): Promise<void> =>
   invoke("navigate_in_app_webview_window", { label, url });
+
+/** Second window with the same React native Proxmox consoles as the main pane (API tickets — no Proxmox web login). */
+export async function openProxmoxNativeConsoleWindow(title: string, payload: ProxmoxStandalonePayload): Promise<void> {
+  await invoke("open_proxmox_native_console_window", {
+    args: {
+      title,
+      payloadJson: JSON.stringify(payload),
+    },
+  });
+}
+
+export async function takeProxmoxStandalonePayload(label: string): Promise<string | null> {
+  return invoke<string | null>("take_proxmox_standalone_payload", { label });
+}
+
+export type { ProxmoxStandalonePayload } from "./features/proxmox-standalone-payload";
 
 export const openVirtViewerFromSpicePayload = (spiceData: Record<string, unknown>): Promise<void> =>
   invoke("open_virt_viewer_from_spice_payload", { spiceData });
@@ -294,11 +319,39 @@ export const createLocalDir = (parentPathKey: string, dirName: string): Promise<
 export const deleteLocalEntry = (parentPathKey: string, name: string): Promise<void> =>
   invoke("delete_local_entry", { parentPathKey, name });
 
+export type DeleteEntryMode = "strict" | "bestEffort" | "chmodOwnerWritableThenStrict";
+
+export type DeletePathFailure = {
+  path: string;
+  message: string;
+};
+
+export type DeleteTreeResult = {
+  completedFully: boolean;
+  failures: DeletePathFailure[];
+  hadPermissionDenied: boolean;
+};
+
+export const deleteLocalEntryWithMode = (
+  parentPathKey: string,
+  name: string,
+  mode: DeleteEntryMode,
+): Promise<DeleteTreeResult> => invoke("delete_local_entry_with_mode", { parentPathKey, name, mode });
+
 export const renameLocalEntry = (parentPathKey: string, oldName: string, newName: string): Promise<void> =>
   invoke("rename_local_entry", { parentPathKey, oldName, newName });
 
 export const openLocalEntryInOs = (parentPathKey: string, name: string): Promise<void> =>
   invoke("open_local_entry_in_os", { parentPathKey, name });
+
+export const readLocalTextFile = (parentPathKey: string, name: string): Promise<string> =>
+  invoke("read_local_text_file", { parentPathKey, name });
+
+export const writeLocalTextFile = (parentPathKey: string, name: string, content: string): Promise<void> =>
+  invoke("write_local_text_file", { parentPathKey, name, content });
+
+export const createLocalTextFile = (parentPathKey: string, name: string, content: string): Promise<void> =>
+  invoke("create_local_text_file", { parentPathKey, name, content });
 
 export const sftpCreateDir = (spec: RemoteSshSpec, parentPath: string, dirName: string): Promise<void> =>
   invoke("sftp_create_dir", { spec, parentPath, dirName });
@@ -306,12 +359,36 @@ export const sftpCreateDir = (spec: RemoteSshSpec, parentPath: string, dirName: 
 export const sftpDeleteEntry = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<void> =>
   invoke("sftp_delete_entry", { spec, parentPath, name });
 
+export const sftpDeleteEntryWithMode = (
+  spec: RemoteSshSpec,
+  parentPath: string,
+  name: string,
+  mode: DeleteEntryMode,
+): Promise<DeleteTreeResult> => invoke("sftp_delete_entry_with_mode", { spec, parentPath, name, mode });
+
 export const sftpRenameEntry = (
   spec: RemoteSshSpec,
   parentPath: string,
   oldName: string,
   newName: string,
 ): Promise<void> => invoke("sftp_rename_entry", { spec, parentPath, oldName, newName });
+
+export const sftpReadTextFile = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<string> =>
+  invoke("sftp_read_text_file", { spec, parentPath, name });
+
+export const sftpCreateTextFile = (
+  spec: RemoteSshSpec,
+  parentPath: string,
+  name: string,
+  content: string,
+): Promise<void> => invoke("sftp_create_text_file", { spec, parentPath, name, content });
+
+export const sftpWriteTextFile = (
+  spec: RemoteSshSpec,
+  parentPath: string,
+  name: string,
+  content: string,
+): Promise<void> => invoke("sftp_write_text_file", { spec, parentPath, name, content });
 
 export const listPlugins = (): Promise<PluginListEntry[]> => invoke("list_plugins");
 

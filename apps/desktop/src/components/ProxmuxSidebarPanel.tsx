@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { pluginInvoke } from "../tauri-api";
+import { InlineSpinner } from "./InlineSpinner";
 import { PROXMUX_PLUGIN_ID } from "../features/builtin-plugin-ids";
 import { buildProxmoxConsoleUrl } from "../features/proxmox-console-urls";
 
@@ -246,11 +247,11 @@ export type ProxmuxSidebarPanelProps = {
   onOpenProxmoxExternalUrl?: (
     url: string,
     label?: string,
-    options?: { allowInsecureTls?: boolean },
+    options?: { allowInsecureTls?: boolean; tlsTrustedCertPem?: string | null },
   ) => void | Promise<void>;
   /** Fetch SPICE proxy via plugin and open a virt-viewer file (handled in App / shell). */
   onOpenProxmoxSpice?: (ctx: { clusterId: string; node: string; vmid: string }) => void | Promise<void>;
-  /** When true with the handlers below, QEMU/LXC consoles use pane-native clients instead of the web UI URL. */
+  /** When true with the handlers below, QEMU/LXC/node shell use pane-native clients instead of the web UI URL. */
   usePaneNativeProxmoxConsoles?: boolean;
   onOpenProxmoxQemuVncInPane?: (ctx: {
     clusterId: string;
@@ -265,6 +266,14 @@ export type ProxmuxSidebarPanelProps = {
     clusterId: string;
     node: string;
     vmid: string;
+    label: string;
+    allowInsecureTls: boolean;
+    proxmoxBaseUrl: string;
+    tlsTrustedCertPem?: string;
+  }) => void | Promise<void>;
+  onOpenProxmoxNodeShellInPane?: (ctx: {
+    clusterId: string;
+    node: string;
     label: string;
     allowInsecureTls: boolean;
     proxmoxBaseUrl: string;
@@ -286,6 +295,7 @@ export function ProxmuxSidebarPanel({
   usePaneNativeProxmoxConsoles = false,
   onOpenProxmoxQemuVncInPane,
   onOpenProxmoxLxcConsoleInPane,
+  onOpenProxmoxNodeShellInPane,
 }: ProxmuxSidebarPanelProps) {
   const [clusters, setClusters] = useState<ProxmuxClusterRow[]>([]);
   const [clusterId, setClusterId] = useState<string | null>(null);
@@ -296,6 +306,8 @@ export function ProxmuxSidebarPanel({
   /** Expanded slide row: `guestKey` for qemu/lxc or `node:{name}` for PVE nodes. */
   const [expandedRowKey, setExpandedRowKey] = useState("");
   const [loadError, setLoadError] = useState("");
+  /** True after the first `listState` attempt finishes (success or error). */
+  const [clustersListReady, setClustersListReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [guestStatus, setGuestStatus] = useState<Record<string, unknown> | null>(null);
   const [guestDetailError, setGuestDetailError] = useState("");
@@ -359,6 +371,8 @@ export function ProxmuxSidebarPanel({
       setClusters([]);
       setClusterId(null);
       setFavoritesByCluster({});
+    } finally {
+      setClustersListReady(true);
     }
   }, []);
 
@@ -409,7 +423,8 @@ export function ProxmuxSidebarPanel({
       await existingInflight;
       return;
     }
-    const showBusy = !cacheEntry || force;
+    const cacheStaleOrMissing = !cacheEntry || !isSufficientlyFresh(cacheEntry.fetchedAt, RESOURCE_TTL_MS, now);
+    const showBusy = force || cacheStaleOrMissing;
     if (showBusy) {
       setBusy(true);
     }
@@ -689,15 +704,32 @@ export function ProxmuxSidebarPanel({
   }, [filteredResources.length, onResourceCountChange]);
 
   const grouped = useMemo(() => {
-    const nodes = filteredResources.filter((r) => r.type === "node");
-    const qemus = filteredResources.filter((r) => r.type === "qemu");
-    const lxcs = filteredResources.filter((r) => r.type === "lxc");
+    const sortRows = (rows: ResourceRow[]): ResourceRow[] =>
+      [...rows].sort((a, b) => {
+        const aUp = rowIsUp(a) ? 0 : 1;
+        const bUp = rowIsUp(b) ? 0 : 1;
+        if (aUp !== bUp) return aUp - bUp;
+
+        const aKey = proxmuxResourceKey(a);
+        const bKey = proxmuxResourceKey(b);
+        const aFav = aKey != null && favoriteSet.has(aKey) ? 0 : 1;
+        const bFav = bKey != null && favoriteSet.has(bKey) ? 0 : 1;
+        if (aFav !== bFav) return aFav - bFav;
+
+        const aName = String(a.name ?? a.node ?? "").toLowerCase();
+        const bName = String(b.name ?? b.node ?? "").toLowerCase();
+        return aName.localeCompare(bName);
+      });
+
+    const nodes = sortRows(filteredResources.filter((r) => r.type === "node"));
+    const qemus = sortRows(filteredResources.filter((r) => r.type === "qemu"));
+    const lxcs = sortRows(filteredResources.filter((r) => r.type === "lxc"));
     return [
       { title: "Nodes", rows: nodes },
       { title: "Virtual machines", rows: qemus },
       { title: "Containers", rows: lxcs },
     ];
-  }, [filteredResources]);
+  }, [filteredResources, favoriteSet]);
 
   const powerDisabled = powerBusy || busy;
   const guestMemLine = guestStatus ? resourceMemLine(guestStatus as ResourceRow) : null;
@@ -728,7 +760,10 @@ export function ProxmuxSidebarPanel({
     async (url: string, label?: string) => {
       if (!onOpenProxmoxExternalUrl) return;
       try {
-        await onOpenProxmoxExternalUrl(url, label, { allowInsecureTls: allowInsecureTlsForOpens });
+        await onOpenProxmoxExternalUrl(url, label, {
+          allowInsecureTls: allowInsecureTlsForOpens,
+          tlsTrustedCertPem: tlsTrustedCertPemForOpens,
+        });
       } catch {
         /* App surfaces errors */
       }
@@ -767,7 +802,11 @@ export function ProxmuxSidebarPanel({
     }
 
     if (cat === "node") {
-      if (!onSshToProxmoxNode && !onOpenProxmoxExternalUrl) {
+      if (
+        !onSshToProxmoxNode &&
+        !onOpenProxmoxExternalUrl &&
+        !(usePaneNativeProxmoxConsoles && onOpenProxmoxNodeShellInPane)
+      ) {
         return spacer();
       }
       if (!node) return spacer();
@@ -787,7 +826,7 @@ export function ProxmuxSidebarPanel({
               SSH
             </button>
           ) : null}
-          {onOpenProxmoxExternalUrl ? (
+          {onOpenProxmoxExternalUrl || (usePaneNativeProxmoxConsoles && onOpenProxmoxNodeShellInPane) ? (
             <button
               type="button"
               className="proxmux-action-btn proxmux-action-shell"
@@ -795,6 +834,17 @@ export function ProxmuxSidebarPanel({
               aria-label="Open Proxmox node shell"
               onClick={(e) => {
                 stopRowEvent(e);
+                if (usePaneNativeProxmoxConsoles && onOpenProxmoxNodeShellInPane && clusterId) {
+                  void onOpenProxmoxNodeShellInPane({
+                    clusterId,
+                    node,
+                    label: "Node shell",
+                    allowInsecureTls: allowInsecureTlsForOpens,
+                    proxmoxBaseUrl,
+                    ...(tlsTrustedCertPemForOpens ? { tlsTrustedCertPem: tlsTrustedCertPemForOpens } : {}),
+                  });
+                  return;
+                }
                 void runOpenUrl(buildProxmoxConsoleUrl(proxmoxBaseUrl, { kind: "node", node }), "Node shell");
               }}
             >
@@ -905,6 +955,17 @@ export function ProxmuxSidebarPanel({
     return spacer();
   }
 
+  if (!clustersListReady && !loadError) {
+    return (
+      <div className="proxmux-sidebar-panel proxmux-sidebar-panel--boot" role="status" aria-busy="true" aria-label="Loading PROXMUX">
+        <p className="muted-copy proxmux-sidebar-loading proxmux-sidebar-loading-row proxmux-sidebar-boot-loading">
+          <InlineSpinner label="Loading PROXMUX" />
+          <span>Loading clusters…</span>
+        </p>
+      </div>
+    );
+  }
+
   if (clusters.length === 0 && !loadError) {
     return (
       <div className="proxmux-sidebar-panel">
@@ -956,8 +1017,15 @@ export function ProxmuxSidebarPanel({
           Refresh
         </button>
       </div>
-      {busy && resources.length === 0 ? (
-        <p className="muted-copy proxmux-sidebar-loading">Loading…</p>
+      {busy ? (
+        <p
+          className="muted-copy proxmux-sidebar-loading proxmux-sidebar-loading-row proxmux-sidebar-inventory-loading"
+          role="status"
+          aria-live="polite"
+        >
+          <InlineSpinner label={resources.length === 0 ? "Loading inventory" : "Refreshing inventory"} />
+          <span>{resources.length === 0 ? "Loading inventory…" : "Refreshing inventory…"}</span>
+        </p>
       ) : null}
       <div className="proxmux-sidebar-scroll host-list-scroll" role="region" aria-label="Proxmox inventory">
         {grouped.every((g) => g.rows.length === 0) && !busy ? (
@@ -1069,7 +1137,13 @@ export function ProxmuxSidebarPanel({
                                         </span>
                                       </p>
                                       {guestStatusLoading && !guestStatus ? (
-                                        <p className="muted-copy proxmux-sidebar-guest-detail-loading">Loading status…</p>
+                                        <p
+                                          className="muted-copy proxmux-sidebar-guest-detail-loading proxmux-sidebar-loading-row"
+                                          role="status"
+                                        >
+                                          <InlineSpinner label="Loading guest status" />
+                                          <span>Loading status…</span>
+                                        </p>
                                       ) : null}
                                       <dl className="proxmux-sidebar-guest-stats">
                                         <dt>IPv4</dt>
@@ -1271,19 +1345,38 @@ export function ProxmuxSidebarPanel({
                                           SSH
                                         </button>
                                       ) : null}
-                                      {onOpenProxmoxExternalUrl && expandedNodeName ? (
+                                      {(onOpenProxmoxExternalUrl ||
+                                        (usePaneNativeProxmoxConsoles && onOpenProxmoxNodeShellInPane)) &&
+                                      expandedNodeName ? (
                                         <button
                                           type="button"
                                           className="btn btn-settings-tool proxmux-action-shell"
-                                          onClick={() =>
+                                          onClick={() => {
+                                            if (
+                                              usePaneNativeProxmoxConsoles &&
+                                              onOpenProxmoxNodeShellInPane &&
+                                              clusterId
+                                            ) {
+                                              void onOpenProxmoxNodeShellInPane({
+                                                clusterId,
+                                                node: expandedNodeName,
+                                                label: "Node shell",
+                                                allowInsecureTls: allowInsecureTlsForOpens,
+                                                proxmoxBaseUrl,
+                                                ...(tlsTrustedCertPemForOpens
+                                                  ? { tlsTrustedCertPem: tlsTrustedCertPemForOpens }
+                                                  : {}),
+                                              });
+                                              return;
+                                            }
                                             void runOpenUrl(
                                               buildProxmoxConsoleUrl(proxmoxBaseUrl, {
                                                 kind: "node",
                                                 node: expandedNodeName,
                                               }),
                                               "Node shell",
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           Shell
                                         </button>

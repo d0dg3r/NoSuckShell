@@ -11,6 +11,7 @@ type Props = {
   paneTitle: string;
   /** When true, matches PROXMUX "Allow insecure TLS" for the in-app webview window (Linux/BSD). */
   allowInsecureTls?: boolean;
+  tlsTrustedCertPem?: string | null;
   onOpenInAppWindowError?: (message: string) => void;
   /** Shown after opening the login URL in a separate webview (Proxmox console deep links). */
   onLoginFirstWebviewOpen?: (payload: { label: string; consoleUrl: string }) => void;
@@ -20,6 +21,7 @@ export function WebPane({
   url,
   paneTitle,
   allowInsecureTls = false,
+  tlsTrustedCertPem,
   onOpenInAppWindowError,
   onLoginFirstWebviewOpen,
 }: Props) {
@@ -47,7 +49,12 @@ export function WebPane({
   }, [url]);
 
   const openInAppWindow = useCallback(() => {
-    void openProxmoxInAppWebviewWindow({ title: paneTitle, consoleUrl: url, allowInsecureTls })
+    void openProxmoxInAppWebviewWindow({
+      title: paneTitle,
+      consoleUrl: url,
+      allowInsecureTls,
+      tlsTrustedCertPem,
+    })
       .then((result) => {
         if (result.loginFirst && !result.reused) {
           onLoginFirstWebviewOpen?.({ label: result.label, consoleUrl: url });

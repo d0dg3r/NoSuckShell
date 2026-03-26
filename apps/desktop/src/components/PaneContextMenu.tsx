@@ -22,6 +22,7 @@ export type PaneContextMenuProps = {
   broadcastModeEnabled: boolean;
   broadcastCount: number;
   freeMoveEnabled: boolean;
+  nssCommanderWorkspace?: boolean;
   workspaceSendTargets: WorkspaceTabLite[];
   workspaceSendPlaceholder: boolean;
   onSendToWorkspace: (sessionId: string, workspaceId: string) => void;
@@ -46,6 +47,7 @@ export function PaneContextMenu({
   broadcastModeEnabled,
   broadcastCount,
   freeMoveEnabled,
+  nssCommanderWorkspace = false,
   workspaceSendTargets,
   workspaceSendPlaceholder,
   onSendToWorkspace,
@@ -63,6 +65,7 @@ export function PaneContextMenu({
     broadcastModeEnabled,
     broadcastCount,
     freeMoveEnabled,
+    nssCommanderWorkspace,
     workspaceSendTargets.length,
     workspaceSendPlaceholder,
   ]);
@@ -87,6 +90,7 @@ export function PaneContextMenu({
         broadcastCount,
         splitMode,
         freeMoveEnabled,
+        nssCommanderWorkspace,
       }).map((action) => (
         <button
           key={action.id}

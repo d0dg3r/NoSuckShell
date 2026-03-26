@@ -5,6 +5,9 @@ import { HostListRow, type HostListRowBridgeProps } from "./HostListRow";
 
 export type HostSidebarView = { id: SidebarViewId; label: string };
 
+/** Identity Store subtabs reachable from the brand quick-add menu. */
+export type QuickAddIdentityStoreSubTab = "users" | "groups" | "keys";
+
 export type HostSidebarProps = {
   isSidebarOpen: boolean;
   isSidebarPinned: boolean;
@@ -19,6 +22,10 @@ export type HostSidebarProps = {
   onConnectLocalInActivePane: () => void;
   onOpenQuickConnect: () => void;
   onOpenAddHost: () => void;
+  /** Open Settings → Identity Store on the given sub-tab (closes quick-add menu in parent). */
+  onOpenIdentityStoreSubTab: (subtab: QuickAddIdentityStoreSubTab) => void;
+  /** Create a new terminal workspace tab (parent should close the quick-add menu). */
+  onCreateWorkspace: () => void;
   sidebarViews: HostSidebarView[];
   selectedSidebarViewId: SidebarViewId;
   onSelectSidebarView: (id: SidebarViewId) => void;
@@ -45,9 +52,13 @@ export type HostSidebarProps = {
   searchInputPlaceholder?: string;
   /** When the PROXMUX sidebar tab is selected, render this instead of SSH host rows. */
   proxmuxPanel: ReactNode | null;
+  /** When the HETZNER sidebar tab is selected, render this instead of SSH host rows. */
+  hetznerPanel: ReactNode | null;
   connectedHostRows: HostRowViewModel[];
   otherHostRows: HostRowViewModel[];
   hostListRowBridge: HostListRowBridgeProps;
+  isBroadcastModeEnabled: boolean;
+  broadcastTargetCount: number;
 };
 
 export function HostSidebar({
@@ -64,6 +75,8 @@ export function HostSidebar({
   onConnectLocalInActivePane,
   onOpenQuickConnect,
   onOpenAddHost,
+  onOpenIdentityStoreSubTab,
+  onCreateWorkspace,
   sidebarViews,
   selectedSidebarViewId,
   onSelectSidebarView,
@@ -86,12 +99,16 @@ export function HostSidebar({
   showHostAdvancedFilters,
   searchInputPlaceholder,
   proxmuxPanel,
+  hetznerPanel,
   connectedHostRows,
   otherHostRows,
   hostListRowBridge,
+  isBroadcastModeEnabled,
+  broadcastTargetCount,
 }: HostSidebarProps) {
   const hostFilterPopoverRef = useRef<HTMLDivElement>(null);
   const isProxmuxView = selectedSidebarViewId === "builtin:proxmux" && proxmuxPanel != null;
+  const isHetznerView = selectedSidebarViewId === "builtin:hetzner" && hetznerPanel != null;
 
   useEffect(() => {
     if (!showAdvancedFilters) {
@@ -171,7 +188,7 @@ export function HostSidebar({
               aria-expanded={isQuickAddMenuOpen}
               aria-haspopup="menu"
               aria-controls={isQuickAddMenuOpen ? "brand-sidebar-quick-add-menu" : undefined}
-              title="Add host, terminal, or connection"
+              title="Terminals, hosts, workspaces, layouts, identity store"
               onClick={onToggleQuickAddMenu}
             >
               <svg className="brand-quick-add-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -186,24 +203,51 @@ export function HostSidebar({
             </button>
           </div>
           {isQuickAddMenuOpen && (
-            <div className="quick-add-menu" id="brand-sidebar-quick-add-menu" role="menu">
-              <button className="quick-add-menu-item" onClick={() => void onConnectLocalInActivePane()}>
+            <div
+              className="quick-add-menu quick-add-menu--two-col"
+              id="brand-sidebar-quick-add-menu"
+              role="menu"
+            >
+              <button
+                type="button"
+                className="quick-add-menu-item"
+                onClick={() => void onConnectLocalInActivePane()}
+              >
                 New local terminal
               </button>
-              <button className="quick-add-menu-item" onClick={() => void onOpenQuickConnect()}>
-                Quick connect terminal
-              </button>
-              <button className="quick-add-menu-item" onClick={onOpenAddHost}>
-                Add host
-              </button>
-              <button className="quick-add-menu-item" disabled>
+              <button
+                type="button"
+                className="quick-add-menu-item"
+                onClick={() => onOpenIdentityStoreSubTab("groups")}
+              >
                 Add group
               </button>
-              <button className="quick-add-menu-item" disabled>
+              <button
+                type="button"
+                className="quick-add-menu-item"
+                onClick={() => void onOpenQuickConnect()}
+              >
+                Quick connect terminal
+              </button>
+              <button
+                type="button"
+                className="quick-add-menu-item"
+                onClick={() => onOpenIdentityStoreSubTab("users")}
+              >
                 Add user
               </button>
-              <button className="quick-add-menu-item" disabled>
+              <button type="button" className="quick-add-menu-item" onClick={onOpenAddHost}>
+                Add host
+              </button>
+              <button
+                type="button"
+                className="quick-add-menu-item"
+                onClick={() => onOpenIdentityStoreSubTab("keys")}
+              >
                 Add key
+              </button>
+              <button type="button" className="quick-add-menu-item" onClick={onCreateWorkspace}>
+                New workspace
               </button>
             </div>
           )}
@@ -312,6 +356,8 @@ export function HostSidebar({
       <div className="host-list">
         {isProxmuxView ? (
           proxmuxPanel
+        ) : isHetznerView ? (
+          hetznerPanel
         ) : listFilterCount === 0 ? (
           <div className="empty-pane">
             <p>No hosts match the active filters.</p>
@@ -342,6 +388,18 @@ export function HostSidebar({
           </>
         )}
       </div>
+
+      <footer className="left-rail-sidebar-footer sessions-footer" role="status">
+        <div className="sessions-footer-meta">
+          <div className="footer-layout-controls">
+            <div className="sessions-footer-status">
+              <span className={`context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`}>
+                Broadcast: {isBroadcastModeEnabled ? "enabled" : "disabled"} ({broadcastTargetCount} targets)
+              </span>
+            </div>
+          </div>
+        </div>
+      </footer>
     </aside>
   );
 }

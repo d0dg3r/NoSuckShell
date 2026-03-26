@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildProxmoxConsoleWebSocketUrl, parseProxmoxConsoleProxyData } from "./proxmox-console-ws";
+import {
+  buildProxmoxConsoleWebSocketUrl,
+  buildProxmoxNodeShellWebSocketUrl,
+  parseProxmoxConsoleProxyData,
+} from "./proxmox-console-ws";
 
 describe("parseProxmoxConsoleProxyData", () => {
   it("reads port and ticket from object", () => {
@@ -42,5 +46,14 @@ describe("buildProxmoxConsoleWebSocketUrl", () => {
       { port: 1, ticket: "t" },
     );
     expect(u).toContain("/nodes/n/lxc/200/vncwebsocket");
+  });
+});
+
+describe("buildProxmoxNodeShellWebSocketUrl", () => {
+  it("builds node vncwebsocket path without guest segment", () => {
+    const u = buildProxmoxNodeShellWebSocketUrl("https://pve:8006", "px03", { port: 5900, ticket: "PVEN:t" });
+    expect(u.startsWith("wss://pve:8006/api2/json/nodes/px03/vncwebsocket?")).toBe(true);
+    expect(u).toContain("port=5900");
+    expect(u).toContain(encodeURIComponent("PVEN:t"));
   });
 });
