@@ -773,6 +773,7 @@ export function App() {
   const [proxmoxQemuVncReconnectNonces, setProxmoxQemuVncReconnectNonces] = useState<Record<number, number>>({});
   const [proxmoxLxcReconnectNonces, setProxmoxLxcReconnectNonces] = useState<Record<number, number>>({});
   const [proxmoxNodeTermReconnectNonces, setProxmoxNodeTermReconnectNonces] = useState<Record<number, number>>({});
+  const [hetznerVncReconnectNonces, setHetznerVncReconnectNonces] = useState<Record<number, number>>({});
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
@@ -3562,6 +3563,20 @@ export function App() {
       }
       return id;
     }
+    if (sourceSession.kind === "hetznerVnc") {
+      const id = `hzvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "hetznerVnc",
+          label: sourceSession.label,
+          projectId: sourceSession.projectId,
+          serverId: sourceSession.serverId,
+        },
+      ]);
+      return id;
+    }
     if (sourceSession.kind === "local") {
       try {
         const started = await startLocalSession();
@@ -5067,6 +5082,32 @@ export function App() {
     [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
   );
 
+  const handleHetznerVncInPane = useCallback(
+    (ctx: { projectId: string; serverId: string; serverName: string }) => {
+      setError("");
+      const id = `hzvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "hetznerVnc" as const,
+          label: ctx.serverName.trim() || `Console ${ctx.serverId}`,
+          projectId: ctx.projectId,
+          serverId: ctx.serverId,
+        },
+      ]);
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
+  );
+
   const startSplitResize = (splitId: string, axis: SplitAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -6015,6 +6056,33 @@ export function App() {
     [proxmoxNodeTermForPane],
   );
 
+  const hetznerVncConsoleForPane = useCallback(
+    (paneIndex: number) => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) return null;
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind !== "hetznerVnc") return null;
+      return {
+        projectId: session.projectId,
+        serverId: session.serverId,
+        paneTitle: session.label,
+      };
+    },
+    [splitSlots, sessions],
+  );
+
+  const hetznerVncReconnectNonceForPane = useCallback(
+    (paneIndex: number): number => hetznerVncReconnectNonces[paneIndex] ?? 0,
+    [hetznerVncReconnectNonces],
+  );
+
+  const requestHetznerVncReconnect = useCallback((paneIndex: number) => {
+    setHetznerVncReconnectNonces((prev) => ({
+      ...prev,
+      [paneIndex]: (prev[paneIndex] ?? 0) + 1,
+    }));
+  }, []);
+
   const getFileExportDestPath = useCallback(async () => {
     return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
   }, [fileExportDestMode, fileExportPathKey]);
@@ -6119,6 +6187,9 @@ export function App() {
     requestProxmoxNodeTermReconnect,
     openProxmoxNodeTermInAppWindow,
     openProxmoxNodeTermInBrowser,
+    hetznerVncConsoleForPane,
+    hetznerVncReconnectNonceForPane,
+    requestHetznerVncReconnect,
     onWebPaneOpenInAppWindowError: setError,
     onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
@@ -6308,6 +6379,7 @@ export function App() {
               searchQuery={searchQuery}
               onResourceCountChange={setHetznerResourceCount}
               onSshToServer={handleHetznerSshServer}
+              onOpenHetznerVncInPane={handleHetznerVncInPane}
             />
             </Suspense>
           ) : null

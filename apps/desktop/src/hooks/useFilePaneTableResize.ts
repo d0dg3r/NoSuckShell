@@ -466,13 +466,14 @@ export function useFilePaneTableResize(
             ? prev
             : { modified: modFloored, actions: ACTION_COL_PX },
         );
+
       }
     };
     const ro = new ResizeObserver(run);
     ro.observe(el);
     run();
     return () => ro.disconnect();
-  }, [widths, persist, isDragging, measureIdealResizableWidths]);
+  }, [persist, isDragging, measureIdealResizableWidths]);
 
   useEffect(() => {
     if (userSizedRef.current) {

@@ -52,6 +52,11 @@ const ProxmoxNodeTermPane = lazy(async () => {
   return { default: m.ProxmoxNodeTermPane };
 });
 
+const HetznerVncPane = lazy(async () => {
+  const m = await import("./HetznerVncPane");
+  return { default: m.HetznerVncPane };
+});
+
 function paneLazySuspenseFallback(label: string): ReactNode {
   return (
     <div className="terminal-root terminal-host terminal-suspense-fallback" role="status" aria-busy="true" aria-label={label}>
@@ -91,6 +96,12 @@ export type ProxmoxNativeConsolePanePayload =
       allowInsecureTls?: boolean;
       tlsTrustedCertPem?: string;
     };
+
+export type HetznerVncPanePayload = {
+  projectId: string;
+  serverId: string;
+  paneTitle: string;
+};
 
 export type SplitPaneRendererBridge = {
   splitSlots: Array<string | null>;
@@ -202,6 +213,10 @@ export type SplitPaneRendererBridge = {
   requestProxmoxNodeTermReconnect: (paneIndex: number) => void;
   openProxmoxNodeTermInAppWindow: (paneIndex: number) => void;
   openProxmoxNodeTermInBrowser: (paneIndex: number) => void;
+  /** Hetzner VNC console pane payload for a given pane index. */
+  hetznerVncConsoleForPane: (paneIndex: number) => HetznerVncPanePayload | null;
+  hetznerVncReconnectNonceForPane: (paneIndex: number) => number;
+  requestHetznerVncReconnect: (paneIndex: number) => void;
   /** WebSocket open wait in browser for Proxmox pane-native consoles (from app preferences). */
   connectTimeoutMs: number;
   /** Surface errors from the web pane (e.g. failed in-app webview window). */
@@ -403,16 +418,18 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
         eligible.length > 0 &&
         eligible.every((sessionId) => b.broadcastTargets.has(sessionId));
       const isPaneBroadcastEligible = Boolean(
-        paneSessionId && b.webPanePayloadForPane(paneIndex) === null && b.proxmoxNativeConsoleForPane(paneIndex) === null,
+        paneSessionId && b.webPanePayloadForPane(paneIndex) === null && b.proxmoxNativeConsoleForPane(paneIndex) === null && b.hetznerVncConsoleForPane(paneIndex) === null,
       );
       const paneFileView = b.paneFileViewForPane(paneIndex);
       const paneCtxKind = b.paneContextSessionKindForPane(paneIndex);
       const remoteSpec = b.remoteSshSpecForPane(paneIndex);
       const proxmoxNative = paneSessionId ? b.proxmoxNativeConsoleForPane(paneIndex) : null;
+      const hetznerVnc = paneSessionId ? b.hetznerVncConsoleForPane(paneIndex) : null;
       const webPayload = paneSessionId ? b.webPanePayloadForPane(paneIndex) : null;
       const hasQemuVncToolbarActions = proxmoxNative?.kind === "qemu-vnc";
       const hasLxcToolbarActions = proxmoxNative?.kind === "lxc-term";
       const hasNodeTermToolbarActions = proxmoxNative?.kind === "node-term";
+      const hasHetznerVncToolbarActions = hetznerVnc != null;
       const activatePaneAndMaybeFocusTerminal = () => {
         b.setActivePaneIndex(paneIndex);
         if (paneSessionId) {
@@ -1027,6 +1044,29 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                 <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
               </>
             ) : null}
+            {hasHetznerVncToolbarActions ? (
+              <>
+                <div className="split-pane-toolbar-group split-pane-toolbar-group-proxmox-vnc">
+                  <button
+                    type="button"
+                    className="btn action-icon-btn pane-toolbar-btn"
+                    title="Reconnect Hetzner VNC"
+                    aria-label={`Reconnect Hetzner VNC in pane ${paneIndex + 1}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      b.requestHetznerVncReconnect(paneIndex);
+                    }}
+                  >
+                    <svg className="pane-toolbar-svg" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M19.2 12a7.2 7.2 0 1 1-2.3-5.3" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                      <path d="M20.4 6.4v4.8h-4.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    </svg>
+                  </button>
+                </div>
+                <span className="pane-toolbar-separator pane-toolbar-separator--primary" aria-hidden="true" />
+              </>
+            ) : null}
             <div className="split-pane-toolbar-group split-pane-toolbar-group-close">
               <button
                 className="btn action-icon-btn pane-toolbar-btn"
@@ -1123,6 +1163,20 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     allowInsecureTls={px.allowInsecureTls === true}
                     tlsTrustedCertPem={px.tlsTrustedCertPem}
                     reconnectRequestNonce={b.proxmoxNodeTermReconnectNonceForPane(paneIndex)}
+                    connectTimeoutMs={b.connectTimeoutMs}
+                    onError={b.onWebPaneOpenInAppWindowError}
+                  />
+                </Suspense>
+              );
+            }
+            if (hetznerVnc) {
+              return (
+                <Suspense fallback={paneLazySuspenseFallback("Loading Hetzner VNC")}>
+                  <HetznerVncPane
+                    projectId={hetznerVnc.projectId}
+                    serverId={hetznerVnc.serverId}
+                    paneTitle={hetznerVnc.paneTitle}
+                    reconnectRequestNonce={b.hetznerVncReconnectNonceForPane(paneIndex)}
                     connectTimeoutMs={b.connectTimeoutMs}
                     onError={b.onWebPaneOpenInAppWindowError}
                   />

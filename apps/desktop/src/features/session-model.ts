@@ -64,6 +64,14 @@ export type ProxmoxNodeTermSessionTab = {
   allowInsecureTls?: boolean;
   tlsTrustedCertPem?: string;
 };
+/** Pane-native Hetzner Cloud VNC console (request_console API + noVNC). */
+export type HetznerVncSessionTab = {
+  id: string;
+  kind: "hetznerVnc";
+  label: string;
+  projectId: string;
+  serverId: string;
+};
 export type SessionTab =
   | SavedSshSessionTab
   | QuickSshSessionTab
@@ -71,7 +79,8 @@ export type SessionTab =
   | WebSessionTab
   | ProxmoxQemuVncSessionTab
   | ProxmoxLxcTermSessionTab
-  | ProxmoxNodeTermSessionTab;
+  | ProxmoxNodeTermSessionTab
+  | HetznerVncSessionTab;
 
 export type QuickConnectDraft = {
   hostName: string;

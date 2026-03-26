@@ -326,6 +326,7 @@ export type HetznerProjectRow = {
 export type HetznerListStateResponse = {
   activeProjectId: string | null;
   projects: HetznerProjectRow[];
+  favoritesByProject?: Record<string, string[]>;
 };
 
 export type HetznerServerRow = {
@@ -335,6 +336,19 @@ export type HetznerServerRow = {
   status: string;
   ip4: string;
   ip6: string;
+  serverType: string;
+  cores: number;
+  memoryGb: number;
+  diskGb: number;
+  datacenter: string;
+  image: string;
+  created: string;
+};
+
+export type HetznerConsoleResponse = {
+  ok: boolean;
+  wssUrl: string;
+  password: string;
 };
 
 export type KnownHostConflictLine = {

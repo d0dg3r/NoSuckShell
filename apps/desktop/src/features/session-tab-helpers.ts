@@ -1,4 +1,5 @@
 import type {
+  HetznerVncSessionTab,
   ProxmoxLxcTermSessionTab,
   ProxmoxNodeTermSessionTab,
   ProxmoxQemuVncSessionTab,
@@ -12,12 +13,13 @@ export function sessionKindIsWebLike(kind: SessionTab["kind"]): boolean {
     kind === "web" ||
     kind === "proxmoxQemuVnc" ||
     kind === "proxmoxLxcTerm" ||
-    kind === "proxmoxNodeTerm"
+    kind === "proxmoxNodeTerm" ||
+    kind === "hetznerVnc"
   );
 }
 
 export function sessionIsWebLike(
   session: SessionTab,
-): session is WebSessionTab | ProxmoxQemuVncSessionTab | ProxmoxLxcTermSessionTab | ProxmoxNodeTermSessionTab {
+): session is WebSessionTab | ProxmoxQemuVncSessionTab | ProxmoxLxcTermSessionTab | ProxmoxNodeTermSessionTab | HetznerVncSessionTab {
   return sessionKindIsWebLike(session.kind);
 }
