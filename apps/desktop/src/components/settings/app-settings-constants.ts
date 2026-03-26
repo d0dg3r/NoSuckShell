@@ -1,6 +1,5 @@
 import type {
   AppSettingsTab,
-  ConnectionSubTab,
   HelpAboutSubTab,
   IdentityStoreSubTab,
   IntegrationsSubTab,
@@ -8,22 +7,15 @@ import type {
   WorkspaceSubTab,
 } from "./app-settings-types";
 
-/** Order: work-first (connection, identity, workspace, plugins) → interface → data → meta. */
+/** Order: work-first (SSH, identity store, workspace, plugins) → interface → data → meta. */
 export const APP_SETTINGS_TABS: Array<{ id: AppSettingsTab; label: string }> = [
-  { id: "connection", label: "Connection" },
+  { id: "ssh", label: "SSH" },
   { id: "store", label: "Identity Store" },
   { id: "workspace", label: "Workspace" },
   { id: "integrations", label: "Plugins" },
   { id: "interface", label: "Interface" },
   { id: "data", label: "Data & Backup" },
   { id: "help", label: "Help & info" },
-];
-
-export const CONNECTION_SUBTABS: Array<{ id: ConnectionSubTab; label: string }> = [
-  { id: "hosts", label: "Hosts" },
-  { id: "ssh", label: "SSH" },
-  { id: "proxmux", label: "PROXMUX" },
-  { id: "hetzner", label: "HETZNER" },
 ];
 
 export const WORKSPACE_SUBTABS: Array<{ id: WorkspaceSubTab; label: string }> = [
@@ -42,9 +34,10 @@ export const HELP_ABOUT_SUBTABS: Array<{ id: HelpAboutSubTab; label: string }> =
   { id: "about", label: "About" },
 ];
 
-/** Overview first; then people → credentials → taxonomy. */
+/** Overview first; then hosts → people → credentials → taxonomy. */
 export const IDENTITY_STORE_SUBTABS: Array<{ id: IdentityStoreSubTab; label: string }> = [
   { id: "overview", label: "Overview" },
+  { id: "hosts", label: "Hosts" },
   { id: "users", label: "Users" },
   { id: "keys", label: "SSH keys" },
   { id: "groups", label: "Groups" },
@@ -54,6 +47,8 @@ export const IDENTITY_STORE_SUBTABS: Array<{ id: IdentityStoreSubTab; label: str
 export const INTEGRATIONS_SUBTABS: Array<{ id: IntegrationsSubTab; label: string }> = [
   { id: "plugins", label: "Plugins" },
   { id: "nss-commander", label: "NSS-Commander" },
+  { id: "proxmux", label: "PROXMUX" },
+  { id: "hetzner", label: "HETZNER" },
 ];
 
 export const TERMINAL_FONT_OFFSET_MIN = -3;

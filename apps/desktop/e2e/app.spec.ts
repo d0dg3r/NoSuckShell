@@ -5,7 +5,7 @@ test.describe("smoke", () => {
     await page.goto("/");
     await expect(page.getByRole("tab", { name: "All" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Favorites" })).toBeVisible();
-    await expect(page.getByRole("tablist", { name: "Terminal workspaces" })).toBeVisible();
+    await expect(page.getByTitle("Workspaces and layouts")).toBeVisible();
     await expect(page.getByPlaceholder("Search alias, hostname, user")).toBeVisible();
   });
 });

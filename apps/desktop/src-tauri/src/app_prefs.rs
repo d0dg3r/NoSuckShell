@@ -93,6 +93,14 @@ pub fn connect_timeout_duration() -> Duration {
     Duration::from_secs(u64::from(current_preferences().connect_timeout_secs))
 }
 
+/// libssh2 blocks indefinitely by default (`set_timeout(0)`). Use the same seconds budget as TCP
+/// `ConnectTimeout` so handshake, known-host checks, and auth cannot hang the SFTP UI forever.
+pub fn libssh2_session_timeout_ms() -> u32 {
+    let secs = u64::from(current_preferences().connect_timeout_secs);
+    let ms = secs.saturating_mul(1000);
+    ms.clamp(1_000, 120_000) as u32
+}
+
 pub fn http_request_timeout_duration() -> Duration {
     Duration::from_secs(u64::from(current_preferences().http_request_timeout_secs))
 }

@@ -68,7 +68,6 @@ import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
 import type {
   AppSettingsTab,
   AutoArrangeMode,
-  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
@@ -460,8 +459,7 @@ export function App() {
   });
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("connection");
-  const [connectionSubTab, setConnectionSubTab] = useState<ConnectionSubTab>("hosts");
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("ssh");
   const [workspaceSubTab, setWorkspaceSubTab] = useState<WorkspaceSubTab>("views");
   const [interfaceSubTab, setInterfaceSubTab] = useState<InterfaceSubTab>("appearance");
   const [helpAboutSubTab, setHelpAboutSubTab] = useState<HelpAboutSubTab>("help");
@@ -773,6 +771,7 @@ export function App() {
   const [proxmoxQemuVncReconnectNonces, setProxmoxQemuVncReconnectNonces] = useState<Record<number, number>>({});
   const [proxmoxLxcReconnectNonces, setProxmoxLxcReconnectNonces] = useState<Record<number, number>>({});
   const [proxmoxNodeTermReconnectNonces, setProxmoxNodeTermReconnectNonces] = useState<Record<number, number>>({});
+  const [hetznerVncReconnectNonces, setHetznerVncReconnectNonces] = useState<Record<number, number>>({});
   const draggingSessionIdRef = useRef<string | null>(null);
   const suppressHostClickAliasRef = useRef<string | null>(null);
   const isApplyingWorkspaceSnapshotRef = useRef<boolean>(false);
@@ -1389,7 +1388,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAppSettingsOpen || activeAppSettingsTab !== "connection" || connectionSubTab !== "ssh") {
+    if (!isAppSettingsOpen || activeAppSettingsTab !== "ssh") {
       return;
     }
     let cancelled = false;
@@ -1409,7 +1408,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isAppSettingsOpen, activeAppSettingsTab, connectionSubTab]);
+  }, [isAppSettingsOpen, activeAppSettingsTab]);
 
   const handleApplySshDirOverride = useCallback(async () => {
     setError("");
@@ -1931,15 +1930,15 @@ export function App() {
   const openHostSettingsForHost = useCallback(
     (alias: string) => {
       loadHostIntoSettingsEditor(alias);
-      setActiveAppSettingsTab("connection");
-      setConnectionSubTab("hosts");
+      setActiveAppSettingsTab("store");
+      setIdentityStoreSubTab("hosts");
       setIsAppSettingsOpen(true);
     },
     [loadHostIntoSettingsEditor],
   );
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
+    if (activeAppSettingsTab !== "store" || identityStoreSubTab !== "hosts") {
       return;
     }
     if (hosts.length === 0) {
@@ -1950,13 +1949,13 @@ export function App() {
     if (!valid) {
       loadHostIntoSettingsEditor(hosts[0].host);
     }
-  }, [activeAppSettingsTab, connectionSubTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
+  }, [activeAppSettingsTab, identityStoreSubTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
+    if (activeAppSettingsTab !== "store" || identityStoreSubTab !== "hosts") {
       clearPendingRemoveHostsTab();
     }
-  }, [activeAppSettingsTab, connectionSubTab, clearPendingRemoveHostsTab]);
+  }, [activeAppSettingsTab, identityStoreSubTab, clearPendingRemoveHostsTab]);
 
   useSessionOutputTrustListener({
     sessionsRef,
@@ -3562,6 +3561,20 @@ export function App() {
       }
       return id;
     }
+    if (sourceSession.kind === "hetznerVnc") {
+      const id = `hzvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "hetznerVnc",
+          label: sourceSession.label,
+          projectId: sourceSession.projectId,
+          serverId: sourceSession.serverId,
+        },
+      ]);
+      return id;
+    }
     if (sourceSession.kind === "local") {
       try {
         const started = await startLocalSession();
@@ -5067,6 +5080,32 @@ export function App() {
     [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
   );
 
+  const handleHetznerVncInPane = useCallback(
+    (ctx: { projectId: string; serverId: string; serverName: string }) => {
+      setError("");
+      const id = `hzvnc-${createId()}`;
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          kind: "hetznerVnc" as const,
+          label: ctx.serverName.trim() || `Console ${ctx.serverId}`,
+          projectId: ctx.projectId,
+          serverId: ctx.serverId,
+        },
+      ]);
+      const autoSplitDirection: "right" | "bottom" =
+        workspaceSnapshots[activeWorkspaceId]?.preferVerticalNewPanes === true ? "bottom" : "right";
+      const firstFree = findFirstFreePaneInOrder(paneOrder, splitSlots);
+      const targetPaneIndex =
+        firstFree !== null ? firstFree : splitFocusedPane(autoSplitDirection, activePaneIndex, "empty");
+      setSplitSlots((prev) => assignSessionToPane(prev, targetPaneIndex, id));
+      setActivePaneIndex(targetPaneIndex);
+      setActiveSession(id);
+    },
+    [activePaneIndex, activeWorkspaceId, paneOrder, splitFocusedPane, splitSlots, workspaceSnapshots],
+  );
+
   const startSplitResize = (splitId: string, axis: SplitAxis) => (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -6015,6 +6054,33 @@ export function App() {
     [proxmoxNodeTermForPane],
   );
 
+  const hetznerVncConsoleForPane = useCallback(
+    (paneIndex: number) => {
+      const sid = splitSlots[paneIndex] ?? null;
+      if (!sid) return null;
+      const session = sessions.find((s) => s.id === sid);
+      if (!session || session.kind !== "hetznerVnc") return null;
+      return {
+        projectId: session.projectId,
+        serverId: session.serverId,
+        paneTitle: session.label,
+      };
+    },
+    [splitSlots, sessions],
+  );
+
+  const hetznerVncReconnectNonceForPane = useCallback(
+    (paneIndex: number): number => hetznerVncReconnectNonces[paneIndex] ?? 0,
+    [hetznerVncReconnectNonces],
+  );
+
+  const requestHetznerVncReconnect = useCallback((paneIndex: number) => {
+    setHetznerVncReconnectNonces((prev) => ({
+      ...prev,
+      [paneIndex]: (prev[paneIndex] ?? 0) + 1,
+    }));
+  }, []);
+
   const getFileExportDestPath = useCallback(async () => {
     return resolveFileExportDestPath(fileExportDestMode, fileExportPathKey);
   }, [fileExportDestMode, fileExportPathKey]);
@@ -6119,6 +6185,9 @@ export function App() {
     requestProxmoxNodeTermReconnect,
     openProxmoxNodeTermInAppWindow,
     openProxmoxNodeTermInBrowser,
+    hetznerVncConsoleForPane,
+    hetznerVncReconnectNonceForPane,
+    requestHetznerVncReconnect,
     onWebPaneOpenInAppWindowError: setError,
     onWebPaneLoginFirstWebviewOpen,
     onSessionWorkingDirectoryChange: handleSessionWorkingDirectoryChange,
@@ -6308,6 +6377,7 @@ export function App() {
               searchQuery={searchQuery}
               onResourceCountChange={setHetznerResourceCount}
               onSshToServer={handleHetznerSshServer}
+              onOpenHetznerVncInPane={handleHetznerVncInPane}
             />
             </Suspense>
           ) : null
@@ -6453,8 +6523,6 @@ export function App() {
           settingsModalPosition={settingsModalPosition}
           activeAppSettingsTab={activeAppSettingsTab}
           setActiveAppSettingsTab={setActiveAppSettingsTab}
-          connectionSubTab={connectionSubTab}
-          setConnectionSubTab={setConnectionSubTab}
           workspaceSubTab={workspaceSubTab}
           setWorkspaceSubTab={setWorkspaceSubTab}
           interfaceSubTab={interfaceSubTab}

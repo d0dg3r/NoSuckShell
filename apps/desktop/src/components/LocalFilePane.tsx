@@ -26,7 +26,7 @@ import { runFilePaneTransfer, type FileDropTarget } from "../features/file-pane-
 import { copyFileToTransferClipboard, getFileTransferClipboard } from "../features/file-transfer-clipboard";
 import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
-import { InlineSpinner } from "./InlineSpinner";
+import { OverlaySpinner } from "./OverlaySpinner";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
 import {
@@ -752,10 +752,7 @@ export function LocalFilePane({
         </div>
       ) : null}
       {loading ? (
-        <div className="file-pane-loading">
-          <InlineSpinner label="Loading directory" />
-          <span>Loading…</span>
-        </div>
+        <OverlaySpinner label="Loading directory" />
       ) : (
         <div className="file-pane-table-wrap" ref={tableWrapRef}>
           <table className="file-pane-table">

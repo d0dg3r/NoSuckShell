@@ -25,6 +25,7 @@ import { copyFileToTransferClipboard, getFileTransferClipboard } from "../featur
 import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
 import { InlineSpinner } from "./InlineSpinner";
+import { OverlaySpinner } from "./OverlaySpinner";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
 import {
@@ -36,9 +37,12 @@ import {
   sftpDeleteEntryWithMode,
   sftpListRemoteDir,
   sftpReadTextFile,
+  sftpRemoveKnownHostEntries,
+  addKnownHostEntry,
   sftpRenameEntry,
   sftpWriteTextFile,
 } from "../tauri-api";
+import { parseKnownHostMismatch, parseKnownHostUnknown, type KnownHostMismatchPayload, type KnownHostUnknownPayload } from "../types";
 import type { RemoteSshSpec, SftpDirEntry } from "../types";
 import type { FileExportArchiveFormat } from "./settings/app-settings-types";
 import type { FilePaneContextMenuAction } from "./FilePaneContextMenu";
@@ -131,6 +135,16 @@ export function RemoteFilePane({
   const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
+  const [hostKeyMismatch, setHostKeyMismatch] = useState<KnownHostMismatchPayload | null>(null);
+  const [hostKeyFixBusy, setHostKeyFixBusy] = useState(false);
+  const [hostKeyUnknown, setHostKeyUnknown] = useState<KnownHostUnknownPayload | null>(null);
+  const [hostKeyAcceptBusy, setHostKeyAcceptBusy] = useState(false);
+
+  /** Parent often passes a new `spec` object each render (`remoteSshSpecForPane`); never use `spec` as a hook dependency. */
+  const remoteSpecIdentityKey =
+    spec.kind === "saved"
+      ? `saved:${spec.host.host}`
+      : `quick:${spec.request.hostName}:${spec.request.user}:${String(spec.request.port ?? 22)}`;
 
   useEffect(() => {
     setSelectedNames(new Set());
@@ -138,7 +152,7 @@ export function RemoteFilePane({
     setLastRangeIndex(null);
     setBulkDeletePendingNames(null);
     setDeleteRecovery(null);
-  }, [path, spec]);
+  }, [path, remoteSpecIdentityKey]);
 
   useEffect(() => {
     onPathChange?.(path);
@@ -152,21 +166,34 @@ export function RemoteFilePane({
     const full = remotePathBarFullDisplay(spec, path);
     onFilePaneTitleChange(paneIndex, { short: remoteFolderTitleShort(path), full });
     return () => onFilePaneTitleChange(paneIndex, null);
-  }, [paneIndex, path, onFilePaneTitleChange, spec]);
+  }, [paneIndex, path, onFilePaneTitleChange, remoteSpecIdentityKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     setLastOk(null);
+    setHostKeyMismatch(null);
+    setHostKeyUnknown(null);
     try {
       const list = await sftpListRemoteDir(spec, path);
       setEntries(list);
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      const mismatch = parseKnownHostMismatch(msg);
+      if (mismatch) {
+        setHostKeyMismatch(mismatch);
+      } else {
+        const unknown = parseKnownHostUnknown(msg);
+        if (unknown) {
+          setHostKeyUnknown(unknown);
+        } else {
+          setError(msg);
+        }
+      }
     } finally {
       setLoading(false);
     }
-  }, [spec, path]);
+  }, [remoteSpecIdentityKey, path]);
 
   const openEditorForExistingFile = useCallback(
     async (name: string) => {
@@ -183,7 +210,7 @@ export function RemoteFilePane({
         setError(String(e));
       }
     },
-    [entries, path, spec],
+    [entries, path, remoteSpecIdentityKey],
   );
 
   useEffect(() => {
@@ -301,7 +328,7 @@ export function RemoteFilePane({
     transferBusy,
     entries.length,
     path,
-    spec,
+    remoteSpecIdentityKey,
   ]);
 
   const openDir = (name: string) => {
@@ -344,7 +371,7 @@ export function RemoteFilePane({
         setExportBusy(null);
       }
     },
-    [archiveFormat, entries, getExportDestPath, path, spec],
+    [archiveFormat, entries, getExportDestPath, path, remoteSpecIdentityKey],
   );
 
   useEffect(() => {
@@ -402,7 +429,7 @@ export function RemoteFilePane({
     if (req.op === "archive") {
       void exportNames(req.names);
     }
-  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, spec, openEditorForExistingFile]);
+  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, remoteSpecIdentityKey, openEditorForExistingFile]);
 
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
@@ -729,10 +756,7 @@ export function RemoteFilePane({
         </div>
       ) : null}
       {loading ? (
-        <div className="file-pane-loading">
-          <InlineSpinner label="Loading remote directory" />
-          <span>Loading…</span>
-        </div>
+        <OverlaySpinner label="Connecting to remote server" />
       ) : (
         <div className="file-pane-table-wrap" ref={tableWrapRef}>
           <table className="file-pane-table">
@@ -1004,6 +1028,134 @@ export function RemoteFilePane({
           <strong>Make writable + retry</strong>: set owner write/read permissions first, then retry strict delete.
         </p>
         <p>{deleteRecovery?.firstError ?? ""}</p>
+      </FilePaneConfirmDialog>
+
+      <FilePaneConfirmDialog
+        open={hostKeyMismatch !== null}
+        title="Host key mismatch"
+        confirmLabel="Remove and reconnect"
+        cancelLabel="Cancel"
+        confirmDanger
+        onCancel={() => {
+          setHostKeyMismatch(null);
+          setError("Connection cancelled — host key mismatch was not resolved.");
+        }}
+        onConfirm={() => {
+          const mismatch = hostKeyMismatch;
+          setHostKeyMismatch(null);
+          if (!mismatch) {
+            return;
+          }
+          void (async () => {
+            setHostKeyFixBusy(true);
+            setError(null);
+            try {
+              await sftpRemoveKnownHostEntries(mismatch.mismatchedHosts);
+              setLastOk("Stale host key entries removed. Reconnecting…");
+              await load();
+            } catch (e) {
+              setError(`Failed to remove entries: ${String(e)}`);
+            } finally {
+              setHostKeyFixBusy(false);
+            }
+          })();
+        }}
+      >
+        <p>
+          The server's host key does not match the key stored in{" "}
+          <code>{hostKeyMismatch?.knownHostsPath ?? "known_hosts"}</code>.
+        </p>
+        {hostKeyMismatch?.conflictingLines && hostKeyMismatch.conflictingLines.length > 0 ? (
+          <div style={{ marginTop: 8, marginBottom: 8 }}>
+            <strong>Conflicting entries:</strong>
+            <ul style={{ margin: "4px 0", paddingLeft: 20, listStyle: "disc", fontSize: "0.85em" }}>
+              {hostKeyMismatch.conflictingLines.map((line, i) => (
+                <li key={i}>
+                  <strong>{line.hostLabel}</strong>
+                  {line.lineNumber > 0 ? ` (line ${line.lineNumber})` : ""}
+                  {line.content ? (
+                    <>
+                      :{" "}
+                      <code style={{ wordBreak: "break-all", fontSize: "0.9em" }}>
+                        {line.content.length > 120 ? `${line.content.slice(0, 120)}…` : line.content}
+                      </code>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p>
+            Affected hosts: <strong>{hostKeyMismatch?.mismatchedHosts.join(", ") ?? ""}</strong>
+          </p>
+        )}
+        <p>
+          <strong>Remove and reconnect</strong> runs{" "}
+          <code>ssh-keygen -R</code> for each listed host and retries.
+        </p>
+        {hostKeyFixBusy ? (
+          <div style={{ marginTop: 8 }}>
+            <InlineSpinner label="Removing entries" />
+            <span> Removing…</span>
+          </div>
+        ) : null}
+      </FilePaneConfirmDialog>
+
+      <FilePaneConfirmDialog
+        open={hostKeyUnknown !== null}
+        title="Unknown host key"
+        confirmLabel="Accept and save"
+        cancelLabel="Cancel"
+        onCancel={() => {
+          setHostKeyUnknown(null);
+          setError("Connection cancelled — host key was not accepted.");
+        }}
+        onConfirm={() => {
+          const info = hostKeyUnknown;
+          setHostKeyUnknown(null);
+          if (!info) {
+            return;
+          }
+          void (async () => {
+            setHostKeyAcceptBusy(true);
+            setError(null);
+            try {
+              await addKnownHostEntry(info.hostname, info.port, info.keyType, info.keyBase64);
+              setLastOk("Host key accepted. Connecting…");
+              await load();
+            } catch (e) {
+              setError(`Failed to save host key: ${String(e)}`);
+            } finally {
+              setHostKeyAcceptBusy(false);
+            }
+          })();
+        }}
+      >
+        <p>
+          The host key for <strong>{hostKeyUnknown?.hostname ?? ""}</strong> is not yet known.
+        </p>
+        <div style={{ marginTop: 8, marginBottom: 8 }}>
+          <p>
+            <strong>Key type:</strong> {hostKeyUnknown?.keyType ?? ""}
+          </p>
+          <p>
+            <strong>Fingerprint:</strong>{" "}
+            <code style={{ wordBreak: "break-all", fontSize: "0.9em" }}>
+              {hostKeyUnknown?.keyFingerprint ?? ""}
+            </code>
+          </p>
+        </div>
+        <p>
+          Verify this fingerprint matches the server's actual key before accepting.
+          <strong> Accept and save</strong> adds the key to your known_hosts file.
+        </p>
+        {hostKeyAcceptBusy ? (
+          <div style={{ marginTop: 8 }}>
+            <InlineSpinner label="Saving host key" />
+            <span> Saving…</span>
+          </div>
+        ) : null}
       </FilePaneConfirmDialog>
 
       <FilePaneDoubleDeleteDialog

@@ -326,6 +326,7 @@ export type HetznerProjectRow = {
 export type HetznerListStateResponse = {
   activeProjectId: string | null;
   projects: HetznerProjectRow[];
+  favoritesByProject?: Record<string, string[]>;
 };
 
 export type HetznerServerRow = {
@@ -335,4 +336,72 @@ export type HetznerServerRow = {
   status: string;
   ip4: string;
   ip6: string;
+  serverType: string;
+  cores: number;
+  memoryGb: number;
+  diskGb: number;
+  datacenter: string;
+  image: string;
+  created: string;
 };
+
+export type HetznerConsoleResponse = {
+  ok: boolean;
+  wssUrl: string;
+  password: string;
+};
+
+export type KnownHostConflictLine = {
+  hostLabel: string;
+  lineNumber: number;
+  content: string;
+};
+
+export type KnownHostMismatchPayload = {
+  mismatchedHosts: string[];
+  knownHostsPath: string;
+  conflictingLines: KnownHostConflictLine[];
+};
+
+const KNOWN_HOST_MISMATCH_PREFIX = "KNOWN_HOST_MISMATCH:";
+
+export function parseKnownHostMismatch(error: string): KnownHostMismatchPayload | null {
+  if (!error.startsWith(KNOWN_HOST_MISMATCH_PREFIX)) {
+    return null;
+  }
+  try {
+    return JSON.parse(error.slice(KNOWN_HOST_MISMATCH_PREFIX.length)) as KnownHostMismatchPayload;
+  } catch {
+    return null;
+  }
+}
+
+export type KnownHostEntry = {
+  lineNumber: number;
+  hostnames: string;
+  keyType: string;
+  keyFingerprint: string;
+  isHashed: boolean;
+  rawLine: string;
+};
+
+export type KnownHostUnknownPayload = {
+  hostname: string;
+  port: number;
+  keyType: string;
+  keyFingerprint: string;
+  keyBase64: string;
+};
+
+const KNOWN_HOST_UNKNOWN_PREFIX = "KNOWN_HOST_UNKNOWN:";
+
+export function parseKnownHostUnknown(error: string): KnownHostUnknownPayload | null {
+  if (!error.startsWith(KNOWN_HOST_UNKNOWN_PREFIX)) {
+    return null;
+  }
+  try {
+    return JSON.parse(error.slice(KNOWN_HOST_UNKNOWN_PREFIX.length)) as KnownHostUnknownPayload;
+  } catch {
+    return null;
+  }
+}

@@ -2,6 +2,13 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [0.3.2] - 2026-03-27
+
+### Fixed
+
+- **Build** — Removed unused `InlineSpinner` import in `LocalFilePane.tsx` that was causing `tsc` to fail.
+- **E2E Tests** — Corrected the smoke test selector for the new `Workspace Command Bar` to use the accessible title “Workspaces and layouts”.
+
 ## [0.3.1] - 2026-03-26
 
 **Stable release.** Binaries are published after you push tag [`v0.3.1`][v0.3.1] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -248,4 +255,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.2.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.2
 [v0.3.0]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.0
 [v0.3.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.1
+[v0.3.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.2
 

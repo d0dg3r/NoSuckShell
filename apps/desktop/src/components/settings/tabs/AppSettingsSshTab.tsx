@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { mergeManagedHostStarBlock } from "../../../features/ssh-config-managed-block";
 import {
   MAX_CONNECT_TIMEOUT_SECS,
@@ -6,9 +6,10 @@ import {
   MIN_CONNECT_TIMEOUT_SECS,
   MIN_HTTP_REQUEST_TIMEOUT_SECS,
 } from "../../../features/connect-timeouts";
-import type { AppPreferences, SshDirInfo } from "../../../types";
+import type { AppPreferences, KnownHostEntry, SshDirInfo } from "../../../types";
 import type React from "react";
 import { SettingsHelpHint } from "../SettingsHelpHint";
+import { listKnownHostsEntries, removeKnownHostsLine } from "../../../tauri-api";
 
 export type AppSettingsSshTabProps = {
   appPreferences: AppPreferences;
@@ -67,6 +68,40 @@ export function AppSettingsSshTab({
       setError(String(e));
     } finally {
       setTimeoutsSaving(false);
+    }
+  };
+
+  const [knownHostEntries, setKnownHostEntries] = useState<KnownHostEntry[]>([]);
+  const [knownHostsPath, setKnownHostsPath] = useState("");
+  const [knownHostsLoading, setKnownHostsLoading] = useState(false);
+  const [knownHostsDeletingLine, setKnownHostsDeletingLine] = useState<number | null>(null);
+
+  const loadKnownHosts = useCallback(async () => {
+    setKnownHostsLoading(true);
+    try {
+      const [path, entries] = await listKnownHostsEntries();
+      setKnownHostsPath(path);
+      setKnownHostEntries(entries);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setKnownHostsLoading(false);
+    }
+  }, [setError]);
+
+  useEffect(() => {
+    void loadKnownHosts();
+  }, [loadKnownHosts]);
+
+  const handleRemoveKnownHostLine = async (lineNumber: number) => {
+    setKnownHostsDeletingLine(lineNumber);
+    try {
+      await removeKnownHostsLine(lineNumber);
+      await loadKnownHosts();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setKnownHostsDeletingLine(null);
     }
   };
 
@@ -147,6 +182,80 @@ export function AppSettingsSshTab({
           </button>
           <button type="button" className="btn btn-settings-tool" onClick={() => void onResetSshDirOverride()}>
             Use default
+          </button>
+        </div>
+      </section>
+      <section className="settings-card">
+        <header className="settings-card-head">
+          <div className="settings-card-head-row">
+            <h3>Known hosts</h3>
+            <SettingsHelpHint
+              topic="Known hosts"
+              description="Lists entries from your known_hosts file. Each entry maps a server hostname to a public key fingerprint. Remove entries to force re-verification on next connection (for example after a server reinstall or key rotation)."
+            />
+          </div>
+          <p className="settings-card-lead">
+            Server host keys stored in <code className="inline-code">{knownHostsPath || "known_hosts"}</code>.
+          </p>
+        </header>
+        {knownHostsLoading ? (
+          <p className="muted-copy">Loading…</p>
+        ) : knownHostEntries.length === 0 ? (
+          <p className="muted-copy">No entries found.</p>
+        ) : (
+          <div className="known-hosts-table-wrap">
+            <table className="known-hosts-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Host</th>
+                  <th>Type</th>
+                  <th>Fingerprint</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {knownHostEntries.map((entry) => (
+                  <tr key={entry.lineNumber}>
+                    <td className="known-hosts-line-num">{entry.lineNumber}</td>
+                    <td className="known-hosts-hostname" title={entry.isHashed ? entry.hostnames : undefined}>
+                      {entry.isHashed ? "(hashed)" : entry.hostnames}
+                    </td>
+                    <td className="known-hosts-keytype">
+                      {entry.keyType.replace("ssh-", "").replace("ecdsa-sha2-", "")}
+                    </td>
+                    <td className="known-hosts-fingerprint" title={entry.keyFingerprint}>
+                      <code className="inline-code">
+                        {entry.keyFingerprint.length > 28
+                          ? `${entry.keyFingerprint.slice(0, 28)}…`
+                          : entry.keyFingerprint}
+                      </code>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-danger-subtle btn-sm"
+                        disabled={knownHostsDeletingLine === entry.lineNumber}
+                        onClick={() => void handleRemoveKnownHostLine(entry.lineNumber)}
+                        title={`Remove line ${entry.lineNumber}`}
+                      >
+                        {knownHostsDeletingLine === entry.lineNumber ? "…" : "Remove"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="action-row">
+          <button
+            type="button"
+            className="btn btn-settings-tool"
+            disabled={knownHostsLoading}
+            onClick={() => void loadKnownHosts()}
+          >
+            {knownHostsLoading ? "Loading…" : "Reload"}
           </button>
         </div>
       </section>
