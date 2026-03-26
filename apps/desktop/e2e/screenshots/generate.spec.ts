@@ -75,6 +75,7 @@ test("generate store and Flathub marketing screenshots", async ({ page }) => {
   await page.getByTitle("Workspaces and layouts").click();
   await expect(page.getByRole("dialog", { name: "Workspaces and layouts" })).toBeVisible();
   await page.getByRole("tab", { name: "Layouts" }).click();
+  await expect(page.getByRole("tab", { name: "Layouts" })).toHaveAttribute("aria-selected", "true");
   await shot(page, "03-layout-profiles");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Workspaces and layouts" })).toBeHidden();
