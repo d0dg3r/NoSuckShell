@@ -2,9 +2,15 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
-## [0.3.0] - 2026-03-26
+## [0.3.1] - 2026-03-26
 
-**Stable release.** Binaries are published after you push tag [`v0.3.0`][v0.3.0] and the [release workflow](../.github/workflows/release.yml) completes.
+**Stable release.** Binaries are published after you push tag [`v0.3.1`][v0.3.1] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Fixed
+
+- **E2E Tests** — Updated marketing screenshot and smoke test selectors to match the new workspace command bar and popover UI.
+
+## [0.3.0] - 2026-03-26
 
 ### Added
 
@@ -241,4 +247,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.2.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.1
 [v0.2.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.2.2
 [v0.3.0]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.0
+[v0.3.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.1
 
