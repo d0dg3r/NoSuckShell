@@ -132,13 +132,19 @@ export function RemoteFilePane({
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
 
+  /** Parent often passes a new `spec` object each render (`remoteSshSpecForPane`); never use `spec` as a hook dependency. */
+  const remoteSpecIdentityKey =
+    spec.kind === "saved"
+      ? `saved:${spec.host.host}`
+      : `quick:${spec.request.hostName}:${spec.request.user}:${String(spec.request.port ?? 22)}`;
+
   useEffect(() => {
     setSelectedNames(new Set());
     setActiveName(null);
     setLastRangeIndex(null);
     setBulkDeletePendingNames(null);
     setDeleteRecovery(null);
-  }, [path, spec]);
+  }, [path, remoteSpecIdentityKey]);
 
   useEffect(() => {
     onPathChange?.(path);
@@ -152,7 +158,7 @@ export function RemoteFilePane({
     const full = remotePathBarFullDisplay(spec, path);
     onFilePaneTitleChange(paneIndex, { short: remoteFolderTitleShort(path), full });
     return () => onFilePaneTitleChange(paneIndex, null);
-  }, [paneIndex, path, onFilePaneTitleChange, spec]);
+  }, [paneIndex, path, onFilePaneTitleChange, remoteSpecIdentityKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,7 +172,7 @@ export function RemoteFilePane({
     } finally {
       setLoading(false);
     }
-  }, [spec, path]);
+  }, [remoteSpecIdentityKey, path]);
 
   const openEditorForExistingFile = useCallback(
     async (name: string) => {
@@ -183,7 +189,7 @@ export function RemoteFilePane({
         setError(String(e));
       }
     },
-    [entries, path, spec],
+    [entries, path, remoteSpecIdentityKey],
   );
 
   useEffect(() => {
@@ -301,7 +307,7 @@ export function RemoteFilePane({
     transferBusy,
     entries.length,
     path,
-    spec,
+    remoteSpecIdentityKey,
   ]);
 
   const openDir = (name: string) => {
@@ -344,7 +350,7 @@ export function RemoteFilePane({
         setExportBusy(null);
       }
     },
-    [archiveFormat, entries, getExportDestPath, path, spec],
+    [archiveFormat, entries, getExportDestPath, path, remoteSpecIdentityKey],
   );
 
   useEffect(() => {
@@ -402,7 +408,7 @@ export function RemoteFilePane({
     if (req.op === "archive") {
       void exportNames(req.names);
     }
-  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, spec, openEditorForExistingFile]);
+  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, remoteSpecIdentityKey, openEditorForExistingFile]);
 
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
