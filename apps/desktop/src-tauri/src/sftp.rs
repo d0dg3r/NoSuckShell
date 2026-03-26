@@ -1,14 +1,37 @@
 //! SFTP directory listing over direct TCP (libssh2). ProxyJump / ProxyCommand are not supported yet.
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use crate::quick_ssh::{normalize_quick_ssh_request, QuickSshSessionRequest};
 use crate::secure_store::resolve_host_config_for_session;
 use crate::ssh_config::HostConfig;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::UNIX_EPOCH;
+
+// #region agent log
+fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
+    const LOG_PATH: &str = "/home/joe/Development/devops-geek/NoSuckShell/.cursor/debug-3b7030.log";
+    let line = serde_json::json!({
+        "sessionId": "3b7030",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(LOG_PATH) {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+// #endregion
 
 /// Cap in-memory upload size (remote file browser transfer).
 const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
@@ -287,6 +310,20 @@ fn known_hosts_check_candidates(host_name: &str, host_alias: &str, connected_ip:
 /// resolution. Everything after the prefix is a JSON `KnownHostMismatchPayload`.
 const KNOWN_HOST_MISMATCH_PREFIX: &str = "KNOWN_HOST_MISMATCH:";
 
+/// Prefix for structured unknown-key errors; lets the frontend offer acceptance instead of
+/// forcing the user to accept via terminal first.
+const KNOWN_HOST_UNKNOWN_PREFIX: &str = "KNOWN_HOST_UNKNOWN:";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownHostUnknownPayload {
+    pub hostname: String,
+    pub port: u16,
+    pub key_type: String,
+    pub key_fingerprint: String,
+    pub key_base64: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnownHostConflictLine {
@@ -339,6 +376,168 @@ fn find_conflicting_known_host_lines(hosts: &[String]) -> Vec<KnownHostConflictL
     out
 }
 
+fn ssh2_key_type_label(key_type: ssh2::HostKeyType) -> &'static str {
+    match key_type {
+        ssh2::HostKeyType::Rsa => "ssh-rsa",
+        ssh2::HostKeyType::Dss => "ssh-dss",
+        ssh2::HostKeyType::Ecdsa256 => "ecdsa-sha2-nistp256",
+        ssh2::HostKeyType::Ecdsa384 => "ecdsa-sha2-nistp384",
+        ssh2::HostKeyType::Ecdsa521 => "ecdsa-sha2-nistp521",
+        ssh2::HostKeyType::Ed25519 => "ssh-ed25519",
+        ssh2::HostKeyType::Unknown => "unknown",
+    }
+}
+
+fn sha256_fingerprint_raw(key_data: &[u8]) -> String {
+    let hash = Sha256::digest(key_data);
+    let encoded = BASE64.encode(hash).trim_end_matches('=').to_string();
+    format!("SHA256:{encoded}")
+}
+
+/// One host name field from `known_hosts` (may be `host`, `[h]:port`, or comma-separated).
+fn known_host_pattern_matches_candidate(pattern: &str, candidate: &str, port: u16) -> bool {
+    let pattern = pattern.trim();
+    let candidate = candidate.trim();
+    if pattern.is_empty() || candidate.is_empty() {
+        return false;
+    }
+    if pattern == candidate {
+        return true;
+    }
+    if pattern.starts_with('[') {
+        if let Some(idx) = pattern.rfind("]:") {
+            let host_part = &pattern[1..idx];
+            if let Ok(p) = pattern[idx + 2..].parse::<u16>() {
+                return p == port && host_part == candidate;
+            }
+        }
+    }
+    false
+}
+
+fn known_hosts_entry_applies_to_candidates(host_field: &str, candidates: &[String], port: u16) -> bool {
+    for part in host_field.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        for cand in candidates {
+            if known_host_pattern_matches_candidate(part, cand, port) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn known_host_entry_decoded_key(entry: &ssh2::Host) -> Option<Vec<u8>> {
+    let mut s = entry.key().to_string();
+    s.retain(|c| !c.is_whitespace());
+    if s.is_empty() {
+        return None;
+    }
+    BASE64.decode(s.as_bytes()).ok()
+}
+
+/// `libssh2_knownhost_checkp` can return `CheckResult::Mismatch` when the first
+/// stored line matches the hostname but not the session key — common when OpenSSH keeps several
+/// key types per host and the negotiated key differs from that first line. Scan all loaded entries.
+fn try_multi_type_known_hosts_match(
+    known_hosts: &ssh2::KnownHosts,
+    candidates: &[String],
+    port: u16,
+    session_key: &[u8],
+) -> Result<bool, String> {
+    let entries = known_hosts
+        .hosts()
+        .map_err(|e| format!("known_hosts list: {e}"))?;
+    for entry in entries {
+        let Some(nm) = entry.name() else {
+            continue;
+        };
+        if !known_hosts_entry_applies_to_candidates(nm, candidates, port) {
+            continue;
+        }
+        if let Some(dec) = known_host_entry_decoded_key(&entry) {
+            if dec == session_key {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Labels to pass to `ssh-keygen -F` (plain names plus `[host]:port` when not already bracketed).
+fn ssh_keygen_f_lookup_labels(candidates: &[String], port: u16) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in candidates {
+        let c = c.trim();
+        if c.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|x| x == c) {
+            out.push(c.to_string());
+        }
+        if !c.starts_with('[') {
+            let tagged = format!("[{c}]:{port}");
+            if !out.iter().any(|x| x == &tagged) {
+                out.push(tagged);
+            }
+        }
+    }
+    out
+}
+
+/// Parses one OpenSSH `known_hosts` body line and returns the decoded host public key blob.
+fn openssh_known_hosts_line_raw_key(line: &str) -> Option<Vec<u8>> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let working = if trimmed.starts_with('@') {
+        trimmed.splitn(2, ' ').nth(1)?.trim()
+    } else {
+        trimmed
+    };
+    let parts: Vec<&str> = working.splitn(3, ' ').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let key_b64 = parts[2].split_whitespace().next()?;
+    let compact: String = key_b64.chars().filter(|ch| !ch.is_whitespace()).collect();
+    BASE64.decode(compact.as_bytes()).ok()
+}
+
+/// Resolves hashed host lines the same way OpenSSH does (`ssh-keygen -F`), then compares raw keys.
+fn try_ssh_keygen_user_known_hosts_match(kh_path: &Path, candidates: &[String], port: u16, session_key: &[u8]) -> bool {
+    if !kh_path.is_file() {
+        return false;
+    }
+    for label in ssh_keygen_f_lookup_labels(candidates, port) {
+        let Ok(output) = Command::new("ssh-keygen")
+            .arg("-F")
+            .arg(&label)
+            .arg("-f")
+            .arg(kh_path)
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Some(raw) = openssh_known_hosts_line_raw_key(line) {
+                if raw == session_key {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Verifies the server host key like OpenSSH: loads user + system known-hosts files, then tries
 /// `HostName`, the config `Host` alias when distinct, and the resolved peer IP (and `[ipv6]` form).
 fn verify_known_host(
@@ -348,7 +547,7 @@ fn verify_known_host(
     host_alias: &str,
     connected_peer_ip: &str,
 ) -> Result<(), String> {
-    let Some((key_data, _key_type)) = sess.host_key() else {
+    let Some((key_data, key_type)) = sess.host_key() else {
         return Err("Server sent no host key.".to_string());
     };
     let mut known_hosts = sess.known_hosts().map_err(|e| format!("known_hosts: {e}"))?;
@@ -356,16 +555,65 @@ fn verify_known_host(
     let host_to_check = host_name.trim();
     let candidates = known_hosts_check_candidates(host_name, host_alias, connected_peer_ip);
     let mut mismatch_labels: Vec<String> = Vec::new();
+    let kh_path_str = effective_known_hosts_path().to_string_lossy().into_owned();
+    let fp = sha256_fingerprint_raw(key_data);
+
+    // #region agent log
+    let mut check_rows: Vec<serde_json::Value> = Vec::new();
+    // #endregion
 
     for name in &candidates {
-        match known_hosts.check_port(name.as_str(), port, key_data) {
+        let res = known_hosts.check_port(name.as_str(), port, key_data);
+        // #region agent log
+        check_rows.push(serde_json::json!({
+            "candidate": name,
+            "result": match res {
+                ssh2::CheckResult::Match => "Match",
+                ssh2::CheckResult::Mismatch => "Mismatch",
+                ssh2::CheckResult::Failure => "Failure",
+                ssh2::CheckResult::NotFound => "NotFound",
+            },
+        }));
+        // #endregion
+        match res {
             ssh2::CheckResult::Match => {
+                // #region agent log
+                agent_debug_log(
+                    "H1",
+                    "sftp.rs:verify_known_host",
+                    "host key check outcome",
+                    serde_json::json!({
+                        "outcome": "ok_match",
+                        "matchedCandidate": name,
+                        "hostName": host_name,
+                        "hostAlias": host_alias,
+                        "port": port,
+                        "connectedPeerIp": connected_peer_ip,
+                        "knownHostsPath": kh_path_str,
+                        "serverKeySha256": fp,
+                        "allChecks": check_rows,
+                    }),
+                );
+                // #endregion
                 return Ok(());
             }
             ssh2::CheckResult::Mismatch => {
                 mismatch_labels.push(name.clone());
             }
             ssh2::CheckResult::Failure => {
+                // #region agent log
+                agent_debug_log(
+                    "H5",
+                    "sftp.rs:verify_known_host",
+                    "host key check failure",
+                    serde_json::json!({
+                        "hostName": host_name,
+                        "hostAlias": host_alias,
+                        "port": port,
+                        "allChecks": check_rows,
+                    }),
+                );
+                // #endregion
                 return Err("Host key verification failed.".to_string());
             }
             ssh2::CheckResult::NotFound => {}
@@ -373,6 +621,70 @@ fn verify_known_host(
     }
 
     if !mismatch_labels.is_empty() {
+        if try_multi_type_known_hosts_match(&known_hosts, &candidates, port, key_data)? {
+            // #region agent log
+            agent_debug_log(
+                "H1",
+                "sftp.rs:verify_known_host",
+                "host key check outcome",
+                serde_json::json!({
+                    "runId": "post-fix",
+                    "outcome": "ok_match_multi_type_fallback",
+                    "priorMismatchLabels": mismatch_labels,
+                    "hostName": host_name,
+                    "hostAlias": host_alias,
+                    "port": port,
+                    "connectedPeerIp": connected_peer_ip,
+                    "knownHostsPath": kh_path_str,
+                    "serverKeySha256": fp,
+                    "candidates": candidates,
+                    "allChecks": check_rows,
+                }),
+            );
+            // #endregion
+            return Ok(());
+        }
+        if try_ssh_keygen_user_known_hosts_match(&effective_known_hosts_path(), &candidates, port, key_data) {
+            // #region agent log
+            agent_debug_log(
+                "H1",
+                "sftp.rs:verify_known_host",
+                "host key check outcome",
+                serde_json::json!({
+                    "runId": "post-fix",
+                    "outcome": "ok_match_ssh_keygen_fallback",
+                    "priorMismatchLabels": mismatch_labels,
+                    "hostName": host_name,
+                    "hostAlias": host_alias,
+                    "port": port,
+                    "connectedPeerIp": connected_peer_ip,
+                    "knownHostsPath": kh_path_str,
+                    "serverKeySha256": fp,
+                    "candidates": candidates,
+                    "allChecks": check_rows,
+                }),
+            );
+            // #endregion
+            return Ok(());
+        }
+        // #region agent log
+        agent_debug_log(
+            "H1",
+            "sftp.rs:verify_known_host",
+            "host key mismatch aggregate",
+            serde_json::json!({
+                "mismatchLabels": mismatch_labels,
+                "hostName": host_name,
+                "hostAlias": host_alias,
+                "port": port,
+                "connectedPeerIp": connected_peer_ip,
+                "knownHostsPath": kh_path_str,
+                "serverKeySha256": fp,
+                "candidates": candidates,
+                "allChecks": check_rows,
+            }),
+        );
+        // #endregion
         let kh_path = effective_known_hosts_path()
             .to_string_lossy()
             .into_owned();
@@ -387,58 +699,41 @@ fn verify_known_host(
         }
         return Err("Host key mismatch. Remove stale entries from known_hosts.".to_string());
     }
+
+    // #region agent log
+    agent_debug_log(
+        "H1",
+        "sftp.rs:verify_known_host",
+        "host key unknown (no match, no mismatch line)",
+        serde_json::json!({
+            "hostName": host_name,
+            "hostAlias": host_alias,
+            "port": port,
+            "connectedPeerIp": connected_peer_ip,
+            "knownHostsPath": kh_path_str,
+            "serverKeySha256": fp,
+            "candidates": candidates,
+            "allChecks": check_rows,
+        }),
+    );
+    // #endregion
+
+    let key_type_label = ssh2_key_type_label(key_type);
+    let key_base64 = BASE64.encode(key_data);
+    let key_fingerprint = sha256_fingerprint_raw(key_data);
+    let payload = KnownHostUnknownPayload {
+        hostname: host_to_check.to_string(),
+        port,
+        key_type: key_type_label.to_string(),
+        key_fingerprint,
+        key_base64,
+    };
+    if let Ok(json) = serde_json::to_string(&payload) {
+        return Err(format!("{KNOWN_HOST_UNKNOWN_PREFIX}{json}"));
+    }
     Err(format!(
         "Host key for {host_to_check} is not in known_hosts. Connect once in the terminal and accept the key, then try again."
     ))
-}
-
-/// Removes entries for each hostname from every known_hosts file OpenSSH would consult.
-pub fn remove_known_host_entries(hosts: Vec<String>) -> Result<(), String> {
-    let kh_path = effective_known_hosts_path();
-    let mut paths_to_clean: Vec<std::path::PathBuf> = vec![kh_path];
-    if let Ok(dir) = crate::ssh_home::effective_ssh_dir() {
-        let kh2 = dir.join("known_hosts2");
-        if kh2.is_file() {
-            paths_to_clean.push(kh2);
-        }
-    }
-    #[cfg(unix)]
-    {
-        let g = Path::new("/etc/ssh/ssh_known_hosts");
-        if g.is_file() {
-            paths_to_clean.push(g.to_path_buf());
-        }
-    }
-    let mut errors: Vec<String> = Vec::new();
-    for host in &hosts {
-        for kh in &paths_to_clean {
-            let res = std::process::Command::new("ssh-keygen")
-                .args([
-                    "-R",
-                    host.as_str(),
-                    "-f",
-                    &kh.to_string_lossy(),
-                ])
-                .output();
-            match res {
-                Ok(out) if !out.status.success() => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    if !stderr.trim().is_empty() {
-                        errors.push(format!("{host} ({}): {}", kh.display(), stderr.trim()));
-                    }
-                }
-                Err(e) => {
-                    errors.push(format!("{host}: {e}"));
-                }
-                _ => {}
-            }
-        }
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
-    }
 }
 
 fn authenticate(sess: &Session, username: &str, host: &HostConfig) -> Result<(), String> {
@@ -480,6 +775,40 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
     let peer_ip = addr.ip().to_string();
     let tcp = TcpStream::connect_timeout(&addr, crate::app_prefs::connect_timeout_duration())
         .map_err(|e| format!("TCP connect to {addr_label}: {e}"))?;
+    // #region agent log
+    let tcp_peer_ip = tcp
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| String::new());
+    let ssh_effective_dir = crate::ssh_home::effective_ssh_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|e| format!("(effective_ssh_dir error: {e})"));
+    let ssh_default_dir = crate::ssh_home::default_ssh_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|e| format!("(default_ssh_dir error: {e})"));
+    agent_debug_log(
+        "H2",
+        "sftp.rs:connect_session",
+        "dns first vs tcp peer",
+        serde_json::json!({
+            "resolvedDnsFirstIp": peer_ip.clone(),
+            "tcpPeerIp": tcp_peer_ip,
+            "hostName": host_name,
+            "hostAlias": host.host,
+            "port": host.port,
+        }),
+    );
+    agent_debug_log(
+        "H3",
+        "sftp.rs:connect_session",
+        "ssh dir resolution",
+        serde_json::json!({
+            "effectiveSshDir": ssh_effective_dir,
+            "defaultSshDir": ssh_default_dir,
+            "knownHostsPath": effective_known_hosts_path().display().to_string(),
+        }),
+    );
+    // #endregion
     let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
     let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(60)));
 

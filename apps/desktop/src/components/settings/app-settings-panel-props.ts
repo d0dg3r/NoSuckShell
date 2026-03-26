@@ -18,7 +18,6 @@ import type {
 import type {
   AppSettingsTab,
   AutoArrangeMode,
-  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
@@ -56,8 +55,6 @@ export type AppSettingsPanelProps = {
   settingsModalPosition: { x: number; y: number } | null;
   activeAppSettingsTab: AppSettingsTab;
   setActiveAppSettingsTab: (tab: AppSettingsTab) => void;
-  connectionSubTab: ConnectionSubTab;
-  setConnectionSubTab: (tab: ConnectionSubTab) => void;
   workspaceSubTab: WorkspaceSubTab;
   setWorkspaceSubTab: (tab: WorkspaceSubTab) => void;
   interfaceSubTab: InterfaceSubTab;

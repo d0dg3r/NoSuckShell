@@ -6,6 +6,7 @@ import type {
   HostBinding,
   HostConfig,
   HostMetadataStore,
+  KnownHostEntry,
   LayoutProfile,
   LicensePayload,
   LicenseStatus,
@@ -358,6 +359,15 @@ export const sftpCreateDir = (spec: RemoteSshSpec, parentPath: string, dirName: 
 
 export const sftpRemoveKnownHostEntries = (hosts: string[]): Promise<void> =>
   invoke("sftp_remove_known_host_entries", { hosts });
+
+export const listKnownHostsEntries = (): Promise<[string, KnownHostEntry[]]> =>
+  invoke("list_known_hosts_entries");
+
+export const removeKnownHostsLine = (lineNumber: number): Promise<void> =>
+  invoke("remove_known_hosts_line", { lineNumber });
+
+export const addKnownHostEntry = (hostname: string, port: number, keyType: string, keyBase64: string): Promise<void> =>
+  invoke("add_known_host_entry", { hostname, port, keyType, keyBase64 });
 
 export const sftpDeleteEntry = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<void> =>
   invoke("sftp_delete_entry", { spec, parentPath, name });

@@ -7,6 +7,7 @@ mod license;
 mod plugins;
 mod proxmux_ws_proxy;
 mod host_metadata;
+mod known_hosts;
 mod sftp_export;
 mod key_crypto;
 mod quick_ssh;
@@ -59,13 +60,13 @@ use sftp::{
     sftp_read_text_file as sftp_read_text_file_backend,
     sftp_rename_entry as sftp_rename_entry_backend,
     sftp_write_text_file as sftp_write_text_file_backend,
-    remove_known_host_entries as sftp_remove_known_host_entries_backend,
     upload_remote_file as sftp_upload_remote_file_backend,
     write_local_text_file as sftp_write_local_text_file_backend,
     DeleteEntryMode,
     DeleteTreeResult,
     RemoteSshSpec,
 };
+use known_hosts::KnownHostEntry;
 use session::SessionState;
 use ssh_home::SshDirInfo;
 use ssh_config::{
@@ -753,7 +754,22 @@ fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: String) -
 
 #[tauri::command]
 fn sftp_remove_known_host_entries(hosts: Vec<String>) -> Result<(), String> {
-    sftp_remove_known_host_entries_backend(hosts)
+    known_hosts::remove_by_host(hosts)
+}
+
+#[tauri::command]
+fn list_known_hosts_entries() -> Result<(String, Vec<KnownHostEntry>), String> {
+    known_hosts::list_entries()
+}
+
+#[tauri::command]
+fn remove_known_hosts_line(line_number: usize) -> Result<(), String> {
+    known_hosts::remove_line(line_number)
+}
+
+#[tauri::command]
+fn add_known_host_entry(hostname: String, port: u16, key_type: String, key_base64: String) -> Result<(), String> {
+    known_hosts::add_entry(&hostname, port, &key_type, &key_base64)
 }
 
 #[tauri::command]
@@ -1112,6 +1128,9 @@ fn main() {
             create_local_text_file,
             sftp_create_dir,
             sftp_remove_known_host_entries,
+            list_known_hosts_entries,
+            remove_known_hosts_line,
+            add_known_host_entry,
             sftp_delete_entry,
             sftp_delete_entry_with_mode,
             sftp_rename_entry,

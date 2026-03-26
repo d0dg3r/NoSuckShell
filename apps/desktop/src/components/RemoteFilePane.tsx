@@ -25,6 +25,7 @@ import { copyFileToTransferClipboard, getFileTransferClipboard } from "../featur
 import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
 import { InlineSpinner } from "./InlineSpinner";
+import { OverlaySpinner } from "./OverlaySpinner";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
 import {
@@ -37,10 +38,11 @@ import {
   sftpListRemoteDir,
   sftpReadTextFile,
   sftpRemoveKnownHostEntries,
+  addKnownHostEntry,
   sftpRenameEntry,
   sftpWriteTextFile,
 } from "../tauri-api";
-import { parseKnownHostMismatch, type KnownHostMismatchPayload } from "../types";
+import { parseKnownHostMismatch, parseKnownHostUnknown, type KnownHostMismatchPayload, type KnownHostUnknownPayload } from "../types";
 import type { RemoteSshSpec, SftpDirEntry } from "../types";
 import type { FileExportArchiveFormat } from "./settings/app-settings-types";
 import type { FilePaneContextMenuAction } from "./FilePaneContextMenu";
@@ -135,6 +137,8 @@ export function RemoteFilePane({
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
   const [hostKeyMismatch, setHostKeyMismatch] = useState<KnownHostMismatchPayload | null>(null);
   const [hostKeyFixBusy, setHostKeyFixBusy] = useState(false);
+  const [hostKeyUnknown, setHostKeyUnknown] = useState<KnownHostUnknownPayload | null>(null);
+  const [hostKeyAcceptBusy, setHostKeyAcceptBusy] = useState(false);
 
   /** Parent often passes a new `spec` object each render (`remoteSshSpecForPane`); never use `spec` as a hook dependency. */
   const remoteSpecIdentityKey =
@@ -169,6 +173,7 @@ export function RemoteFilePane({
     setError(null);
     setLastOk(null);
     setHostKeyMismatch(null);
+    setHostKeyUnknown(null);
     try {
       const list = await sftpListRemoteDir(spec, path);
       setEntries(list);
@@ -178,7 +183,12 @@ export function RemoteFilePane({
       if (mismatch) {
         setHostKeyMismatch(mismatch);
       } else {
-        setError(msg);
+        const unknown = parseKnownHostUnknown(msg);
+        if (unknown) {
+          setHostKeyUnknown(unknown);
+        } else {
+          setError(msg);
+        }
       }
     } finally {
       setLoading(false);
@@ -746,10 +756,7 @@ export function RemoteFilePane({
         </div>
       ) : null}
       {loading ? (
-        <div className="file-pane-loading">
-          <InlineSpinner label="Connecting to remote server" />
-          <span>Connecting…</span>
-        </div>
+        <OverlaySpinner label="Connecting to remote server" />
       ) : (
         <div className="file-pane-table-wrap" ref={tableWrapRef}>
           <table className="file-pane-table">
@@ -1091,6 +1098,62 @@ export function RemoteFilePane({
           <div style={{ marginTop: 8 }}>
             <InlineSpinner label="Removing entries" />
             <span> Removing…</span>
+          </div>
+        ) : null}
+      </FilePaneConfirmDialog>
+
+      <FilePaneConfirmDialog
+        open={hostKeyUnknown !== null}
+        title="Unknown host key"
+        confirmLabel="Accept and save"
+        cancelLabel="Cancel"
+        onCancel={() => {
+          setHostKeyUnknown(null);
+          setError("Connection cancelled — host key was not accepted.");
+        }}
+        onConfirm={() => {
+          const info = hostKeyUnknown;
+          setHostKeyUnknown(null);
+          if (!info) {
+            return;
+          }
+          void (async () => {
+            setHostKeyAcceptBusy(true);
+            setError(null);
+            try {
+              await addKnownHostEntry(info.hostname, info.port, info.keyType, info.keyBase64);
+              setLastOk("Host key accepted. Connecting…");
+              await load();
+            } catch (e) {
+              setError(`Failed to save host key: ${String(e)}`);
+            } finally {
+              setHostKeyAcceptBusy(false);
+            }
+          })();
+        }}
+      >
+        <p>
+          The host key for <strong>{hostKeyUnknown?.hostname ?? ""}</strong> is not yet known.
+        </p>
+        <div style={{ marginTop: 8, marginBottom: 8 }}>
+          <p>
+            <strong>Key type:</strong> {hostKeyUnknown?.keyType ?? ""}
+          </p>
+          <p>
+            <strong>Fingerprint:</strong>{" "}
+            <code style={{ wordBreak: "break-all", fontSize: "0.9em" }}>
+              {hostKeyUnknown?.keyFingerprint ?? ""}
+            </code>
+          </p>
+        </div>
+        <p>
+          Verify this fingerprint matches the server's actual key before accepting.
+          <strong> Accept and save</strong> adds the key to your known_hosts file.
+        </p>
+        {hostKeyAcceptBusy ? (
+          <div style={{ marginTop: 8 }}>
+            <InlineSpinner label="Saving host key" />
+            <span> Saving…</span>
           </div>
         ) : null}
       </FilePaneConfirmDialog>

@@ -375,3 +375,33 @@ export function parseKnownHostMismatch(error: string): KnownHostMismatchPayload 
     return null;
   }
 }
+
+export type KnownHostEntry = {
+  lineNumber: number;
+  hostnames: string;
+  keyType: string;
+  keyFingerprint: string;
+  isHashed: boolean;
+  rawLine: string;
+};
+
+export type KnownHostUnknownPayload = {
+  hostname: string;
+  port: number;
+  keyType: string;
+  keyFingerprint: string;
+  keyBase64: string;
+};
+
+const KNOWN_HOST_UNKNOWN_PREFIX = "KNOWN_HOST_UNKNOWN:";
+
+export function parseKnownHostUnknown(error: string): KnownHostUnknownPayload | null {
+  if (!error.startsWith(KNOWN_HOST_UNKNOWN_PREFIX)) {
+    return null;
+  }
+  try {
+    return JSON.parse(error.slice(KNOWN_HOST_UNKNOWN_PREFIX.length)) as KnownHostUnknownPayload;
+  } catch {
+    return null;
+  }
+}

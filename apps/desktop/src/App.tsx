@@ -68,7 +68,6 @@ import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
 import type {
   AppSettingsTab,
   AutoArrangeMode,
-  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
@@ -460,8 +459,7 @@ export function App() {
   });
   const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
   const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
-  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("connection");
-  const [connectionSubTab, setConnectionSubTab] = useState<ConnectionSubTab>("hosts");
+  const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("ssh");
   const [workspaceSubTab, setWorkspaceSubTab] = useState<WorkspaceSubTab>("views");
   const [interfaceSubTab, setInterfaceSubTab] = useState<InterfaceSubTab>("appearance");
   const [helpAboutSubTab, setHelpAboutSubTab] = useState<HelpAboutSubTab>("help");
@@ -1390,7 +1388,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAppSettingsOpen || activeAppSettingsTab !== "connection" || connectionSubTab !== "ssh") {
+    if (!isAppSettingsOpen || activeAppSettingsTab !== "ssh") {
       return;
     }
     let cancelled = false;
@@ -1410,7 +1408,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isAppSettingsOpen, activeAppSettingsTab, connectionSubTab]);
+  }, [isAppSettingsOpen, activeAppSettingsTab]);
 
   const handleApplySshDirOverride = useCallback(async () => {
     setError("");
@@ -1932,15 +1930,15 @@ export function App() {
   const openHostSettingsForHost = useCallback(
     (alias: string) => {
       loadHostIntoSettingsEditor(alias);
-      setActiveAppSettingsTab("connection");
-      setConnectionSubTab("hosts");
+      setActiveAppSettingsTab("store");
+      setIdentityStoreSubTab("hosts");
       setIsAppSettingsOpen(true);
     },
     [loadHostIntoSettingsEditor],
   );
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
+    if (activeAppSettingsTab !== "store" || identityStoreSubTab !== "hosts") {
       return;
     }
     if (hosts.length === 0) {
@@ -1951,13 +1949,13 @@ export function App() {
     if (!valid) {
       loadHostIntoSettingsEditor(hosts[0].host);
     }
-  }, [activeAppSettingsTab, connectionSubTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
+  }, [activeAppSettingsTab, identityStoreSubTab, hosts, hostSettingsSelectedAlias, loadHostIntoSettingsEditor]);
 
   useEffect(() => {
-    if (activeAppSettingsTab !== "connection" || connectionSubTab !== "hosts") {
+    if (activeAppSettingsTab !== "store" || identityStoreSubTab !== "hosts") {
       clearPendingRemoveHostsTab();
     }
-  }, [activeAppSettingsTab, connectionSubTab, clearPendingRemoveHostsTab]);
+  }, [activeAppSettingsTab, identityStoreSubTab, clearPendingRemoveHostsTab]);
 
   useSessionOutputTrustListener({
     sessionsRef,
@@ -6525,8 +6523,6 @@ export function App() {
           settingsModalPosition={settingsModalPosition}
           activeAppSettingsTab={activeAppSettingsTab}
           setActiveAppSettingsTab={setActiveAppSettingsTab}
-          connectionSubTab={connectionSubTab}
-          setConnectionSubTab={setConnectionSubTab}
           workspaceSubTab={workspaceSubTab}
           setWorkspaceSubTab={setWorkspaceSubTab}
           interfaceSubTab={interfaceSubTab}

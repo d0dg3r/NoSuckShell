@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 import {
   APP_SETTINGS_TABS,
-  CONNECTION_SUBTABS,
   HELP_ABOUT_SUBTABS,
   INTEGRATIONS_SUBTABS,
   INTERFACE_SUBTABS,
@@ -29,7 +28,6 @@ import { AppSettingsNssCommanderTab } from "./settings/tabs/AppSettingsNssComman
 export type {
   AppSettingsTab,
   AutoArrangeMode,
-  ConnectionSubTab,
   DensityProfile,
   FileExportArchiveFormat,
   FileExportDestMode,
@@ -68,8 +66,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     settingsModalPosition,
     activeAppSettingsTab,
     setActiveAppSettingsTab,
-    connectionSubTab,
-    setConnectionSubTab,
     workspaceSubTab,
     setWorkspaceSubTab,
     interfaceSubTab,
@@ -283,14 +279,6 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             </button>
           ))}
         </div>
-        {activeAppSettingsTab === "connection" && (
-          <SettingsSubtabRow
-            ariaLabel="Connection sections"
-            tabs={CONNECTION_SUBTABS}
-            activeTab={connectionSubTab}
-            onSelect={setConnectionSubTab}
-          />
-        )}
         {activeAppSettingsTab === "store" && (
           <IdentityStoreSubtabs identityStoreSubTab={identityStoreSubTab} setIdentityStoreSubTab={setIdentityStoreSubTab} />
         )}
@@ -418,7 +406,24 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               backupMessage={backupMessage}
             />
           )}
-          {activeAppSettingsTab === "connection" && connectionSubTab === "hosts" && (
+          {activeAppSettingsTab === "ssh" && (
+            <AppSettingsSshTab
+              appPreferences={appPreferences}
+              onSaveAppPreferences={onSaveAppPreferences}
+              setError={setError}
+              setSshConfigRaw={setSshConfigRaw}
+              sshConfigRaw={sshConfigRaw}
+              onSaveSshConfig={onSaveSshConfig}
+              onExportResolvedOpensshConfig={onExportResolvedOpensshConfig}
+              sshDirInfo={sshDirInfo}
+              sshDirOverrideDraft={sshDirOverrideDraft}
+              setSshDirOverrideDraft={setSshDirOverrideDraft}
+              onApplySshDirOverride={onApplySshDirOverride}
+              onResetSshDirOverride={onResetSshDirOverride}
+            />
+          )}
+         
+          {activeAppSettingsTab === "store" && identityStoreSubTab === "hosts" && (
             <AppSettingsHostsTab
               hosts={hosts}
               selectedHostAlias={hostSettingsSelectedAlias}
@@ -446,32 +451,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               error={error}
             />
           )}
-          {activeAppSettingsTab === "connection" && connectionSubTab === "ssh" && (
-            <AppSettingsSshTab
-              appPreferences={appPreferences}
-              onSaveAppPreferences={onSaveAppPreferences}
-              setError={setError}
-              setSshConfigRaw={setSshConfigRaw}
-              sshConfigRaw={sshConfigRaw}
-              onSaveSshConfig={onSaveSshConfig}
-              onExportResolvedOpensshConfig={onExportResolvedOpensshConfig}
-              sshDirInfo={sshDirInfo}
-              sshDirOverrideDraft={sshDirOverrideDraft}
-              setSshDirOverrideDraft={setSshDirOverrideDraft}
-              onApplySshDirOverride={onApplySshDirOverride}
-              onResetSshDirOverride={onResetSshDirOverride}
-            />
-          )}
-          {activeAppSettingsTab === "connection" && connectionSubTab === "proxmux" && (
-            <AppSettingsProxmuxTab
-              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
-              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
-            />
-          )}
-          {activeAppSettingsTab === "connection" && connectionSubTab === "hetzner" && (
-            <AppSettingsHetznerTab />
-          )}
-          {activeAppSettingsTab === "store" && (
+          {activeAppSettingsTab === "store" && identityStoreSubTab !== "hosts" && (
             <AppSettingsStoreTabContent
               identityStoreSubTab={identityStoreSubTab}
               metadataStore={metadataStore}
@@ -526,6 +506,15 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               appPreferences={appPreferences}
               onSaveAppPreferences={onSaveAppPreferences}
             />
+          )}
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "proxmux" && (
+            <AppSettingsProxmuxTab
+              openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
+              setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
+            />
+          )}
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "hetzner" && (
+            <AppSettingsHetznerTab />
           )}
           {activeAppSettingsTab === "help" && helpAboutSubTab === "help" && (
             <AppSettingsHelpTab
