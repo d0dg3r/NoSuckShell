@@ -1,6 +1,7 @@
 import type React from "react";
 import type { MutableRefObject, Ref, PointerEvent as ReactPointerEvent } from "react";
 import type {
+  AppPreferences,
   HostBinding,
   HostConfig,
   HostMetadata,
@@ -24,6 +25,7 @@ import type {
   FrameModePreset,
   HelpAboutSubTab,
   IdentityStoreSubTab,
+  IntegrationsSubTab,
   InterfaceSubTab,
   LayoutMode,
   ListTonePreset,
@@ -64,6 +66,8 @@ export type AppSettingsPanelProps = {
   setHelpAboutSubTab: (tab: HelpAboutSubTab) => void;
   identityStoreSubTab: IdentityStoreSubTab;
   setIdentityStoreSubTab: (tab: IdentityStoreSubTab) => void;
+  integrationsSubTab: IntegrationsSubTab;
+  setIntegrationsSubTab: (tab: IntegrationsSubTab) => void;
   densityProfile: DensityProfile;
   setDensityProfile: (value: DensityProfile) => void;
   uiDensityOffset: number;
@@ -208,4 +212,6 @@ export type AppSettingsPanelProps = {
   /** When true, PROXMUX web consoles open inside a split pane instead of the system browser. */
   proxmuxOpenWebConsolesInPane: boolean;
   setProxmuxOpenWebConsolesInPane: (value: boolean) => void;
+  appPreferences: AppPreferences;
+  onSaveAppPreferences: (prefs: AppPreferences) => Promise<void>;
 };

@@ -5,13 +5,16 @@ use crate::ssh_config::HostConfig;
 use serde::{Deserialize, Serialize};
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// Cap in-memory upload size (remote file browser transfer).
 const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Max UTF-8 byte length for in-app text editor read/write (local + SFTP).
+pub const MAX_EDITOR_TEXT_BYTES: u64 = 5 * 1024 * 1024;
 
 const S_IFMT: u32 = 0o170_000;
 const S_IFDIR: u32 = 0o040_000;
@@ -81,10 +84,43 @@ fn remote_mode_and_owners(stat: &ssh2::FileStat, is_dir: bool) -> (String, Strin
     };
     let mode = mode_display_rwx(type_ch, perm_low);
     let octal = mode_octal_low(perm_low);
-    // Avoid UID/GID and owner strings in Tauri IPC payloads (CodeQL cleartext-logging).
-    let user = String::from("-");
-    let group = String::from("-");
+    let user = stat.uid.map_or_else(|| "-".into(), |u| u.to_string());
+    let group = stat.gid.map_or_else(|| "-".into(), |g| g.to_string());
     (mode, user, group, octal)
+}
+
+#[cfg(unix)]
+fn uid_to_name(uid: u32) -> String {
+    use std::ffi::CStr;
+    let mut buf = vec![0u8; 1024];
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::passwd = std::ptr::null_mut();
+    let rc = unsafe {
+        libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), &mut result)
+    };
+    if rc == 0 && !result.is_null() {
+        if let Ok(name) = unsafe { CStr::from_ptr(pwd.pw_name) }.to_str() {
+            return name.to_owned();
+        }
+    }
+    uid.to_string()
+}
+
+#[cfg(unix)]
+fn gid_to_name(gid: u32) -> String {
+    use std::ffi::CStr;
+    let mut buf = vec![0u8; 1024];
+    let mut grp: libc::group = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::group = std::ptr::null_mut();
+    let rc = unsafe {
+        libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), &mut result)
+    };
+    if rc == 0 && !result.is_null() {
+        if let Ok(name) = unsafe { CStr::from_ptr(grp.gr_name) }.to_str() {
+            return name.to_owned();
+        }
+    }
+    gid.to_string()
 }
 
 #[cfg(unix)]
@@ -96,9 +132,8 @@ fn local_mode_and_owners(meta: &std::fs::Metadata) -> (String, String, String, S
     let low = mode_bits & 0o777;
     let mode = mode_display_rwx(tc, low);
     let octal = mode_octal_low(low);
-    // Same as remote listing: avoid owner resolution in values returned over Tauri IPC (CodeQL).
-    let user = String::from("-");
-    let group = String::from("-");
+    let user = uid_to_name(meta.uid());
+    let group = gid_to_name(meta.gid());
     (mode, user, group, octal)
 }
 
@@ -249,7 +284,7 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
     let addr = addrs
         .next()
         .ok_or_else(|| format!("Could not resolve {host_name}"))?;
-    let tcp = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(30))
+    let tcp = TcpStream::connect_timeout(&addr, crate::app_prefs::connect_timeout_duration())
         .map_err(|e| format!("TCP connect to {addr_label}: {e}"))?;
     let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
     let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(60)));
@@ -286,6 +321,30 @@ pub struct SftpDirEntry {
 pub enum RemoteSshSpec {
     Saved { host: HostConfig },
     Quick { request: QuickSshSessionRequest },
+}
+
+/// How aggressively to remove a file or directory tree (used by file-pane recovery flows).
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeleteEntryMode {
+    Strict,
+    BestEffort,
+    ChmodOwnerWritableThenStrict,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePathFailure {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTreeResult {
+    pub completed_fully: bool,
+    pub failures: Vec<DeletePathFailure>,
+    pub had_permission_denied: bool,
 }
 
 pub(crate) fn resolve_remote_spec(spec: RemoteSshSpec) -> Result<HostConfig, String> {
@@ -535,9 +594,9 @@ pub fn create_local_dir(parent_path_key: String, dir_name: String) -> Result<(),
     Ok(())
 }
 
-pub fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), String> {
-    validate_entry_name(&name)?;
-    let dir = resolve_local_browser_path(parent_path_key)?;
+fn resolve_local_delete_target(parent_path_key: &str, name: &str) -> Result<PathBuf, String> {
+    validate_entry_name(name)?;
+    let dir = resolve_local_browser_path(parent_path_key.to_string())?;
     let target = dir.join(name.trim());
     let target = target
         .canonicalize()
@@ -545,15 +604,186 @@ pub fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), S
     if !target.starts_with(&dir) {
         return Err("Invalid path.".to_string());
     }
-    let meta = fs::metadata(&target).map_err(|e| format!("Metadata: {e}"))?;
-    if meta.is_dir() {
-        fs::remove_dir(&target).map_err(|e| {
-            format!("Remove directory (folder must be empty): {e}")
-        })?;
+    Ok(target)
+}
+
+fn local_io_delete_err(e: io::Error, target: &Path) -> String {
+    let p = target.to_string_lossy();
+    if e.kind() == io::ErrorKind::PermissionDenied {
+        format!(
+            "Permission denied while deleting '{p}'. Use “Delete all I can” or “Make writable and retry” when offered."
+        )
     } else {
-        fs::remove_file(&target).map_err(|e| format!("Remove file: {e}"))?;
+        format!("Delete '{p}': {e}")
+    }
+}
+
+fn delete_local_at_path_strict(target: &Path) -> Result<(), String> {
+    let meta = fs::symlink_metadata(target).map_err(|e| format!("Metadata: {e}"))?;
+    if meta.is_dir() {
+        fs::remove_dir_all(target)
+            .map_err(|e| local_io_delete_err(e, target))?;
+    } else {
+        fs::remove_file(target)
+            .map_err(|e| local_io_delete_err(e, target))?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn local_chmod_tree_owner_rw(root: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fn chmod_path(path: &Path, meta: &fs::Metadata) -> io::Result<()> {
+        let mut perms = meta.permissions();
+        let mode = perms.mode();
+        let new_mode = if meta.is_dir() {
+            mode | 0o700
+        } else {
+            mode | 0o600
+        };
+        perms.set_mode(new_mode);
+        fs::set_permissions(path, perms)
+    }
+    fn walk(path: &Path) -> io::Result<()> {
+        let meta = fs::symlink_metadata(path)?;
+        if meta.file_type().is_symlink() {
+            return Ok(());
+        }
+        if meta.is_dir() {
+            for entry in fs::read_dir(path)? {
+                let entry = entry?;
+                walk(&entry.path())?;
+            }
+        }
+        let meta = fs::symlink_metadata(path)?;
+        chmod_path(path, &meta)
+    }
+    walk(root)
+}
+
+fn delete_local_tree_best_effort(target: &Path) -> DeleteTreeResult {
+    let mut failures: Vec<DeletePathFailure> = Vec::new();
+    let mut had_permission_denied = false;
+    remove_local_best_effort(target, &mut failures, &mut had_permission_denied);
+    DeleteTreeResult {
+        completed_fully: failures.is_empty(),
+        failures,
+        had_permission_denied,
+    }
+}
+
+fn remove_local_best_effort(path: &Path, failures: &mut Vec<DeletePathFailure>, had_perm: &mut bool) {
+    let path_str = path.to_string_lossy().into_owned();
+    let meta = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                *had_perm = true;
+            }
+            failures.push(DeletePathFailure {
+                path: path_str,
+                message: e.to_string(),
+            });
+            return;
+        }
+    };
+    if meta.file_type().is_symlink() {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) => {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: e.to_string(),
+                });
+            }
+        }
+        return;
+    }
+    if meta.is_dir() {
+        let read_dir = match fs::read_dir(path) {
+            Ok(r) => r,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: e.to_string(),
+                });
+                return;
+            }
+        };
+        for entry in read_dir.flatten() {
+            remove_local_best_effort(&entry.path(), failures, had_perm);
+        }
+        match fs::remove_dir(path) {
+            Ok(()) => {}
+            Err(e) => {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: e.to_string(),
+                });
+            }
+        }
+        return;
+    }
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) => {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                *had_perm = true;
+            }
+            failures.push(DeletePathFailure {
+                path: path_str,
+                message: e.to_string(),
+            });
+        }
+    }
+}
+
+pub fn delete_local_entry_with_mode(
+    parent_path_key: String,
+    name: String,
+    mode: DeleteEntryMode,
+) -> Result<DeleteTreeResult, String> {
+    let target = resolve_local_delete_target(&parent_path_key, &name)?;
+    match mode {
+        DeleteEntryMode::Strict => {
+            delete_local_at_path_strict(&target)?;
+            Ok(DeleteTreeResult {
+                completed_fully: true,
+                failures: vec![],
+                had_permission_denied: false,
+            })
+        }
+        DeleteEntryMode::BestEffort => Ok(delete_local_tree_best_effort(&target)),
+        DeleteEntryMode::ChmodOwnerWritableThenStrict => {
+            #[cfg(unix)]
+            {
+                local_chmod_tree_owner_rw(&target).map_err(|e| format!("Could not adjust permissions: {e}"))?;
+                delete_local_at_path_strict(&target)?;
+                Ok(DeleteTreeResult {
+                    completed_fully: true,
+                    failures: vec![],
+                    had_permission_denied: false,
+                })
+            }
+            #[cfg(not(unix))]
+            {
+                Err("Adjusting Unix permissions for delete recovery is not supported on this platform.".to_string())
+            }
+        }
+    }
+}
+
+pub fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), String> {
+    delete_local_entry_with_mode(parent_path_key, name, DeleteEntryMode::Strict).map(|_| ())
 }
 
 pub fn rename_local_entry(parent_path_key: String, old_name: String, new_name: String) -> Result<(), String> {
@@ -618,6 +848,280 @@ pub fn open_local_entry_in_os(parent_path_key: String, name: String) -> Result<(
     Ok(())
 }
 
+fn check_editor_text_content(content: &str) -> Result<(), String> {
+    let n = content.len() as u64;
+    if n > MAX_EDITOR_TEXT_BYTES {
+        return Err(format!(
+            "Content is larger than {} MiB; use an external editor for this file.",
+            MAX_EDITOR_TEXT_BYTES / 1024 / 1024
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_local_file_under_parent(parent_path_key: &str, name: &str) -> Result<PathBuf, String> {
+    validate_entry_name(name)?;
+    let dir = resolve_local_browser_path(parent_path_key.to_string())?;
+    if !dir.is_dir() {
+        return Err("Parent is not a directory.".to_string());
+    }
+    let target = dir.join(name.trim());
+    let target = target
+        .canonicalize()
+        .map_err(|e| format!("Path: {e}"))?;
+    if !target.starts_with(&dir) {
+        return Err("Invalid path.".to_string());
+    }
+    Ok(target)
+}
+
+/// Reads a regular file as UTF-8 text for the in-app editor. Rejects directories, oversize files, and invalid UTF-8.
+pub fn read_local_text_file(parent_path_key: String, name: String) -> Result<String, String> {
+    let target = resolve_local_file_under_parent(&parent_path_key, &name)?;
+    let meta = fs::metadata(&target).map_err(|e| format!("Metadata: {e}"))?;
+    if !meta.is_file() {
+        return Err("Not a regular file.".to_string());
+    }
+    let len = meta.len();
+    if len > MAX_EDITOR_TEXT_BYTES {
+        return Err(format!(
+            "File is larger than {} MiB; open it in an external editor.",
+            MAX_EDITOR_TEXT_BYTES / 1024 / 1024
+        ));
+    }
+    let cap = len as usize;
+    let mut buf = Vec::with_capacity(cap.max(4096));
+    let mut f = fs::File::open(&target).map_err(|e| format!("Open file: {e}"))?;
+    f.read_to_end(&mut buf).map_err(|e| format!("Read file: {e}"))?;
+    if buf.len() as u64 > MAX_EDITOR_TEXT_BYTES {
+        return Err(format!(
+            "File is larger than {} MiB; open it in an external editor.",
+            MAX_EDITOR_TEXT_BYTES / 1024 / 1024
+        ));
+    }
+    String::from_utf8(buf).map_err(|_| "File is not valid UTF-8 text.".to_string())
+}
+
+/// Overwrites an existing regular file with UTF-8 text.
+pub fn write_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+    check_editor_text_content(&content)?;
+    let target = resolve_local_file_under_parent(&parent_path_key, &name)?;
+    let meta = fs::metadata(&target).map_err(|e| format!("Metadata: {e}"))?;
+    if !meta.is_file() {
+        return Err("Not a regular file.".to_string());
+    }
+    fs::write(&target, content.as_bytes()).map_err(|e| format!("Write file: {e}"))?;
+    Ok(())
+}
+
+/// Creates a new regular file with UTF-8 text (fails if the name already exists).
+pub fn create_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+    validate_entry_name(&name)?;
+    check_editor_text_content(&content)?;
+    let dir = resolve_local_browser_path(parent_path_key)?;
+    if !dir.is_dir() {
+        return Err("Parent is not a directory.".to_string());
+    }
+    let path = dir.join(name.trim());
+    if path.exists() {
+        return Err("A file or folder with that name already exists.".to_string());
+    }
+    fs::write(&path, content.as_bytes()).map_err(|e| format!("Create file: {e}"))?;
+    Ok(())
+}
+
+fn sftp_error_suggests_permission_denied(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("permission denied")
+        || m.contains("permission_denied")
+        || m.contains("eacces")
+}
+
+/// Deletes a remote file, symlink, or directory tree (`path` is absolute on the server).
+fn sftp_remove_remote_tree_strict(sftp: &ssh2::Sftp, path: &Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy();
+    let stat = sftp
+        .lstat(path)
+        .map_err(|e| format!("Stat remote path '{path_str}': {e}"))?;
+
+    if stat.file_type().is_symlink() {
+        sftp
+            .unlink(path)
+            .map_err(|e| format!("Remove remote symlink '{path_str}': {e}"))?;
+        return Ok(());
+    }
+    if stat.is_dir() {
+        let rows = sftp
+            .readdir(path)
+            .map_err(|e| format!("Read remote directory '{path_str}': {e}"))?;
+        for (full_path, _) in rows {
+            let name = full_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
+            sftp_remove_remote_tree_strict(sftp, &full_path)?;
+        }
+        sftp
+            .rmdir(path)
+            .map_err(|e| format!("Remove remote directory '{path_str}': {e}"))?;
+        return Ok(());
+    }
+
+    sftp
+        .unlink(path)
+        .map_err(|e| format!("Remove remote file '{path_str}': {e}"))?;
+    Ok(())
+}
+
+fn sftp_remove_remote_tree_best_effort(sftp: &ssh2::Sftp, path: &Path) -> DeleteTreeResult {
+    let mut failures = Vec::new();
+    let mut had_permission_denied = false;
+    sftp_remove_remote_tree_best_rec(sftp, path, &mut failures, &mut had_permission_denied);
+    DeleteTreeResult {
+        completed_fully: failures.is_empty(),
+        failures,
+        had_permission_denied,
+    }
+}
+
+fn sftp_remove_remote_tree_best_rec(
+    sftp: &ssh2::Sftp,
+    path: &Path,
+    failures: &mut Vec<DeletePathFailure>,
+    had_perm: &mut bool,
+) {
+    let path_str = path.to_string_lossy().into_owned();
+    let stat = match sftp.lstat(path) {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("Stat remote path '{path_str}': {e}");
+            if sftp_error_suggests_permission_denied(&msg) {
+                *had_perm = true;
+            }
+            failures.push(DeletePathFailure {
+                path: path_str,
+                message: msg,
+            });
+            return;
+        }
+    };
+
+    if stat.file_type().is_symlink() {
+        match sftp.unlink(path) {
+            Ok(()) => {}
+            Err(e) => {
+                let msg = format!("Remove remote symlink '{path_str}': {e}");
+                if sftp_error_suggests_permission_denied(&msg) {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: msg,
+                });
+            }
+        }
+        return;
+    }
+    if stat.is_dir() {
+        let rows = match sftp.readdir(path) {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("Read remote directory '{path_str}': {e}");
+                if sftp_error_suggests_permission_denied(&msg) {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: msg,
+                });
+                return;
+            }
+        };
+        for (full_path, _) in rows {
+            let name = full_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
+            sftp_remove_remote_tree_best_rec(sftp, &full_path, failures, had_perm);
+        }
+        match sftp.rmdir(path) {
+            Ok(()) => {}
+            Err(e) => {
+                let msg = format!("Remove remote directory '{path_str}': {e}");
+                if sftp_error_suggests_permission_denied(&msg) {
+                    *had_perm = true;
+                }
+                failures.push(DeletePathFailure {
+                    path: path_str,
+                    message: msg,
+                });
+            }
+        }
+        return;
+    }
+
+    match sftp.unlink(path) {
+        Ok(()) => {}
+        Err(e) => {
+            let msg = format!("Remove remote file '{path_str}': {e}");
+            if sftp_error_suggests_permission_denied(&msg) {
+                *had_perm = true;
+            }
+            failures.push(DeletePathFailure {
+                path: path_str,
+                message: msg,
+            });
+        }
+    }
+}
+
+fn sftp_chmod_remote_tree(sftp: &ssh2::Sftp, path: &Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy();
+    let stat = sftp
+        .lstat(path)
+        .map_err(|e| format!("Stat remote path '{path_str}': {e}"))?;
+
+    if stat.file_type().is_symlink() {
+        return Ok(());
+    }
+
+    if stat.is_dir() {
+        let rows = sftp
+            .readdir(path)
+            .map_err(|e| format!("Read remote directory '{path_str}': {e}"))?;
+        for (full_path, _) in rows {
+            let name = full_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
+            sftp_chmod_remote_tree(sftp, &full_path)?;
+        }
+    }
+
+    let mode = if stat.is_dir() { 0o700_u32 } else { 0o600_u32 };
+    let st = ssh2::FileStat {
+        size: None,
+        uid: None,
+        gid: None,
+        perm: Some(mode),
+        mtime: None,
+        atime: None,
+    };
+    sftp
+        .setstat(path, st)
+        .map_err(|e| format!("chmod remote '{path_str}': {e}"))?;
+    Ok(())
+}
+
 pub fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: String) -> Result<(), String> {
     let remote_path = remote_child_path(&parent_path, &dir_name)?;
     let host = resolve_remote_spec(spec)?;
@@ -630,25 +1134,44 @@ pub fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: Strin
     Ok(())
 }
 
-pub fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+pub fn sftp_delete_entry_with_mode(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    mode: DeleteEntryMode,
+) -> Result<DeleteTreeResult, String> {
     let remote_path = remote_child_path(&parent_path, &name)?;
     let host = resolve_remote_spec(spec)?;
     let sess = connect_session(&host)?;
     let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
     let path_ref = Path::new(&remote_path);
-    let stat = sftp
-        .stat(path_ref)
-        .map_err(|e| format!("Stat remote path: {e}"))?;
-    if stat.is_dir() {
-        sftp
-            .rmdir(path_ref)
-            .map_err(|e| format!("Remove remote directory (must be empty): {e}"))?;
-    } else {
-        sftp
-            .unlink(path_ref)
-            .map_err(|e| format!("Remove remote file: {e}"))?;
+
+    match mode {
+        DeleteEntryMode::Strict => {
+            sftp_remove_remote_tree_strict(&sftp, path_ref)?;
+            Ok(DeleteTreeResult {
+                completed_fully: true,
+                failures: vec![],
+                had_permission_denied: false,
+            })
+        }
+        DeleteEntryMode::BestEffort => Ok(sftp_remove_remote_tree_best_effort(&sftp, path_ref)),
+        DeleteEntryMode::ChmodOwnerWritableThenStrict => {
+            sftp_chmod_remote_tree(&sftp, path_ref)?;
+            sftp_remove_remote_tree_strict(&sftp, path_ref).map_err(|e| {
+                format!("{e} Remote chmod (owner read/write) was applied first; delete still failed.")
+            })?;
+            Ok(DeleteTreeResult {
+                completed_fully: true,
+                failures: vec![],
+                had_permission_denied: false,
+            })
+        }
     }
-    Ok(())
+}
+
+pub fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+    sftp_delete_entry_with_mode(spec, parent_path, name, DeleteEntryMode::Strict).map(|_| ())
 }
 
 pub fn sftp_rename_entry(
@@ -669,6 +1192,113 @@ pub fn sftp_rename_entry(
             Some(RenameFlags::empty()),
         )
         .map_err(|e| format!("Rename on server: {e}"))?;
+    Ok(())
+}
+
+/// Reads a remote regular file as UTF-8 text for the in-app editor.
+pub fn sftp_read_text_file(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<String, String> {
+    let remote_path = remote_child_path(&parent_path, &name)?;
+    let host = resolve_remote_spec(spec)?;
+    let sess = connect_session(&host)?;
+    let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
+    let remote_ref = Path::new(&remote_path);
+    let mut remote_file = sftp
+        .open(remote_ref)
+        .map_err(|e| format!("Open remote file: {e}"))?;
+    let stat = remote_file
+        .stat()
+        .map_err(|e| format!("Stat remote file: {e}"))?;
+    if stat.is_dir() {
+        return Err("Cannot edit a directory.".to_string());
+    }
+    let size = stat.size.unwrap_or(0);
+    if size > MAX_EDITOR_TEXT_BYTES {
+        return Err(format!(
+            "File is larger than {} MiB; open it in an external editor.",
+            MAX_EDITOR_TEXT_BYTES / 1024 / 1024
+        ));
+    }
+    let cap = size as usize;
+    let mut buf = Vec::with_capacity(cap.max(4096));
+    let mut chunk = [0u8; 256 * 1024];
+    loop {
+        let n = remote_file
+            .read(&mut chunk)
+            .map_err(|e| format!("Read remote file: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len() as u64 + n as u64 > MAX_EDITOR_TEXT_BYTES {
+            return Err(format!(
+                "File is larger than {} MiB; open it in an external editor.",
+                MAX_EDITOR_TEXT_BYTES / 1024 / 1024
+            ));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    String::from_utf8(buf).map_err(|_| "File is not valid UTF-8 text.".to_string())
+}
+
+/// Creates a new remote file with UTF-8 text (fails if the path already exists).
+pub fn sftp_create_text_file(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
+    check_editor_text_content(&content)?;
+    let remote_path = remote_child_path(&parent_path, &name)?;
+    let host = resolve_remote_spec(spec)?;
+    let sess = connect_session(&host)?;
+    let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
+    let remote_ref = Path::new(&remote_path);
+    if sftp.lstat(remote_ref).is_ok() {
+        return Err("A file or folder with that name already exists.".to_string());
+    }
+    let mut remote_file = sftp
+        .open_mode(
+            remote_ref,
+            OpenFlags::WRITE | OpenFlags::EXCLUSIVE,
+            0o644,
+            OpenType::File,
+        )
+        .map_err(|e| format!("Create remote file: {e}"))?;
+    remote_file
+        .write_all(content.as_bytes())
+        .map_err(|e| format!("Write remote file: {e}"))?;
+    Ok(())
+}
+
+/// Overwrites an existing remote regular file with UTF-8 text.
+pub fn sftp_write_text_file(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
+    check_editor_text_content(&content)?;
+    let remote_path = remote_child_path(&parent_path, &name)?;
+    let host = resolve_remote_spec(spec)?;
+    let sess = connect_session(&host)?;
+    let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
+    let remote_ref = Path::new(&remote_path);
+    let stat = sftp
+        .lstat(remote_ref)
+        .map_err(|e| format!("Stat remote file: {e}"))?;
+    if stat.is_dir() {
+        return Err("Cannot overwrite a directory.".to_string());
+    }
+    let mut remote_file = sftp
+        .open_mode(
+            remote_ref,
+            OpenFlags::WRITE | OpenFlags::TRUNCATE,
+            0o644,
+            OpenType::File,
+        )
+        .map_err(|e| format!("Open remote file for write: {e}"))?;
+    remote_file
+        .write_all(content.as_bytes())
+        .map_err(|e| format!("Write remote file: {e}"))?;
     Ok(())
 }
 

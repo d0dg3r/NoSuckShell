@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   formatFileSize,
-  formatLocalPathDisplay,
   isLocalUpDisabled,
   joinLocalPath,
   localFolderTitleShort,
   localParentDir,
   localParentOfHome,
+  localPathBreadcrumbSegments,
   localPathResolvedForTitle,
 } from "../features/file-pane-paths";
 import {
@@ -20,27 +21,47 @@ import {
   importFilesFromDialogToLocal,
   importFolderFromDialogToLocal,
 } from "../features/file-pane-upload-from-dialog";
+import { monacoLanguageFromFileName } from "../features/file-pane-editor-language";
 import { runFilePaneTransfer, type FileDropTarget } from "../features/file-pane-transfer";
 import { copyFileToTransferClipboard, getFileTransferClipboard } from "../features/file-transfer-clipboard";
 import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
+import { InlineSpinner } from "./InlineSpinner";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
 import {
   createLocalDir,
+  createLocalTextFile,
   deleteLocalEntry,
+  deleteLocalEntryWithMode,
+  type DeleteEntryMode,
+  type DeleteTreeResult,
   getLocalHomeCanonicalPath,
   listLocalDir,
   openLocalEntryInOs,
+  readLocalTextFile,
   renameLocalEntry,
+  writeLocalTextFile,
 } from "../tauri-api";
 import type { LocalDirEntry } from "../types";
 import type { FileExportArchiveFormat } from "./settings/app-settings-types";
 import type { FilePaneContextMenuAction } from "./FilePaneContextMenu";
 import { FilePaneContextMenu } from "./FilePaneContextMenu";
-import { FilePaneDoubleDeleteDialog, FilePaneTextPrompt } from "./FilePaneDialogs";
+import { FilePaneConfirmDialog, FilePaneDoubleDeleteDialog, FilePaneTextPrompt } from "./FilePaneDialogs";
 import { FilePaneTableHead } from "./FilePaneTableHead";
 import { FilePaneToolbar } from "./FilePaneToolbar";
+import { FilePanePathBreadcrumbs } from "./FilePanePathBreadcrumbs";
+
+const FilePaneTextEditor = lazy(async () => {
+  const m = await import("./FilePaneTextEditor");
+  return { default: m.FilePaneTextEditor };
+});
+
+type TextEditorSession = {
+  fileName: string;
+  initialContent: string;
+  isNewFile: boolean;
+};
 
 type Props = {
   paneIndex: number;
@@ -54,6 +75,21 @@ type Props = {
   onF5Copy?: (sourcePath: string, selectedNames: string[]) => void;
   /** Tab in an NSS-Commander workspace moves focus to the other file pane. */
   onTabSwitchPane?: () => void;
+  /** NSS-Commander: icons portaled into pane title row; full path in this toolbar row. */
+  nssCommanderSwapFilePaneToolbarWithPaneLabel?: boolean;
+  getNssCommanderFilePaneToolbarSlot?: (paneIndex: number) => HTMLElement | null;
+  /** Report selection to the host (vertical ops bar). */
+  onSelectionChange?: (paneIndex: number, selectedNames: Set<string>) => void;
+  /** Incrementing key: all file panes reload when it changes. */
+  nssCommanderReloadAllKey?: number;
+  /** One-shot op from the vertical ops bar for this pane. */
+  nssCommanderPaneOpRequest?: {
+    requestId: number;
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    names: string[];
+  } | null;
+  /** NSS-Commander: distance from split-pane top to table header row (for center ops strip alignment). */
+  onFilePaneTableHeadOffsetInSplitPane?: (paneIndex: number, offsetPx: number | null) => void;
 };
 
 function SaveRowIcon() {
@@ -77,8 +113,15 @@ export function LocalFilePane({
   semanticFileNameColors,
   onF5Copy,
   onTabSwitchPane,
+  nssCommanderSwapFilePaneToolbarWithPaneLabel = false,
+  getNssCommanderFilePaneToolbarSlot,
+  onSelectionChange,
+  nssCommanderReloadAllKey = 0,
+  nssCommanderPaneOpRequest,
+  onFilePaneTableHeadOffsetInSplitPane,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const lastNssPaneOpRequestIdRef = useRef(0);
   const [path, setPath] = useState("");
   const [homeCanon, setHomeCanon] = useState<string | null>(null);
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
@@ -91,13 +134,18 @@ export function LocalFilePane({
   const [lastRangeIndex, setLastRangeIndex] = useState<number | null>(null);
   const [activeName, setActiveName] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const [promptKind, setPromptKind] = useState<null | "mkdir" | "rename">(null);
+  const [promptKind, setPromptKind] = useState<null | "mkdir" | "rename" | "newFile">(null);
   const [deleteFlow, setDeleteFlow] = useState<null | { name: string; isDir: boolean; step: 1 | 2 }>(null);
+  const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
+  const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
+  const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
 
   useEffect(() => {
     setSelectedNames(new Set());
     setActiveName(null);
     setLastRangeIndex(null);
+    setBulkDeletePendingNames(null);
+    setDeleteRecovery(null);
   }, [path]);
 
   useEffect(() => {
@@ -109,6 +157,10 @@ export function LocalFilePane({
   useEffect(() => {
     onPathChange(path);
   }, [path, onPathChange]);
+
+  useEffect(() => {
+    onSelectionChange?.(paneIndex, selectedNames);
+  }, [onSelectionChange, paneIndex, selectedNames]);
 
   useEffect(() => {
     const full = localPathResolvedForTitle(homeCanon, path);
@@ -129,9 +181,61 @@ export function LocalFilePane({
     }
   }, [path]);
 
+  const openEditorForExistingFile = useCallback(
+    async (name: string) => {
+      const row = entries.find((e) => e.name === name);
+      if (!row || row.isDir) {
+        return;
+      }
+      setCtxMenu(null);
+      setError(null);
+      try {
+        const text = await readLocalTextFile(path, name);
+        setTextEditorSession({ fileName: name, initialContent: text, isNewFile: false });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [entries, path],
+  );
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  const isPermissionDeleteError = (error: unknown): boolean => {
+    const msg = String(error).toLowerCase();
+    return msg.includes("permission denied") || msg.includes("eacces") || msg.includes("operation not permitted");
+  };
+
+  const summarizeDeleteModeFailures = (outcomes: DeleteTreeResult[]): string | null => {
+    const failures = outcomes.flatMap((o) => o.failures);
+    if (failures.length === 0) {
+      return null;
+    }
+    const preview = failures
+      .slice(0, 3)
+      .map((f) => `${f.path}: ${f.message}`)
+      .join(" | ");
+    const extra = failures.length > 3 ? ` (+${failures.length - 3} more)` : "";
+    return `Some entries could not be deleted: ${preview}${extra}`;
+  };
+
+  const runDeleteModeAcrossNames = async (
+    names: string[],
+    mode: DeleteEntryMode,
+  ): Promise<{ ok: boolean; message?: string }> => {
+    const outcomes: DeleteTreeResult[] = [];
+    for (const name of names) {
+      try {
+        outcomes.push(await deleteLocalEntryWithMode(path, name, mode));
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    }
+    const summary = summarizeDeleteModeFailures(outcomes);
+    return summary ? { ok: false, message: summary } : { ok: true };
+  };
 
   useSplitPaneFilePaneLabelInset(rootRef, path, loading, entries.length);
 
@@ -146,6 +250,8 @@ export function LocalFilePane({
         }
         return r || o || "—";
       }),
+      user: entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
+      group: entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
       size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
     }),
     [entries],
@@ -160,8 +266,55 @@ export function LocalFilePane({
     [entries],
   );
 
-  const { tableWrapRef, widths, userColWidth, groupColWidth, tailCols, onGripPointerDown, onGripDoubleClick, applyOptimalColumnWidths } =
-    useFilePaneTableResize("local", 300, autoFitSamples, userColumnSamples, groupColumnSamples);
+  const { tableWrapRef, widths, tailCols, onGripPointerDown, onGripDoubleClick, applyOptimalColumnWidths } =
+    useFilePaneTableResize("local", 140, autoFitSamples, userColumnSamples, groupColumnSamples);
+
+  useLayoutEffect(() => {
+    if (nssCommanderSwapFilePaneToolbarWithPaneLabel !== true || !onFilePaneTableHeadOffsetInSplitPane) {
+      return;
+    }
+    const measure = () => {
+      const paneRoot = rootRef.current?.closest("[data-pane-index]") as HTMLElement | null;
+      const thead = tableWrapRef.current?.querySelector("thead");
+      if (!paneRoot || !thead) {
+        onFilePaneTableHeadOffsetInSplitPane(paneIndex, null);
+        return;
+      }
+      const paneRect = paneRoot.getBoundingClientRect();
+      const thRect = thead.getBoundingClientRect();
+      onFilePaneTableHeadOffsetInSplitPane(paneIndex, Math.round(thRect.top - paneRect.top));
+    };
+    measure();
+    const ro = new ResizeObserver(() => {
+      measure();
+    });
+    if (rootRef.current) {
+      ro.observe(rootRef.current);
+    }
+    if (tableWrapRef.current) {
+      ro.observe(tableWrapRef.current);
+    }
+    const paneRoot = rootRef.current?.closest("[data-pane-index]");
+    if (paneRoot) {
+      ro.observe(paneRoot);
+    }
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro.disconnect();
+      onFilePaneTableHeadOffsetInSplitPane(paneIndex, null);
+    };
+  }, [
+    nssCommanderSwapFilePaneToolbarWithPaneLabel,
+    onFilePaneTableHeadOffsetInSplitPane,
+    paneIndex,
+    loading,
+    error,
+    lastOk,
+    transferBusy,
+    entries.length,
+    path,
+  ]);
 
   const openDir = (name: string) => {
     setPath((p) => joinLocalPath(p, name));
@@ -182,36 +335,95 @@ export function LocalFilePane({
     setPath("/");
   };
 
-  const label = formatLocalPathDisplay(homeCanon, path);
   const titlePath = localPathResolvedForTitle(homeCanon, path);
   const upDisabled = isLocalUpDisabled(path, homeCanon);
 
-  const exportNames = async (names: string[]) => {
-    if (names.length === 0) {
-      return;
-    }
-    setExportBusy(names.length === 1 ? names[0]! : "__multi__");
-    setError(null);
-    setLastOk(null);
-    try {
-      const dest = await getExportDestPath();
-      if (dest === null) {
+  const exportNames = useCallback(
+    async (names: string[]) => {
+      if (names.length === 0) {
         return;
       }
-      const saved = await runLocalFilePaneExport({
-        parentPathKey: path,
-        names,
-        entries,
-        destPathKeyOrAbs: dest,
-        archiveFormat,
-      });
-      setLastOk(`Saved to ${saved}`);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setExportBusy(null);
+      setExportBusy(names.length === 1 ? names[0]! : "__multi__");
+      setError(null);
+      setLastOk(null);
+      try {
+        const dest = await getExportDestPath();
+        if (dest === null) {
+          return;
+        }
+        const saved = await runLocalFilePaneExport({
+          parentPathKey: path,
+          names,
+          entries,
+          destPathKeyOrAbs: dest,
+          archiveFormat,
+        });
+        setLastOk(`Saved to ${saved}`);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setExportBusy(null);
+      }
+    },
+    [archiveFormat, entries, getExportDestPath, path],
+  );
+
+  useEffect(() => {
+    if (nssCommanderReloadAllKey > 0) {
+      void load();
     }
-  };
+  }, [nssCommanderReloadAllKey, load]);
+
+  useEffect(() => {
+    const req = nssCommanderPaneOpRequest;
+    if (!req || (req.op !== "mkdir" && req.op !== "newTextFile" && req.names.length === 0)) {
+      return;
+    }
+    if (req.requestId === lastNssPaneOpRequestIdRef.current) {
+      return;
+    }
+    lastNssPaneOpRequestIdRef.current = req.requestId;
+    if (req.op === "mkdir") {
+      setPromptKind("mkdir");
+      return;
+    }
+    if (req.op === "newTextFile") {
+      setPromptKind("newFile");
+      return;
+    }
+    if (req.op === "editTextFile") {
+      if (req.names.length !== 1) {
+        return;
+      }
+      void openEditorForExistingFile(req.names[0]!);
+      return;
+    }
+    if (req.op === "rename") {
+      if (req.names.length !== 1) {
+        return;
+      }
+      const name = req.names[0]!;
+      setActiveName(name);
+      setSelectedNames(new Set([name]));
+      setPromptKind("rename");
+      return;
+    }
+    if (req.op === "delete") {
+      if (req.names.length === 1) {
+        const name = req.names[0]!;
+        const row = entries.find((e) => e.name === name);
+        if (row) {
+          setDeleteFlow({ name, isDir: row.isDir, step: 1 });
+        }
+        return;
+      }
+      setBulkDeletePendingNames(req.names);
+      return;
+    }
+    if (req.op === "archive") {
+      void exportNames(req.names);
+    }
+  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, openEditorForExistingFile]);
 
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
@@ -358,6 +570,11 @@ export function LocalFilePane({
     setPromptKind("mkdir");
   };
 
+  const startNewFile = () => {
+    setCtxMenu(null);
+    setPromptKind("newFile");
+  };
+
   const startRename = () => {
     if (!activeName) {
       return;
@@ -392,6 +609,9 @@ export function LocalFilePane({
     switch (action) {
       case "newFolder":
         startNewFolder();
+        break;
+      case "newFile":
+        startNewFile();
         break;
       case "refresh":
         void load();
@@ -438,9 +658,38 @@ export function LocalFilePane({
   };
 
   const selectedRow = activeName ? entries.find((e) => e.name === activeName) : undefined;
+  const soleSelectedFile =
+    selectedNames.size === 1 ? entries.find((e) => selectedNames.has(e.name) && !e.isDir) : undefined;
+  const editFileDisabled = !soleSelectedFile;
   const exportSelectedOrder = () =>
     entries.filter((e) => selectedNames.has(e.name)).map((e) => e.name);
   const exportSelectionDisabled = selectedNames.size === 0 || exportBusy !== null;
+
+  const nssCmd = nssCommanderSwapFilePaneToolbarWithPaneLabel === true;
+  const nssToolbarSlot = nssCmd ? getNssCommanderFilePaneToolbarSlot?.(paneIndex) ?? null : null;
+
+  const filePaneToolbar = (
+    <FilePaneToolbar
+      onUp={goUp}
+      upDisabled={upDisabled}
+      onRefresh={() => void load()}
+      onTerminal={onBack}
+      onRoot={goRoot}
+      onNewFolder={startNewFolder}
+      onNewFile={startNewFile}
+      onEditFile={() => soleSelectedFile && void openEditorForExistingFile(soleSelectedFile.name)}
+      editFileDisabled={editFileDisabled}
+      onDelete={startDelete}
+      deleteDisabled={!activeName}
+      onUploadFiles={() => void handleUploadFiles()}
+      uploadFilesDisabled={uploadTransferDisabled}
+      onUploadFolder={() => void handleUploadFolder()}
+      uploadFolderDisabled={uploadTransferDisabled}
+      onExportSelection={() => void exportNames(exportSelectedOrder())}
+      exportSelectionDisabled={exportSelectionDisabled}
+      showBackToTerminalButton={!nssCmd}
+    />
+  );
 
   return (
     <div
@@ -462,25 +711,29 @@ export function LocalFilePane({
       onDrop={(e) => void handleDrop(e)}
     >
       <div className="file-pane-toolbar">
-        <FilePaneToolbar
-          onUp={goUp}
-          upDisabled={upDisabled}
-          onRefresh={() => void load()}
-          onTerminal={onBack}
-          onRoot={goRoot}
-          onNewFolder={startNewFolder}
-          onDelete={startDelete}
-          deleteDisabled={!activeName}
-          onUploadFiles={() => void handleUploadFiles()}
-          uploadFilesDisabled={uploadTransferDisabled}
-          onUploadFolder={() => void handleUploadFolder()}
-          uploadFolderDisabled={uploadTransferDisabled}
-          onExportSelection={() => void exportNames(exportSelectedOrder())}
-          exportSelectionDisabled={exportSelectionDisabled}
-        />
-        <span className="file-pane-path" title={titlePath}>
-          {label}
-        </span>
+        {nssCmd && nssToolbarSlot ? createPortal(filePaneToolbar, nssToolbarSlot) : null}
+        <div className="file-pane-toolbar-main">
+          {nssCmd ? (
+            <>
+              {nssCmd && !nssToolbarSlot ? filePaneToolbar : null}
+              <FilePanePathBreadcrumbs
+                className="file-pane-path--nss-commander-full"
+                fullTitle={titlePath}
+                segments={localPathBreadcrumbSegments(path)}
+                onNavigate={setPath}
+              />
+            </>
+          ) : (
+            <>
+              {filePaneToolbar}
+              <FilePanePathBreadcrumbs
+                fullTitle={titlePath}
+                segments={localPathBreadcrumbSegments(path)}
+                onNavigate={setPath}
+              />
+            </>
+          )}
+        </div>
         {selectedNames.size > 0 ? (
           <span className="file-pane-selection-count" aria-live="polite">
             {selectedNames.size} selected
@@ -499,7 +752,10 @@ export function LocalFilePane({
         </div>
       ) : null}
       {loading ? (
-        <div className="file-pane-loading">Loading…</div>
+        <div className="file-pane-loading">
+          <InlineSpinner label="Loading directory" />
+          <span>Loading…</span>
+        </div>
       ) : (
         <div className="file-pane-table-wrap" ref={tableWrapRef}>
           <table className="file-pane-table">
@@ -507,8 +763,8 @@ export function LocalFilePane({
               variant="local"
               nameWidth={widths.name}
               permWidth={widths.perm}
-              userWidth={userColWidth}
-              groupWidth={groupColWidth}
+              userWidth={widths.user}
+              groupWidth={widths.group}
               sizeWidth={widths.size}
               modifiedColWidth={tailCols.modified}
               actionsColWidth={tailCols.actions}
@@ -536,10 +792,6 @@ export function LocalFilePane({
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDirectoryActivate(row.name, index, e);
-                        }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          openDir(row.name);
                         }}
                       >
                         {row.name}/
@@ -625,6 +877,20 @@ export function LocalFilePane({
         }}
       />
       <FilePaneTextPrompt
+        open={promptKind === "newFile"}
+        title="New file name"
+        confirmLabel="Create"
+        onCancel={() => setPromptKind(null)}
+        onConfirm={(name) => {
+          const t = name.trim();
+          if (!t) {
+            return;
+          }
+          setPromptKind(null);
+          setTextEditorSession({ fileName: t, initialContent: "", isNewFile: true });
+        }}
+      />
+      <FilePaneTextPrompt
         open={promptKind === "rename"}
         title="Rename to"
         initialValue={activeName ?? ""}
@@ -654,6 +920,110 @@ export function LocalFilePane({
         }}
       />
 
+      <FilePaneConfirmDialog
+        open={bulkDeletePendingNames !== null && bulkDeletePendingNames.length > 0}
+        title="Delete selected items?"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        confirmDanger
+        onCancel={() => setBulkDeletePendingNames(null)}
+        onConfirm={() => {
+          const names = bulkDeletePendingNames;
+          setBulkDeletePendingNames(null);
+          if (!names || names.length === 0) {
+            return;
+          }
+          void (async () => {
+            setError(null);
+            try {
+              for (let i = 0; i < names.length; i += 1) {
+                const name = names[i]!;
+                try {
+                  await deleteLocalEntry(path, name);
+                } catch (e) {
+                  if (isPermissionDeleteError(e)) {
+                    setDeleteRecovery({
+                      names: names.slice(i),
+                      firstError: String(e),
+                    });
+                    await load();
+                    return;
+                  }
+                  throw e;
+                }
+              }
+              setSelectedNames(new Set());
+              setActiveName(null);
+              await load();
+            } catch (e) {
+              setError(String(e));
+            }
+          })();
+        }}
+      >
+        <p>
+          Permanently delete <strong>{bulkDeletePendingNames?.length ?? 0}</strong> selected items? This cannot be
+          undone. Folders are removed together with their contents.
+        </p>
+      </FilePaneConfirmDialog>
+
+      <FilePaneConfirmDialog
+        open={deleteRecovery !== null && deleteRecovery.names.length > 0}
+        title="Delete blocked by permissions"
+        confirmLabel="Delete all I can"
+        alternateLabel="Make writable + retry"
+        cancelLabel="Cancel"
+        confirmDanger
+        onCancel={() => setDeleteRecovery(null)}
+        onAlternate={() => {
+          const recovery = deleteRecovery;
+          setDeleteRecovery(null);
+          if (!recovery || recovery.names.length === 0) {
+            return;
+          }
+          void (async () => {
+            setError(null);
+            const result = await runDeleteModeAcrossNames(recovery.names, "chmodOwnerWritableThenStrict");
+            setSelectedNames(new Set());
+            setActiveName(null);
+            await load();
+            if (result.ok) {
+              setLastOk("Delete completed after adjusting owner permissions.");
+            } else {
+              setError(result.message ?? "Delete failed after permission adjustment.");
+            }
+          })();
+        }}
+        onConfirm={() => {
+          const recovery = deleteRecovery;
+          setDeleteRecovery(null);
+          if (!recovery || recovery.names.length === 0) {
+            return;
+          }
+          void (async () => {
+            setError(null);
+            const result = await runDeleteModeAcrossNames(recovery.names, "bestEffort");
+            setSelectedNames(new Set());
+            setActiveName(null);
+            await load();
+            if (result.ok) {
+              setLastOk("Deleted all removable entries.");
+            } else {
+              setError(result.message ?? "Some entries could not be deleted.");
+            }
+          })();
+        }}
+      >
+        <p>
+          No permission to delete one or more items.
+          <br />
+          <strong>Delete all I can</strong>: remove everything possible and leave blocked entries.
+          <br />
+          <strong>Make writable + retry</strong>: set owner write/read permissions first, then retry strict delete.
+        </p>
+        <p>{deleteRecovery?.firstError ?? ""}</p>
+      </FilePaneConfirmDialog>
+
       <FilePaneDoubleDeleteDialog
         open={deleteFlow !== null}
         targetLabel={deleteFlow?.name ?? ""}
@@ -678,10 +1048,43 @@ export function LocalFilePane({
             setActiveName((cur) => (cur === d.name ? null : cur));
             await load();
           } catch (e) {
-            setError(String(e));
+            if (isPermissionDeleteError(e)) {
+              setDeleteRecovery({ names: [d.name], firstError: String(e) });
+              await load();
+            } else {
+              setError(String(e));
+            }
           }
         }}
       />
+
+      {textEditorSession ? (
+        <Suspense
+          fallback={
+            <div className="file-pane-text-editor" role="status">
+              <div className="file-pane-text-editor-toolbar">
+                <span className="file-pane-text-editor-title">Loading editor…</span>
+              </div>
+            </div>
+          }
+        >
+          <FilePaneTextEditor
+            fileName={textEditorSession.fileName}
+            initialContent={textEditorSession.initialContent}
+            isNewFile={textEditorSession.isNewFile}
+            monacoLanguage={monacoLanguageFromFileName(textEditorSession.fileName)}
+            onSave={async (content) => {
+              if (textEditorSession.isNewFile) {
+                await createLocalTextFile(path, textEditorSession.fileName, content);
+              } else {
+                await writeLocalTextFile(path, textEditorSession.fileName, content);
+              }
+              await load();
+            }}
+            onClose={() => setTextEditorSession(null)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

@@ -3,7 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PROXMUX_PLUGIN_ID } from "../features/builtin-plugin-ids";
 import { buildProxmoxConsoleWebSocketUrl, parseProxmoxConsoleProxyData } from "../features/proxmox-console-ws";
+import { connectTimeoutMs as defaultConnectTimeoutMs } from "../features/connect-timeouts";
 import { pluginInvoke, proxmuxWsProxyStart, proxmuxWsProxyStop } from "../tauri-api";
+import { InlineSpinner } from "./InlineSpinner";
 
 type Props = {
   clusterId: string;
@@ -14,6 +16,7 @@ type Props = {
   tlsTrustedCertPem?: string;
   /** Incrementing nonce from pane toolbar to trigger reconnect. */
   reconnectRequestNonce?: number;
+  connectTimeoutMs?: number;
   onError?: (message: string) => void;
 };
 
@@ -97,8 +100,10 @@ export function ProxmoxLxcTermPane({
   allowInsecureTls = false,
   tlsTrustedCertPem,
   reconnectRequestNonce = 0,
+  connectTimeoutMs: connectTimeoutMsProp,
   onError,
 }: Props) {
+  const connectTimeoutMs = connectTimeoutMsProp ?? defaultConnectTimeoutMs(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -249,7 +254,7 @@ export function ProxmoxLxcTermPane({
         wsRef.current = ws;
 
         await new Promise<void>((resolve, reject) => {
-          const t = window.setTimeout(() => reject(new Error("WebSocket open timed out.")), 30000);
+          const t = window.setTimeout(() => reject(new Error("Connection timed out.")), connectTimeoutMs);
           ws.addEventListener(
             "open",
             () => {
@@ -301,13 +306,14 @@ export function ProxmoxLxcTermPane({
       ro.disconnect();
       void teardown();
     };
-  }, [allowInsecureTls, clusterId, node, onError, reconnectRequestNonce, teardown, tlsTrustedCertPem, vmid]);
+  }, [allowInsecureTls, clusterId, connectTimeoutMs, node, onError, reconnectRequestNonce, teardown, tlsTrustedCertPem, vmid]);
 
   return (
     <div className="proxmox-console-pane proxmox-console-pane--lxc terminal-root terminal-host" role="region" aria-label={paneTitle}>
       {phase !== "ready" && statusMessage ? (
-        <div className="proxmox-console-pane-status muted-copy" role="status">
-          {statusMessage}
+        <div className="proxmox-console-pane-status muted-copy proxmox-console-pane-status--row" role="status">
+          {phase === "connecting" ? <InlineSpinner label="Connecting" className="proxmox-console-pane-status-spinner" /> : null}
+          <span>{statusMessage}</span>
         </div>
       ) : null}
       <div ref={containerRef} className="proxmox-console-xterm-wrap" />

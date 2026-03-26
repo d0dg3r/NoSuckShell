@@ -3,6 +3,7 @@ import {
   APP_SETTINGS_TABS,
   CONNECTION_SUBTABS,
   HELP_ABOUT_SUBTABS,
+  INTEGRATIONS_SUBTABS,
   INTERFACE_SUBTABS,
   WORKSPACE_SUBTABS,
 } from "./settings/app-settings-constants";
@@ -22,6 +23,8 @@ import { AppSettingsSshTab } from "./settings/tabs/AppSettingsSshTab";
 import { AppSettingsHostsTab } from "./settings/tabs/AppSettingsHostsTab";
 import { AppSettingsStoreTabContent } from "./settings/tabs/AppSettingsStoreTabContent";
 import { AppSettingsViewsTab } from "./settings/tabs/AppSettingsViewsTab";
+import { AppSettingsHetznerTab } from "./settings/tabs/AppSettingsHetznerTab";
+import { AppSettingsNssCommanderTab } from "./settings/tabs/AppSettingsNssCommanderTab";
 
 export type {
   AppSettingsTab,
@@ -41,6 +44,7 @@ export type {
   SplitRatioPreset,
   TerminalFontPreset,
   UiFontPreset,
+  IntegrationsSubTab,
   WorkspaceSubTab,
 } from "./settings/app-settings-types";
 
@@ -74,6 +78,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     setHelpAboutSubTab,
     identityStoreSubTab,
     setIdentityStoreSubTab,
+    integrationsSubTab,
+    setIntegrationsSubTab,
     densityProfile,
     setDensityProfile,
     uiDensityOffset,
@@ -209,6 +215,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     toggleJumpHostForHost,
     proxmuxOpenWebConsolesInPane,
     setProxmuxOpenWebConsolesInPane,
+    appPreferences,
+    onSaveAppPreferences,
   } = props;
 
   return (
@@ -300,6 +308,14 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
             tabs={INTERFACE_SUBTABS}
             activeTab={interfaceSubTab}
             onSelect={setInterfaceSubTab}
+          />
+        )}
+        {activeAppSettingsTab === "integrations" && (
+          <SettingsSubtabRow
+            ariaLabel="Integrations sections"
+            tabs={INTEGRATIONS_SUBTABS}
+            activeTab={integrationsSubTab}
+            onSelect={setIntegrationsSubTab}
           />
         )}
         {activeAppSettingsTab === "help" && (
@@ -432,6 +448,8 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
           )}
           {activeAppSettingsTab === "connection" && connectionSubTab === "ssh" && (
             <AppSettingsSshTab
+              appPreferences={appPreferences}
+              onSaveAppPreferences={onSaveAppPreferences}
               setError={setError}
               setSshConfigRaw={setSshConfigRaw}
               sshConfigRaw={sshConfigRaw}
@@ -449,6 +467,9 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               openWebConsolesInAppPane={proxmuxOpenWebConsolesInPane}
               setOpenWebConsolesInAppPane={setProxmuxOpenWebConsolesInPane}
             />
+          )}
+          {activeAppSettingsTab === "connection" && connectionSubTab === "hetzner" && (
+            <AppSettingsHetznerTab />
           )}
           {activeAppSettingsTab === "store" && (
             <AppSettingsStoreTabContent
@@ -499,7 +520,13 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
               removeStoreKey={removeStoreKey}
             />
           )}
-          {activeAppSettingsTab === "integrations" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "plugins" && <AppSettingsPluginsTab />}
+          {activeAppSettingsTab === "integrations" && integrationsSubTab === "nss-commander" && (
+            <AppSettingsNssCommanderTab
+              appPreferences={appPreferences}
+              onSaveAppPreferences={onSaveAppPreferences}
+            />
+          )}
           {activeAppSettingsTab === "help" && helpAboutSubTab === "help" && (
             <AppSettingsHelpTab
               resolveHelpShortcutLabel={resolveHelpShortcutLabel}

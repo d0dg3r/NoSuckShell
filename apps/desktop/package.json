@@ -1,8 +1,9 @@
 {
   "name": "desktop",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Cross-platform SSH manager desktop app",
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "vite",
     "build": "rm -rf dist && tsc && vite build",
     "build:e2e": "tsc && vite build --mode e2e",
@@ -19,11 +20,13 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@novnc/novnc": "^1.5.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.55.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
@@ -38,8 +41,10 @@
     "@vitejs/plugin-react": "^6.0.1",
     "esbuild": "^0.27.4",
     "jsdom": "^29.0.1",
+    "patch-package": "^8.0.1",
     "typescript": "^5.9.3",
     "vite": "^8.0.1",
+    "vite-plugin-monaco-editor": "^1.1.0",
     "vitest": "^4.1.0"
   }
 }

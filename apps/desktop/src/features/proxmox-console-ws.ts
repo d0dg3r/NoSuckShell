@@ -21,7 +21,7 @@ function pickPortAndTicket(data: Record<string, unknown>): ProxmoxConsoleTicketF
   return { port, ticket };
 }
 
-/** Parse PROXMUX `fetchQemuVncProxy` / `fetchLxcTermProxy` `data` object. */
+/** Parse PROXMUX `fetchQemuVncProxy` / `fetchLxcTermProxy` / `fetchNodeTermProxy` `data` object. */
 export function parseProxmoxConsoleProxyData(data: unknown): ProxmoxConsoleTicketFields | null {
   if (data == null || typeof data !== "object" || Array.isArray(data)) {
     return null;
@@ -49,6 +49,28 @@ export function buildProxmoxConsoleWebSocketUrl(
   const wssScheme = u.protocol === "https:" ? "wss:" : "ws:";
   const segment = guest === "qemu" ? "qemu" : "lxc";
   const path = `/api2/json/nodes/${encodeURIComponent(node)}/${segment}/${encodeURIComponent(vmid)}/vncwebsocket`;
+  const q = new URLSearchParams();
+  q.set("port", String(ticketFields.port));
+  q.set("vncticket", ticketFields.ticket);
+  return `${wssScheme}//${u.host}${path}?${q.toString()}`;
+}
+
+/**
+ * WebSocket URL for Proxmox **node host shell** (POST `.../nodes/{node}/termproxy` ticket).
+ * Same `vncwebsocket` path shape as LXC, without a guest segment.
+ */
+export function buildProxmoxNodeShellWebSocketUrl(
+  apiOrigin: string,
+  node: string,
+  ticketFields: ProxmoxConsoleTicketFields,
+): string {
+  const base = normalizeProxmoxBaseUrl(apiOrigin);
+  if (!base) {
+    throw new Error("apiOrigin is empty.");
+  }
+  const u = new URL(`${base}/`);
+  const wssScheme = u.protocol === "https:" ? "wss:" : "ws:";
+  const path = `/api2/json/nodes/${encodeURIComponent(node)}/vncwebsocket`;
   const q = new URLSearchParams();
   q.set("port", String(ticketFields.port));
   q.set("vncticket", ticketFields.ticket);

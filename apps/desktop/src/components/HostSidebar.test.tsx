@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { HostSidebarProps } from "./HostSidebar";
 import { HostSidebar } from "./HostSidebar";
@@ -19,6 +19,8 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     onConnectLocalInActivePane: vi.fn(),
     onOpenQuickConnect: vi.fn(),
     onOpenAddHost: vi.fn(),
+    onOpenIdentityStoreSubTab: vi.fn(),
+    onCreateWorkspace: vi.fn(),
     sidebarViews: [{ id: "builtin:all", label: "All" }],
     selectedSidebarViewId: "builtin:all",
     onSelectSidebarView: vi.fn(),
@@ -31,6 +33,7 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     showHostAdvancedFilters: true,
     searchInputPlaceholder: undefined,
     proxmuxPanel: null,
+    hetznerPanel: null,
     statusFilter: "all",
     onStatusFilterChange: vi.fn(),
     portFilter: "",
@@ -44,6 +47,8 @@ function minimalHostSidebarProps(overrides: Partial<HostSidebarProps> = {}): Hos
     connectedHostRows: [],
     otherHostRows: [],
     hostListRowBridge: noopBridge(),
+    isBroadcastModeEnabled: false,
+    broadcastTargetCount: 0,
     ...overrides,
   };
 }
@@ -115,6 +120,25 @@ describe("HostSidebar", () => {
     expect(container.querySelector(".filter-toggle-btn")).toBeNull();
   });
 
+  it("renders hetzner panel when HETZNER tab is active", () => {
+    const { container } = render(
+      <HostSidebar
+        {...minimalHostSidebarProps({
+          sidebarViews: [
+            { id: "builtin:all", label: "All" },
+            { id: "builtin:hetzner", label: "HETZNER" },
+          ],
+          selectedSidebarViewId: "builtin:hetzner",
+          listFilterCount: 0,
+          showHostAdvancedFilters: false,
+          hetznerPanel: <div data-testid="hetzner-panel">Hetzner UI</div>,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("hetzner-panel")).toBeInTheDocument();
+    expect(container.querySelector(".filter-toggle-btn")).toBeNull();
+  });
+
   it("calls onToggleQuickAddMenu when the Add dropdown trigger is clicked", () => {
     const onToggleQuickAddMenu = vi.fn();
     const { container } = render(
@@ -126,5 +150,50 @@ describe("HostSidebar", () => {
     expect(btn).toBeTruthy();
     fireEvent.click(btn!);
     expect(onToggleQuickAddMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onOpenIdentityStoreSubTab when Add user is chosen from the quick-add menu", () => {
+    const onOpenIdentityStoreSubTab = vi.fn();
+    render(
+      <HostSidebar
+        {...minimalHostSidebarProps({
+          isQuickAddMenuOpen: true,
+          onOpenIdentityStoreSubTab,
+        })}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: "Add user" }));
+    expect(onOpenIdentityStoreSubTab).toHaveBeenCalledTimes(1);
+    expect(onOpenIdentityStoreSubTab).toHaveBeenCalledWith("users");
+  });
+
+  it("calls onCreateWorkspace when New workspace is chosen from the quick-add menu", () => {
+    const onCreateWorkspace = vi.fn();
+    render(
+      <HostSidebar
+        {...minimalHostSidebarProps({
+          isQuickAddMenuOpen: true,
+          onCreateWorkspace,
+        })}
+      />,
+    );
+    const menus = screen.getAllByRole("menu");
+    const menu = menus[menus.length - 1];
+    fireEvent.click(within(menu).getByRole("button", { name: "New workspace" }));
+    expect(onCreateWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders sidebar footer with broadcast status", () => {
+    const { container } = render(
+      <HostSidebar
+        {...minimalHostSidebarProps({
+          isBroadcastModeEnabled: true,
+          broadcastTargetCount: 2,
+        })}
+      />,
+    );
+    const footer = container.querySelector(".left-rail-sidebar-footer");
+    expect(footer).toBeTruthy();
+    expect(within(footer as HTMLElement).getByText(/Broadcast: enabled \(2 targets\)/)).toBeInTheDocument();
   });
 });

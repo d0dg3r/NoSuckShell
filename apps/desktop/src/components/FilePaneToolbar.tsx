@@ -5,6 +5,9 @@ type Props = {
   onTerminal: () => void;
   onRoot: () => void;
   onNewFolder: () => void;
+  onNewFile: () => void;
+  onEditFile: () => void;
+  editFileDisabled: boolean;
   onDelete: () => void;
   deleteDisabled: boolean;
   /** Show filesystem-root jump (local: `/`, remote: `/`). */
@@ -15,6 +18,8 @@ type Props = {
   uploadFolderDisabled?: boolean;
   onExportSelection?: () => void;
   exportSelectionDisabled?: boolean;
+  /** When false, hide the terminal / "Back to terminal" control (NSS-Commander file view). */
+  showBackToTerminalButton?: boolean;
 };
 
 const iconSize = 16;
@@ -71,6 +76,27 @@ function IconNewFolder() {
   );
 }
 
+function IconNewFile() {
+  return (
+    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" strokeLinejoin="round" />
+      <path d="M14 2v6h6M12 18v-6M9 15h6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconEditFile() {
+  return (
+    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path
+        d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function IconTrash() {
   return (
     <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -114,6 +140,9 @@ export function FilePaneToolbar({
   onTerminal,
   onRoot,
   onNewFolder,
+  onNewFile,
+  onEditFile,
+  editFileDisabled,
   onDelete,
   deleteDisabled,
   showRoot = true,
@@ -123,6 +152,7 @@ export function FilePaneToolbar({
   uploadFolderDisabled = true,
   onExportSelection,
   exportSelectionDisabled = true,
+  showBackToTerminalButton = true,
 }: Props) {
   return (
     <>
@@ -164,6 +194,25 @@ export function FilePaneToolbar({
         aria-label="New folder"
       >
         <IconNewFolder />
+      </button>
+      <button
+        type="button"
+        className="btn file-pane-toolbar-btn"
+        onClick={onNewFile}
+        title="New text file"
+        aria-label="New text file"
+      >
+        <IconNewFile />
+      </button>
+      <button
+        type="button"
+        className="btn file-pane-toolbar-btn"
+        onClick={onEditFile}
+        disabled={editFileDisabled}
+        title="Edit selected file"
+        aria-label="Edit selected file"
+      >
+        <IconEditFile />
       </button>
       <button
         type="button"
@@ -211,15 +260,17 @@ export function FilePaneToolbar({
           <IconSaveExport />
         </button>
       ) : null}
-      <button
-        type="button"
-        className="btn file-pane-toolbar-btn"
-        onClick={onTerminal}
-        title="Back to terminal"
-        aria-label="Back to terminal"
-      >
-        <IconTerminal />
-      </button>
+      {showBackToTerminalButton ? (
+        <button
+          type="button"
+          className="btn file-pane-toolbar-btn"
+          onClick={onTerminal}
+          title="Back to terminal"
+          aria-label="Back to terminal"
+        >
+          <IconTerminal />
+        </button>
+      ) : null}
     </>
   );
 }

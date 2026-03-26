@@ -38,6 +38,7 @@ describe("openProxmoxInAppWebviewWindow", () => {
       "noVNC",
       "https://pve:8006/",
       false,
+      undefined,
       "https://pve:8006/?console=kvm&novnc=1&vmid=1&node=n",
     );
     expect(navigateInAppWebviewWindow).not.toHaveBeenCalled();
@@ -69,6 +70,6 @@ describe("openProxmoxInAppWebviewWindow", () => {
     __forgetWebviewLabelForOriginForTests("https://pve:8006");
     const r = await openProxmoxInAppWebviewWindow({ title: "b", consoleUrl: u, allowInsecureTls: true });
     expect(r.loginFirst).toBe(true);
-    expect(openInAppWebviewWindow).toHaveBeenLastCalledWith("b", "https://pve:8006/", true, u);
+    expect(openInAppWebviewWindow).toHaveBeenLastCalledWith("b", "https://pve:8006/", true, undefined, u);
   });
 });

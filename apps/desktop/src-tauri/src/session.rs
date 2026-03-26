@@ -87,13 +87,21 @@ fn resolve_ssh_program() -> String {
     }
 }
 
-pub fn build_ssh_command(host: &HostConfig, strict_host_key_checking: &str) -> CommandBuilder {
+pub fn build_ssh_command(
+    host: &HostConfig,
+    strict_host_key_checking: &str,
+    connect_timeout_secs: u32,
+) -> CommandBuilder {
     let ssh = resolve_ssh_program();
     let mut command = CommandBuilder::new(&ssh);
     command.arg("-o");
     command.arg(format!("StrictHostKeyChecking={strict_host_key_checking}"));
     command.arg("-o");
     command.arg(ssh_user_known_hosts_option());
+    command.arg("-o");
+    command.arg(format!("ConnectTimeout={connect_timeout_secs}"));
+    command.arg("-o");
+    command.arg("ConnectionAttempts=1");
     command.arg("-p");
     command.arg(host.port.to_string());
     if !host.identity_file.is_empty() {
@@ -194,7 +202,8 @@ impl SessionState {
             Some(p) => p.as_ssh_value(),
             None => crate::host_metadata::resolved_strict_host_key_for_alias(&host.host),
         };
-        let command = build_ssh_command(&host, sk);
+        let connect_secs = crate::app_prefs::current_preferences().connect_timeout_secs;
+        let command = build_ssh_command(&host, sk, connect_secs);
         self.spawn_and_register_command(app, pair, command)
     }
 
@@ -390,7 +399,7 @@ mod tests {
             proxy_command: String::new(),
         };
 
-        let cmd = build_ssh_command(&host, "ask");
+        let cmd = build_ssh_command(&host, "ask", 3);
         let rendered = format!("{cmd:?}");
         assert!(rendered.to_lowercase().contains("ssh"));
         assert!(rendered.contains("-p"));
@@ -402,6 +411,8 @@ mod tests {
         assert!(rendered.contains("-J"));
         assert!(rendered.contains("bastion"));
         assert!(rendered.contains("deploy@10.0.0.5"));
+        assert!(rendered.contains("ConnectTimeout=3"));
+        assert!(rendered.contains("ConnectionAttempts=1"));
     }
 
     #[test]
@@ -415,7 +426,7 @@ mod tests {
             proxy_jump: String::new(),
             proxy_command: String::new(),
         };
-        let cmd = build_ssh_command(&host, "accept-new");
+        let cmd = build_ssh_command(&host, "accept-new", 3);
         let rendered = format!("{cmd:?}");
         assert!(rendered.contains("StrictHostKeyChecking=accept-new"));
     }

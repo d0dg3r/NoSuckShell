@@ -1,3 +1,5 @@
+import type { RemoteSshSpec } from "../types";
+
 /** Join remote SFTP path segments (POSIX-style). */
 export function joinRemotePath(parent: string, name: string): string {
   const n = name.trim();
@@ -181,4 +183,90 @@ export function remotePathFullDisplay(remotePath: string): string {
     return ".";
   }
   return t;
+}
+
+
+export type PathBreadcrumbSegment = { label: string; path: string };
+
+/** `user@host` for remote path bar (saved host or quick connect). */
+export function remoteSshConnectionPrefix(spec: RemoteSshSpec): string {
+  if (spec.kind === "saved") {
+    const u = spec.host.user.trim() || "root";
+    const h = spec.host.hostName.trim() || spec.host.host.trim() || "host";
+    return `${u}@${h}`;
+  }
+  const u = spec.request.user.trim() || "root";
+  const h = spec.request.hostName.trim() || "host";
+  return `${u}@${h}`;
+}
+
+/** Full remote path bar: `user@host:/path` or `user@host:.` */
+export function remotePathBarFullDisplay(spec: RemoteSshSpec, remotePath: string): string {
+  const prefix = remoteSshConnectionPrefix(spec);
+  const t = remotePath.trim();
+  if (!t || t === ".") {
+    return `${prefix}:.`;
+  }
+  return `${prefix}:${t}`;
+}
+
+/** SFTP directory crumbs; paths match `setPath` / `joinRemotePath` usage. */
+export function remotePathBreadcrumbSegments(remotePath: string): PathBreadcrumbSegment[] {
+  const t = remotePath.trim();
+  if (!t || t === ".") {
+    return [{ label: ".", path: "." }];
+  }
+  if (t === "/") {
+    return [{ label: "/", path: "/" }];
+  }
+  if (t.startsWith("/")) {
+    const parts = t.split("/").filter((seg) => seg.length > 0);
+    const out: PathBreadcrumbSegment[] = [{ label: "/", path: "/" }];
+    let acc = "";
+    for (const part of parts) {
+      acc = `${acc}/${part}`;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
+  const parts = t.split("/").filter((seg) => seg.length > 0);
+  if (parts.length === 0) {
+    return [{ label: ".", path: "." }];
+  }
+  const out: PathBreadcrumbSegment[] = [];
+  let acc = "";
+  for (const part of parts) {
+    acc = acc ? `${acc}/${part}` : part;
+    out.push({ label: part, path: acc });
+  }
+  return out;
+}
+
+/** Local path keys for breadcrumbs (`""` = home, `/…` absolute, else home-relative segments). */
+export function localPathBreadcrumbSegments(pathKey: string): PathBreadcrumbSegment[] {
+  const key = pathKey.trim();
+  if (key === "") {
+    return [{ label: "~", path: "" }];
+  }
+  if (key === "/") {
+    return [{ label: "/", path: "/" }];
+  }
+  if (key.startsWith("/")) {
+    const parts = key.split("/").filter((seg) => seg.length > 0);
+    const out: PathBreadcrumbSegment[] = [{ label: "/", path: "/" }];
+    let acc = "";
+    for (const part of parts) {
+      acc = `${acc}/${part}`;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
+  const parts = key.split("/").filter((seg) => seg.length > 0);
+  const out: PathBreadcrumbSegment[] = [{ label: "~", path: "" }];
+  let acc = "";
+  for (const part of parts) {
+    acc = acc ? `${acc}/${part}` : part;
+    out.push({ label: part, path: acc });
+  }
+  return out;
 }

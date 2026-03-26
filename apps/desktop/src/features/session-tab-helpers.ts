@@ -1,17 +1,23 @@
 import type {
   ProxmoxLxcTermSessionTab,
+  ProxmoxNodeTermSessionTab,
   ProxmoxQemuVncSessionTab,
   SessionTab,
   WebSessionTab,
 } from "./session-model";
 
-/** Sessions rendered as web/noVNC/LXC overlays rather than PTY terminals (no SSH backend, no broadcast). */
+/** Sessions rendered as web/noVNC/LXC/node-shell overlays rather than PTY terminals (no SSH backend, no broadcast). */
 export function sessionKindIsWebLike(kind: SessionTab["kind"]): boolean {
-  return kind === "web" || kind === "proxmoxQemuVnc" || kind === "proxmoxLxcTerm";
+  return (
+    kind === "web" ||
+    kind === "proxmoxQemuVnc" ||
+    kind === "proxmoxLxcTerm" ||
+    kind === "proxmoxNodeTerm"
+  );
 }
 
 export function sessionIsWebLike(
   session: SessionTab,
-): session is WebSessionTab | ProxmoxQemuVncSessionTab | ProxmoxLxcTermSessionTab {
+): session is WebSessionTab | ProxmoxQemuVncSessionTab | ProxmoxLxcTermSessionTab | ProxmoxNodeTermSessionTab {
   return sessionKindIsWebLike(session.kind);
 }

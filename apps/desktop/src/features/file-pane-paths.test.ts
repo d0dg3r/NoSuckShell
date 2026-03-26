@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatLocalPathDisplay,
   isLocalUpDisabled,
   joinLocalPath,
   localParentDir,
   localParentOfHome,
+  localPathBreadcrumbSegments,
   localPathResolvedForTitle,
+  remotePathBarFullDisplay,
+  remotePathBreadcrumbSegments,
+  remoteSshConnectionPrefix,
 } from "./file-pane-paths";
 
 describe("file-pane-paths local", () => {
@@ -30,14 +33,6 @@ describe("file-pane-paths local", () => {
     expect(localParentOfHome("/")).toBe("/");
   });
 
-  it("formatLocalPathDisplay maps home prefix to tilde", () => {
-    expect(formatLocalPathDisplay("/home/joe", "")).toBe("~");
-    expect(formatLocalPathDisplay("/home/joe", "Documents")).toBe("~/Documents");
-    expect(formatLocalPathDisplay("/home/joe", "/home/joe")).toBe("~");
-    expect(formatLocalPathDisplay("/home/joe", "/home/joe/proj")).toBe("~/proj");
-    expect(formatLocalPathDisplay("/home/joe", "/etc")).toBe("/etc");
-  });
-
   it("isLocalUpDisabled", () => {
     expect(isLocalUpDisabled("/", "/home/joe")).toBe(true);
     expect(isLocalUpDisabled("", "/home/joe")).toBe(false);
@@ -50,5 +45,65 @@ describe("file-pane-paths local", () => {
     expect(localPathResolvedForTitle("/home/joe", "")).toBe("/home/joe");
     expect(localPathResolvedForTitle("/home/joe", "x")).toBe("/home/joe/x");
     expect(localPathResolvedForTitle("/home/joe", "/etc")).toBe("/etc");
+  });
+
+  it("localPathBreadcrumbSegments for home-relative and absolute", () => {
+    expect(localPathBreadcrumbSegments("")).toEqual([{ label: "~", path: "" }]);
+    expect(localPathBreadcrumbSegments("a/b")).toEqual([
+      { label: "~", path: "" },
+      { label: "a", path: "a" },
+      { label: "b", path: "a/b" },
+    ]);
+    expect(localPathBreadcrumbSegments("/var/log")).toEqual([
+      { label: "/", path: "/" },
+      { label: "var", path: "/var" },
+      { label: "log", path: "/var/log" },
+    ]);
+  });
+});
+
+describe("file-pane-paths remote", () => {
+  const saved = {
+    kind: "saved" as const,
+    host: {
+      host: "srv-alias",
+      hostName: "server.example",
+      user: "root",
+      port: 22,
+      identityFile: "",
+      proxyJump: "",
+      proxyCommand: "",
+    },
+  };
+
+  const quick = {
+    kind: "quick" as const,
+    request: {
+      hostName: "10.0.0.4",
+      user: "joe",
+      identityFile: "",
+      proxyJump: "",
+      proxyCommand: "",
+    },
+  };
+
+  it("remoteSshConnectionPrefix", () => {
+    expect(remoteSshConnectionPrefix(saved)).toBe("root@server.example");
+    expect(remoteSshConnectionPrefix(quick)).toBe("joe@10.0.0.4");
+  });
+
+  it("remotePathBarFullDisplay", () => {
+    expect(remotePathBarFullDisplay(saved, "/var/log")).toBe("root@server.example:/var/log");
+    expect(remotePathBarFullDisplay(quick, ".")).toBe("joe@10.0.0.4:.");
+  });
+
+  it("remotePathBreadcrumbSegments for ., /, and nested", () => {
+    expect(remotePathBreadcrumbSegments(".")).toEqual([{ label: ".", path: "." }]);
+    expect(remotePathBreadcrumbSegments("/")).toEqual([{ label: "/", path: "/" }]);
+    expect(remotePathBreadcrumbSegments("/a/b")).toEqual([
+      { label: "/", path: "/" },
+      { label: "a", path: "/a" },
+      { label: "b", path: "/a/b" },
+    ]);
   });
 });

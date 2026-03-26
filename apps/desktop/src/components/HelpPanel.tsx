@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import {
   REPO_ISSUES_URL,
   REPO_SECURITY_URL,
@@ -170,9 +171,19 @@ const interactionSections: HelpSection[] = [
     rows: [
       {
         action: "Copy to other pane (file browser)",
-        mouse: "When the file workspace plugin is enabled, copy selection to the paired pane where supported.",
+        mouse: "Copy selection from focused pane to other pane. Shift+F5 reverses direction.",
         keys: "-",
       },
+      {
+        action: "Move to other pane",
+        mouse: "Move selection from focused pane to other pane. Shift+F6 reverses direction.",
+        keys: "F6",
+      },
+      { action: "Edit file", mouse: "Open selected file in the text editor.", keys: "F4" },
+      { action: "New folder", mouse: "Create a new directory in the focused pane.", keys: "F7" },
+      { action: "Delete", mouse: "Delete selected items in the focused pane.", keys: "F8" },
+      { action: "Pack archive", mouse: "Archive selected items in the focused pane.", keys: "F9" },
+      { action: "Rename", mouse: "Rename selected item in the focused pane.", keys: "F10" },
       {
         action: "Switch file pane (file browser)",
         mouse: "Move focus between local and remote file panes in the workspace.",
@@ -183,7 +194,7 @@ const interactionSections: HelpSection[] = [
   {
     title: "Layouts and navigation",
     rows: [
-      { action: "Saved layouts", mouse: "Footer “Layouts” — templates and cleanup options.", keys: "-" },
+      { action: "Saved layouts", mouse: "Bottom command bar → workspace popover → Layouts tab.", keys: "-" },
       { action: "Sidebar views", mouse: "All, Favorites, and custom views from Settings → Views.", keys: "-" },
       {
         action: "Narrow / stacked layout",
@@ -549,29 +560,23 @@ function renderSectionTable(
   return (
     <section key={section.title} className="help-section">
       <h4>{section.title}</h4>
-      <div className="help-table-wrap">
-        <table className="help-table">
-          <thead>
-            <tr>
-              <th>Topic</th>
-              <th>Details</th>
-              <th>Keyboard</th>
-            </tr>
-          </thead>
-          <tbody>
-            {section.rows.map((row) => {
-              const resolved = resolveHelpShortcutLabel?.(row.action);
-              const keysCell = resolved && resolved.length > 0 ? resolved : row.keys;
-              return (
-                <tr key={`${section.title}:${row.action}`}>
-                  <td>{row.action}</td>
-                  <td>{row.mouse}</td>
-                  <td>{keysCell}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="help-grid-wrap">
+        <div className="help-grid">
+          <div className="help-grid-th">Topic</div>
+          <div className="help-grid-th">Details</div>
+          <div className="help-grid-th help-grid-center">Keyboard</div>
+          {section.rows.map((row) => {
+            const resolved = resolveHelpShortcutLabel?.(row.action);
+            const keysCell = resolved && resolved.length > 0 ? resolved : row.keys;
+            return (
+              <Fragment key={`${section.title}:${row.action}`}>
+                <div className="help-grid-td">{row.action}</div>
+                <div className="help-grid-td">{row.mouse}</div>
+                <div className="help-grid-td help-grid-center">{keysCell}</div>
+              </Fragment>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -608,23 +613,17 @@ export function HelpPanel(props: HelpPanelProps = {}) {
             second step (default: open this Help’s shortcut list via <strong>K</strong> after leader). With focus in a
             terminal, most keys go to the shell; global chords and Escape (overlays) still apply.
           </p>
-          <div className="help-table-wrap">
-            <table className="help-table help-table--shortcuts">
-              <thead>
-                <tr>
-                  <th>Action</th>
-                  <th>Shortcut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shortcutCheatsheetLines.map((row) => (
-                  <tr key={row.label}>
-                    <td>{row.label}</td>
-                    <td>{row.keys}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="help-grid-wrap">
+            <div className="help-grid help-grid--shortcuts">
+              <div className="help-grid-th">Action</div>
+              <div className="help-grid-th">Shortcut</div>
+              {shortcutCheatsheetLines.map((row) => (
+                <Fragment key={row.label}>
+                  <div className="help-grid-td">{row.label}</div>
+                  <div className="help-grid-td">{row.keys}</div>
+                </Fragment>
+              ))}
+            </div>
           </div>
         </section>
       ) : null}

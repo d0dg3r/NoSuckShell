@@ -28,8 +28,9 @@ export async function openProxmoxInAppWebviewWindow(options: {
   title: string;
   consoleUrl: string;
   allowInsecureTls: boolean;
+  tlsTrustedCertPem?: string | null;
 }): Promise<OpenProxmoxInAppWebviewResult> {
-  const { title, consoleUrl, allowInsecureTls } = options;
+  const { title, consoleUrl, allowInsecureTls, tlsTrustedCertPem } = options;
   const trimmed = consoleUrl.trim();
   const origin = httpOrigin(trimmed);
 
@@ -51,8 +52,8 @@ export async function openProxmoxInAppWebviewWindow(options: {
   const loginFirst = consoleDeep;
   const openUrl = loginFirst ? proxmoxWebUiEntryUrlFromConsoleOrBaseUrl(trimmed) : trimmed;
   const label = loginFirst
-    ? await openInAppWebviewWindow(title, openUrl, allowInsecureTls, trimmed)
-    : await openInAppWebviewWindow(title, openUrl, allowInsecureTls);
+    ? await openInAppWebviewWindow(title, openUrl, allowInsecureTls, tlsTrustedCertPem, trimmed)
+    : await openInAppWebviewWindow(title, openUrl, allowInsecureTls, tlsTrustedCertPem);
   if (origin) {
     labelByProxmoxOrigin[origin] = label;
   }

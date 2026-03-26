@@ -1,5 +1,6 @@
-# Rust workspace (root Cargo.toml) builds here
+/node_modules/
 /target/
+
 
 apps/desktop/node_modules
 apps/desktop/dist

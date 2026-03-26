@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type ReactNode, type RefObject, type UIEvent } from "react";
-import type { DragPayload } from "../features/pane-dnd";
+import { useState, type ReactNode, type RefObject, type UIEvent } from "react";
+import type { LayoutProfile, LayoutSplitTreeNode } from "../types";
+import type { LayoutPresetDefinition } from "../layoutPresets";
 import { createLeafNode, type SplitResizeState, type SplitTreeNode } from "../features/split-tree";
-import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPosition";
+import { WorkspaceCommandBar } from "./WorkspaceCommandBar";
 
 import type { WorkspaceKind } from "../features/workspace-snapshot";
 
@@ -11,8 +12,6 @@ export type TerminalWorkspaceDockProps = {
   workspaceTabs: WorkspaceTabInfo[];
   activeWorkspaceId: string;
   switchWorkspace: (workspaceId: string) => void;
-  parseDragPayload: (event: ReactDragEvent) => DragPayload | null;
-  sendSessionToWorkspace: (sessionId: string, workspaceId: string) => void;
   createWorkspace: () => void;
   createNssCommanderWorkspace: () => void;
   removeWorkspace: (workspaceId: string) => void;
@@ -31,18 +30,41 @@ export type TerminalWorkspaceDockProps = {
   handleMobilePagerScroll: (event: UIEvent<HTMLDivElement>) => void;
   splitTree: SplitTreeNode;
   renderSplitNode: (node: SplitTreeNode) => ReactNode;
-  onOpenLayoutCommandCenter: () => void;
-  isBroadcastModeEnabled: boolean;
-  broadcastTargetCount: number;
-  commanderActionRail?: ReactNode;
+  commandBarFKeySlot?: ReactNode;
+
+  layoutPresets: LayoutPresetDefinition[];
+  layoutProfiles: LayoutProfile[];
+  selectedLayoutProfileId: string;
+  onSelectLayoutProfileId: (id: string) => void;
+  layoutProfileName: string;
+  onLayoutProfileNameChange: (name: string) => void;
+  saveLayoutWithHosts: boolean;
+  onSaveLayoutWithHostsChange: (value: boolean) => void;
+  onApplyLayoutProfile: () => void;
+  onSaveLayoutProfile: () => void;
+  pendingLayoutDeleteProfileId: string;
+  onDeleteLayoutProfileIntent: () => void;
+  onApplyLayoutPreset: (tree: LayoutSplitTreeNode) => void;
+  onApplyCustomGrid: (rows: number, cols: number) => void;
+  onCloseAllIntent: (withLayoutReset: boolean) => void;
+  pendingCloseAllIntent: "close" | "reset" | null;
+  layoutPreviewTree: LayoutSplitTreeNode | null;
+  applyLayoutProfileDisabled: boolean;
+  saveLayoutDisabled: boolean;
+  closeActionsDisabled: boolean;
+  layoutWorkspaceOptions: Array<{ id: string; name: string }>;
+  layoutTargetWorkspaceId: string;
+  onLayoutTargetWorkspaceChange: (id: string) => void;
+  layoutSwitchToTargetAfterApply: boolean;
+  onLayoutSwitchToTargetAfterApplyChange: (value: boolean) => void;
+  layoutMirrorWorkspaceIdOnSave: string;
+  onLayoutMirrorWorkspaceIdOnSaveChange: (id: string) => void;
 };
 
 export function TerminalWorkspaceDock({
   workspaceTabs,
   activeWorkspaceId,
   switchWorkspace,
-  parseDragPayload,
-  sendSessionToWorkspace,
   createWorkspace,
   createNssCommanderWorkspace,
   removeWorkspace,
@@ -61,148 +83,39 @@ export function TerminalWorkspaceDock({
   handleMobilePagerScroll,
   splitTree,
   renderSplitNode,
-  onOpenLayoutCommandCenter,
-  isBroadcastModeEnabled,
-  broadcastTargetCount,
-  commanderActionRail,
+  commandBarFKeySlot,
+  layoutPresets,
+  layoutProfiles,
+  selectedLayoutProfileId,
+  onSelectLayoutProfileId,
+  layoutProfileName,
+  onLayoutProfileNameChange,
+  saveLayoutWithHosts,
+  onSaveLayoutWithHostsChange,
+  onApplyLayoutProfile,
+  onSaveLayoutProfile,
+  pendingLayoutDeleteProfileId,
+  onDeleteLayoutProfileIntent,
+  onApplyLayoutPreset,
+  onApplyCustomGrid,
+  onCloseAllIntent,
+  pendingCloseAllIntent,
+  layoutPreviewTree,
+  applyLayoutProfileDisabled,
+  saveLayoutDisabled,
+  closeActionsDisabled,
+  layoutWorkspaceOptions,
+  layoutTargetWorkspaceId,
+  onLayoutTargetWorkspaceChange,
+  layoutSwitchToTargetAfterApply,
+  onLayoutSwitchToTargetAfterApplyChange,
+  layoutMirrorWorkspaceIdOnSave,
+  onLayoutMirrorWorkspaceIdOnSaveChange,
 }: TerminalWorkspaceDockProps) {
-  const [workspaceMenu, setWorkspaceMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
-  const targetWorkspace = useMemo(
-    () => workspaceTabs.find((workspace) => workspace.id === workspaceMenu?.workspaceId) ?? null,
-    [workspaceMenu?.workspaceId, workspaceTabs],
-  );
-  const { menuRef, style: menuStyle } = useClampedContextMenuPosition(
-    workspaceMenu != null,
-    workspaceMenu?.x ?? 0,
-    workspaceMenu?.y ?? 0,
-    [workspaceMenu?.workspaceId, targetWorkspace?.preferVerticalNewPanes === true],
-  );
-
-  useEffect(() => {
-    if (!workspaceMenu) {
-      return;
-    }
-    const dismiss = () => setWorkspaceMenu(null);
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (menuRef.current && target instanceof Node && menuRef.current.contains(target)) {
-        return;
-      }
-      dismiss();
-    };
-    const onWindowBlur = () => dismiss();
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        dismiss();
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("blur", onWindowBlur);
-    window.addEventListener("keydown", onEscape);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("blur", onWindowBlur);
-      window.removeEventListener("keydown", onEscape);
-    };
-  }, [menuRef, workspaceMenu]);
+  const [workspacePopoverOpen, setWorkspacePopoverOpen] = useState(false);
 
   return (
     <section className="right-dock panel">
-      <div className="workspace-tabs" role="tablist" aria-label="Terminal workspaces">
-        {workspaceTabs.map((workspace) => (
-          <button
-            key={workspace.id}
-            type="button"
-            role="tab"
-            aria-selected={workspace.id === activeWorkspaceId}
-            className={`btn workspace-tab ${workspace.id === activeWorkspaceId ? "is-active" : ""}`}
-            onClick={() => switchWorkspace(workspace.id)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setWorkspaceMenu({ workspaceId: workspace.id, x: event.clientX, y: event.clientY });
-            }}
-            onDragOver={(event) => {
-              const payload = parseDragPayload(event);
-              const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-              if (shouldReject) {
-                return;
-              }
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(event) => {
-              const payload = parseDragPayload(event);
-              const shouldReject = !payload || payload.type !== "session" || workspace.id === activeWorkspaceId;
-              if (shouldReject) {
-                return;
-              }
-              event.preventDefault();
-              sendSessionToWorkspace(payload.sessionId, workspace.id);
-            }}
-          >
-            {workspace.name}
-          </button>
-        ))}
-        <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createWorkspace}>
-          + Workspace
-        </button>
-        <button type="button" className="btn workspace-tab workspace-tab-add" onClick={createNssCommanderWorkspace} title="NSS-Commander: dual file-pane workspace">
-          + NSS-Commander
-        </button>
-        {workspaceTabs.length > 1 && (
-          <button type="button" className="btn workspace-tab workspace-tab-danger" onClick={() => removeWorkspace(activeWorkspaceId)}>
-            Remove current
-          </button>
-        )}
-        {workspaceMenu && targetWorkspace && (
-          <div
-            ref={menuRef}
-            className="context-menu"
-            style={menuStyle}
-            role="menu"
-            onContextMenuCapture={(event) => {
-              event.preventDefault();
-            }}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              className="context-menu-item"
-              onClick={() => {
-                const nextName = window.prompt("Workspace name", targetWorkspace.name);
-                if (nextName == null) {
-                  setWorkspaceMenu(null);
-                  return;
-                }
-                const trimmed = nextName.trim();
-                if (!trimmed) {
-                  setWorkspaceMenu(null);
-                  return;
-                }
-                renameWorkspace(targetWorkspace.id, trimmed);
-                setWorkspaceMenu(null);
-              }}
-            >
-              Rename workspace
-            </button>
-            {targetWorkspace.kind === "nss-commander" ? null : (
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={targetWorkspace.preferVerticalNewPanes}
-                className="context-menu-item separator-above"
-                onClick={() => {
-                  setWorkspaceVerticalStacking(targetWorkspace.id, !targetWorkspace.preferVerticalNewPanes);
-                  setWorkspaceMenu(null);
-                }}
-              >
-                {targetWorkspace.preferVerticalNewPanes ? "✓ " : ""}Stack new panes vertically
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      {commanderActionRail}
       <div className="sessions-workspace">
         <div className="sessions-zone">
           <div
@@ -277,27 +190,48 @@ export function TerminalWorkspaceDock({
               </nav>
             ) : null}
           </div>
-          <div className="sessions-footer" role="status">
-            <div className="sessions-footer-meta">
-              <div className="footer-layout-controls">
-                <button
-                  type="button"
-                  className="btn btn-primary footer-layout-command-btn"
-                  onClick={onOpenLayoutCommandCenter}
-                  aria-label="Open layout command center"
-                  title="Layouts, templates, session cleanup"
-                >
-                  Layouts
-                </button>
-                <div className="sessions-footer-status">
-                  <span className={`context-pill footer-broadcast-pill ${isBroadcastModeEnabled ? "is-active" : ""}`}>
-                    Broadcast: {isBroadcastModeEnabled ? "enabled" : "disabled"} ({broadcastTargetCount} targets)
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
+        <WorkspaceCommandBar
+          workspaceTabs={workspaceTabs}
+          activeWorkspaceId={activeWorkspaceId}
+          onIndicatorClick={() => setWorkspacePopoverOpen((v) => !v)}
+          popoverOpen={workspacePopoverOpen}
+          onPopoverClose={() => setWorkspacePopoverOpen(false)}
+          fKeyBarSlot={commandBarFKeySlot}
+          switchWorkspace={switchWorkspace}
+          createWorkspace={createWorkspace}
+          createNssCommanderWorkspace={createNssCommanderWorkspace}
+          removeWorkspace={removeWorkspace}
+          renameWorkspace={renameWorkspace}
+          setWorkspaceVerticalStacking={setWorkspaceVerticalStacking}
+          layoutPresets={layoutPresets}
+          profiles={layoutProfiles}
+          selectedProfileId={selectedLayoutProfileId}
+          onSelectProfileId={onSelectLayoutProfileId}
+          profileName={layoutProfileName}
+          onProfileNameChange={onLayoutProfileNameChange}
+          restoreSessions={saveLayoutWithHosts}
+          onRestoreSessionsChange={onSaveLayoutWithHostsChange}
+          onApplyProfile={onApplyLayoutProfile}
+          onSaveProfile={onSaveLayoutProfile}
+          pendingDeleteProfileId={pendingLayoutDeleteProfileId}
+          onDeleteProfileIntent={onDeleteLayoutProfileIntent}
+          onApplyPreset={onApplyLayoutPreset}
+          onApplyCustomGrid={onApplyCustomGrid}
+          onCloseAllIntent={onCloseAllIntent}
+          pendingCloseAllIntent={pendingCloseAllIntent}
+          previewTree={layoutPreviewTree}
+          applyProfileDisabled={applyLayoutProfileDisabled}
+          saveDisabled={saveLayoutDisabled}
+          closeActionsDisabled={closeActionsDisabled}
+          workspaceOptions={layoutWorkspaceOptions}
+          layoutTargetWorkspaceId={layoutTargetWorkspaceId}
+          onLayoutTargetWorkspaceChange={onLayoutTargetWorkspaceChange}
+          layoutSwitchToTargetAfterApply={layoutSwitchToTargetAfterApply}
+          onLayoutSwitchToTargetAfterApplyChange={onLayoutSwitchToTargetAfterApplyChange}
+          layoutMirrorWorkspaceIdOnSave={layoutMirrorWorkspaceIdOnSave}
+          onLayoutMirrorWorkspaceIdOnSaveChange={onLayoutMirrorWorkspaceIdOnSaveChange}
+        />
       </div>
     </section>
   );

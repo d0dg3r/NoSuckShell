@@ -1,6 +1,7 @@
 //! Built-in plugin registry and host-config enrichment hooks.
 mod file_workspace;
 mod proxmux;
+mod hetzner;
 
 use crate::license;
 use crate::ssh_config::HostConfig;
@@ -30,7 +31,7 @@ pub struct PluginManifest {
 }
 
 pub struct HostEnrichContext<'a> {
-    pub original: &'a HostConfig,
+    pub _original: &'a HostConfig,
 }
 
 pub trait NssPlugin: Send + Sync {
@@ -51,6 +52,7 @@ pub fn register_builtin_plugins() {
     let _ = REGISTRY.set(vec![
         &file_workspace::FileWorkspacePlugin as &dyn NssPlugin,
         &proxmux::ProxmuxPlugin as &dyn NssPlugin,
+        &hetzner::HetznerPlugin as &dyn NssPlugin,
     ]);
 }
 
@@ -104,7 +106,7 @@ pub fn set_plugin_enabled_backend(plugin_id: &str, enabled: bool) -> Result<()> 
 
 /// Runs after store resolution; may adjust `HostConfig` for SSH/SFTP.
 pub fn enrich_resolved_host(resolved: &mut HostConfig, original: &HostConfig) -> Result<()> {
-    let ctx = HostEnrichContext { original };
+    let ctx = HostEnrichContext { _original: original };
     let state = load_plugins_file()?;
     for plugin in all_plugins() {
         let id = plugin.manifest().id.clone();

@@ -3,11 +3,13 @@ import { useClampedContextMenuPosition } from "../hooks/useClampedContextMenuPos
 
 export type FilePaneContextMenuAction =
   | "newFolder"
+  | "newFile"
   | "refresh"
   | "paste"
   | "copy"
   | "rename"
   | "delete"
+  | "editFile"
   | "openInOs";
 
 type Props = {
@@ -42,6 +44,7 @@ export function FilePaneContextMenu({
 
   const hasSelection = Boolean(selectedName);
   const showOpen = showOpenInOs && hasSelection && !selectedIsDir;
+  const showEdit = hasSelection && !selectedIsDir;
   const showCopy = hasSelection && !selectedIsDir;
 
   /** Portals to body so position:fixed matches viewport clientX/Y (avoids backdrop-filter containing block on .panel). */
@@ -69,6 +72,9 @@ export function FilePaneContextMenu({
         <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("newFolder")}>
           New folder…
         </button>
+        <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("newFile")}>
+          New text file…
+        </button>
         <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("refresh")}>
           Refresh
         </button>
@@ -84,10 +90,15 @@ export function FilePaneContextMenu({
                 Copy
               </button>
             ) : null}
+            {showEdit ? (
+              <button type="button" role="menuitem" className="context-menu-item" onClick={() => onAction("editFile")}>
+                Edit file…
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
-              className={`context-menu-item ${showCopy ? "" : "separator-above"}`}
+              className={`context-menu-item ${showCopy || showEdit ? "" : "separator-above"}`}
               onClick={() => onAction("rename")}
             >
               Rename…

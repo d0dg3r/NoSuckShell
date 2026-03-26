@@ -9,9 +9,19 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: [["list"]],
+  reporter: [
+    ["list"],
+    [
+      "html",
+      {
+        open: process.env.CI ? "never" : "on-failure",
+        outputFolder: "playwright-report",
+      },
+    ],
+  ],
   use: {
     baseURL: previewOrigin,
+    screenshot: "only-on-failure",
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

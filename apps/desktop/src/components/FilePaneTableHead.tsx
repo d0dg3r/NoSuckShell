@@ -9,8 +9,8 @@ type Props = {
   sizeWidth: number;
   modifiedColWidth: number;
   actionsColWidth: number;
-  onGripPointerDown: (grip: 0 | 1 | 2) => (e: ReactPointerEvent<HTMLSpanElement>) => void;
-  onGripDoubleClick: (grip: 0 | 1 | 2) => (e: ReactMouseEvent<HTMLSpanElement>) => void;
+  onGripPointerDown: (grip: 0 | 1 | 2 | 3 | 4) => (e: ReactPointerEvent<HTMLSpanElement>) => void;
+  onGripDoubleClick: (grip: 0 | 1 | 2 | 3 | 4) => (e: ReactMouseEvent<HTMLSpanElement>) => void;
   onOptimalColumnWidths: () => void;
   optimalWidthsDisabled?: boolean;
 };
@@ -72,16 +72,32 @@ export function FilePaneTableHead({
               className="file-pane-col-resize-grip"
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize permissions column versus size column"
+              aria-label="Resize permissions column versus user column"
               onPointerDown={onGripPointerDown(1)}
               onDoubleClick={onGripDoubleClick(1)}
             />
           </th>
-          <th className="file-pane-th file-pane-th-owner" scope="col">
+          <th className="file-pane-th file-pane-th-owner file-pane-th-resizable" scope="col">
             <span className="file-pane-th-text">User</span>
+            <span
+              className="file-pane-col-resize-grip"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize user column versus group column"
+              onPointerDown={onGripPointerDown(2)}
+              onDoubleClick={onGripDoubleClick(2)}
+            />
           </th>
-          <th className="file-pane-th file-pane-th-owner" scope="col">
+          <th className="file-pane-th file-pane-th-owner file-pane-th-resizable" scope="col">
             <span className="file-pane-th-text">Group</span>
+            <span
+              className="file-pane-col-resize-grip"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize group column versus size column"
+              onPointerDown={onGripPointerDown(3)}
+              onDoubleClick={onGripDoubleClick(3)}
+            />
           </th>
           <th className="file-pane-th file-pane-th-resizable" scope="col">
             <span className="file-pane-th-text">Size</span>
@@ -90,8 +106,8 @@ export function FilePaneTableHead({
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize between size and modified columns"
-              onPointerDown={onGripPointerDown(2)}
-              onDoubleClick={onGripDoubleClick(2)}
+              onPointerDown={onGripPointerDown(4)}
+              onDoubleClick={onGripDoubleClick(4)}
             />
           </th>
           <th scope="col">Modified</th>

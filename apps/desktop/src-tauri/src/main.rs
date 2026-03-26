@@ -1,6 +1,7 @@
 //! On Windows, the default console subsystem spawns a second (blank) window next to the WebView.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod app_prefs;
 mod backup;
 mod license;
 mod plugins;
@@ -19,7 +20,9 @@ mod ssh_config;
 mod ssh_home;
 mod store_models;
 mod view_profiles;
+mod sensitive;
 
+use app_prefs::AppPreferences;
 use backup::{create_backup_payload, export_encrypted_backup, import_encrypted_backup};
 use host_metadata::{load_metadata, save_metadata, touch_host_last_used as touch_host_last_used_backend, HostMetadataStore};
 use layout_profiles::{
@@ -39,17 +42,27 @@ use secure_store::{
 use sftp::{
     copy_local_file as sftp_copy_local_file_backend,
     create_local_dir as sftp_create_local_dir_backend,
+    create_local_text_file as sftp_create_local_text_file_backend,
     delete_local_entry as sftp_delete_local_entry_backend,
+    delete_local_entry_with_mode as sftp_delete_local_entry_with_mode_backend,
     download_remote_file as sftp_download_remote_file_backend,
     get_local_home_canonical_path as sftp_get_local_home_canonical_path_backend,
     list_local_dir as sftp_list_local_dir_backend,
     list_remote_dir as sftp_list_remote_dir_backend,
     open_local_entry_in_os as sftp_open_local_entry_in_os_backend,
+    read_local_text_file as sftp_read_local_text_file_backend,
     rename_local_entry as sftp_rename_local_entry_backend,
     sftp_create_dir as sftp_create_dir_backend,
+    sftp_create_text_file as sftp_create_text_file_backend,
     sftp_delete_entry as sftp_delete_entry_backend,
+    sftp_delete_entry_with_mode as sftp_delete_entry_with_mode_backend,
+    sftp_read_text_file as sftp_read_text_file_backend,
     sftp_rename_entry as sftp_rename_entry_backend,
+    sftp_write_text_file as sftp_write_text_file_backend,
     upload_remote_file as sftp_upload_remote_file_backend,
+    write_local_text_file as sftp_write_local_text_file_backend,
+    DeleteEntryMode,
+    DeleteTreeResult,
     RemoteSshSpec,
 };
 use session::SessionState;
@@ -64,7 +77,8 @@ use view_profiles::{
     reorder_view_profiles as reorder_view_profiles_backend, save_view_profile as save_view_profile_backend,
     ViewProfile,
 };
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::Emitter;
 use tauri::Manager;
@@ -120,7 +134,9 @@ fn get_ssh_dir_info() -> Result<SshDirInfo, String> {
 
 #[tauri::command]
 fn set_ssh_dir_override(path: Option<String>) -> Result<(), String> {
-    ssh_home::apply_ssh_dir_override_from_ipc(path).map_err(|err| err.to_string())
+    ssh_home::apply_ssh_dir_override_from_ipc(path).map_err(|err| err.to_string())?;
+    app_prefs::reload_from_disk();
+    Ok(())
 }
 
 #[tauri::command]
@@ -456,6 +472,7 @@ fn open_in_app_webview_window(
     title: String,
     url: String,
     allow_insecure_tls: bool,
+    tls_trusted_cert_pem: Option<String>,
     auto_console_url: Option<String>,
 ) -> Result<String, String> {
     validate_external_http_url(&url)?;
@@ -505,7 +522,7 @@ fn open_in_app_webview_window(
             state,
         );
     }
-    if allow_insecure_tls {
+    if allow_insecure_tls || tls_trusted_cert_pem.filter(|s| !s.trim().is_empty()).is_some() {
         webkit_set_tls_errors_ignored_for_window(&win)?;
         let _ = win.reload();
     }
@@ -695,6 +712,15 @@ fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn delete_local_entry_with_mode(
+    parent_path_key: String,
+    name: String,
+    mode: DeleteEntryMode,
+) -> Result<DeleteTreeResult, String> {
+    sftp_delete_local_entry_with_mode_backend(parent_path_key, name, mode)
+}
+
+#[tauri::command]
 fn rename_local_entry(parent_path_key: String, old_name: String, new_name: String) -> Result<(), String> {
     sftp_rename_local_entry_backend(parent_path_key, old_name, new_name)
 }
@@ -702,6 +728,21 @@ fn rename_local_entry(parent_path_key: String, old_name: String, new_name: Strin
 #[tauri::command]
 fn open_local_entry_in_os(parent_path_key: String, name: String) -> Result<(), String> {
     sftp_open_local_entry_in_os_backend(parent_path_key, name)
+}
+
+#[tauri::command]
+fn read_local_text_file(parent_path_key: String, name: String) -> Result<String, String> {
+    sftp_read_local_text_file_backend(parent_path_key, name)
+}
+
+#[tauri::command]
+fn write_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+    sftp_write_local_text_file_backend(parent_path_key, name, content)
+}
+
+#[tauri::command]
+fn create_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+    sftp_create_local_text_file_backend(parent_path_key, name, content)
 }
 
 #[tauri::command]
@@ -715,6 +756,16 @@ fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> 
 }
 
 #[tauri::command]
+fn sftp_delete_entry_with_mode(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    mode: DeleteEntryMode,
+) -> Result<DeleteTreeResult, String> {
+    sftp_delete_entry_with_mode_backend(spec, parent_path, name, mode)
+}
+
+#[tauri::command]
 fn sftp_rename_entry(
     spec: RemoteSshSpec,
     parent_path: String,
@@ -722,6 +773,31 @@ fn sftp_rename_entry(
     new_name: String,
 ) -> Result<(), String> {
     sftp_rename_entry_backend(spec, parent_path, old_name, new_name)
+}
+
+#[tauri::command]
+fn sftp_read_text_file(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<String, String> {
+    sftp_read_text_file_backend(spec, parent_path, name)
+}
+
+#[tauri::command]
+fn sftp_create_text_file(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
+    sftp_create_text_file_backend(spec, parent_path, name, content)
+}
+
+#[tauri::command]
+fn sftp_write_text_file(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
+    sftp_write_text_file_backend(spec, parent_path, name, content)
 }
 
 #[tauri::command]
@@ -914,6 +990,79 @@ fn clear_license() -> Result<(), String> {
     license::clear_license_backend().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_app_preferences() -> Result<AppPreferences, String> {
+    Ok(app_prefs::current_preferences())
+}
+
+#[tauri::command]
+fn save_app_preferences(prefs: AppPreferences) -> Result<AppPreferences, String> {
+    app_prefs::save_preferences(prefs)
+}
+
+static PROXMUX_STANDALONE_PAYLOADS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+const MAX_PROXMUX_STANDALONE_PAYLOAD_BYTES: usize = 65_536;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenProxmoxNativeConsoleWindowArgs {
+    title: String,
+    payload_json: String,
+}
+
+/// Opens a second app window loading `index.html`; the frontend reads the payload via [`take_proxmox_standalone_payload`].
+/// This avoids loading the Proxmox **web UI** in an external webview (which would require a separate PVE login cookie).
+#[tauri::command]
+fn open_proxmox_native_console_window(
+    app: tauri::AppHandle,
+    args: OpenProxmoxNativeConsoleWindowArgs,
+) -> Result<(), String> {
+    if args.payload_json.len() > MAX_PROXMUX_STANDALONE_PAYLOAD_BYTES {
+        return Err("Standalone console payload is too large.".to_string());
+    }
+    if args.payload_json.trim().is_empty() {
+        return Err("Standalone console payload is empty.".to_string());
+    }
+    let label = format!("px-{}", uuid::Uuid::new_v4());
+    {
+        let mut map = PROXMUX_STANDALONE_PAYLOADS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|e| e.to_string())?;
+        map.insert(label.clone(), args.payload_json);
+    }
+    let window_title: String = args.title.trim().chars().take(120).collect();
+    let window_title = if window_title.is_empty() {
+        "Proxmox console".to_string()
+    } else {
+        window_title
+    };
+    // Same entry URL as `open_aux_window` so dev (`devUrl`) and production both resolve correctly.
+    let build_result = WebviewWindowBuilder::new(&app, &label, WebviewUrl::default())
+        .title(window_title)
+        .inner_size(1200.0, 800.0)
+        .build();
+    let win = match build_result {
+        Ok(w) => w,
+        Err(e) => {
+            let err_s = e.to_string();
+            return Err(err_s);
+        }
+    };
+    win.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn take_proxmox_standalone_payload(label: String) -> Result<Option<String>, String> {
+    let mut map = PROXMUX_STANDALONE_PAYLOADS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|e| e.to_string())?;
+    Ok(map.remove(&label))
+}
+
 fn main() {
     plugins::register_builtin_plugins();
     tauri::Builder::default()
@@ -933,6 +1082,8 @@ fn main() {
             open_external_url,
             open_in_app_webview_window,
             navigate_in_app_webview_window,
+            open_proxmox_native_console_window,
+            take_proxmox_standalone_payload,
             open_virt_viewer_from_spice_payload,
             start_session,
             start_local_session,
@@ -947,11 +1098,19 @@ fn main() {
             copy_local_file,
             create_local_dir,
             delete_local_entry,
+            delete_local_entry_with_mode,
             rename_local_entry,
             open_local_entry_in_os,
+            read_local_text_file,
+            write_local_text_file,
+            create_local_text_file,
             sftp_create_dir,
             sftp_delete_entry,
+            sftp_delete_entry_with_mode,
             sftp_rename_entry,
+            sftp_read_text_file,
+            sftp_create_text_file,
+            sftp_write_text_file,
             broadcast_file_transfer_clipboard,
             open_aux_window,
             send_input,
@@ -984,7 +1143,9 @@ fn main() {
             proxmux_ws_proxy::proxmux_ws_proxy_stop,
             activate_license,
             license_status,
-            clear_license
+            clear_license,
+            get_app_preferences,
+            save_app_preferences
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoSuckShell");

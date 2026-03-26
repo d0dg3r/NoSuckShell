@@ -7,7 +7,7 @@ export type AppSettingsTab =
   | "data"
   | "help";
 
-export type ConnectionSubTab = "hosts" | "ssh" | "proxmux";
+export type ConnectionSubTab = "hosts" | "ssh" | "proxmux" | "hetzner";
 
 export type WorkspaceSubTab = "views" | "layout" | "files";
 
@@ -22,6 +22,8 @@ export type FileExportDestMode = "fixed" | "ask";
 export type FileExportArchiveFormat = "tarGz" | "zip";
 
 export type IdentityStoreSubTab = "overview" | "users" | "groups" | "tags" | "keys";
+
+export type IntegrationsSubTab = "plugins" | "nss-commander";
 
 export type DensityProfile = "aggressive" | "balanced" | "safe";
 export type ListTonePreset = "subtle" | "strong";

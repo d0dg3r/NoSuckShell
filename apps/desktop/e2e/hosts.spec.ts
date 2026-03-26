@@ -23,4 +23,15 @@ test.describe("hosts", () => {
 
     await expect(page.locator(".xterm-rows")).toContainText(/e2e mock shell/, { timeout: 15_000 });
   });
+
+  test("quick-add Add user opens Identity Store on Users sub-tab", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Open add menu" }).click();
+    await page.getByRole("menu").getByRole("button", { name: "Add user" }).click();
+
+    await expect(page.getByRole("tab", { name: "Identity Store" })).toHaveAttribute("aria-selected", "true");
+    const usersSubtab = page.locator('[aria-label="Identity store sections"]').getByRole("button", { name: "Users" });
+    await expect(usersSubtab).toHaveClass(/is-active/);
+  });
 });

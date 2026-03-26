@@ -1,10 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { mergeManagedHostStarBlock } from "../../../features/ssh-config-managed-block";
-import type { SshDirInfo } from "../../../types";
+import {
+  MAX_CONNECT_TIMEOUT_SECS,
+  MAX_HTTP_REQUEST_TIMEOUT_SECS,
+  MIN_CONNECT_TIMEOUT_SECS,
+  MIN_HTTP_REQUEST_TIMEOUT_SECS,
+} from "../../../features/connect-timeouts";
+import type { AppPreferences, SshDirInfo } from "../../../types";
 import type React from "react";
 import { SettingsHelpHint } from "../SettingsHelpHint";
 
 export type AppSettingsSshTabProps = {
+  appPreferences: AppPreferences;
+  onSaveAppPreferences: (prefs: AppPreferences) => Promise<void>;
   setError: (message: string) => void;
   setSshConfigRaw: React.Dispatch<React.SetStateAction<string>>;
   sshConfigRaw: string;
@@ -18,6 +26,8 @@ export type AppSettingsSshTabProps = {
 };
 
 export function AppSettingsSshTab({
+  appPreferences,
+  onSaveAppPreferences,
   setError,
   setSshConfigRaw,
   sshConfigRaw,
@@ -29,6 +39,37 @@ export function AppSettingsSshTab({
   onApplySshDirOverride,
   onResetSshDirOverride,
 }: AppSettingsSshTabProps) {
+  const [connectTimeoutDraft, setConnectTimeoutDraft] = useState(String(appPreferences.connectTimeoutSecs));
+  const [httpRequestTimeoutDraft, setHttpRequestTimeoutDraft] = useState(String(appPreferences.httpRequestTimeoutSecs));
+  const [timeoutsSaving, setTimeoutsSaving] = useState(false);
+
+  useEffect(() => {
+    setConnectTimeoutDraft(String(appPreferences.connectTimeoutSecs));
+    setHttpRequestTimeoutDraft(String(appPreferences.httpRequestTimeoutSecs));
+  }, [appPreferences.connectTimeoutSecs, appPreferences.httpRequestTimeoutSecs]);
+
+  const saveTimeouts = async () => {
+    const c = Number.parseInt(connectTimeoutDraft.trim(), 10);
+    const h = Number.parseInt(httpRequestTimeoutDraft.trim(), 10);
+    if (!Number.isFinite(c) || !Number.isFinite(h)) {
+      setError("Timeouts must be whole numbers.");
+      return;
+    }
+    setError("");
+    setTimeoutsSaving(true);
+    try {
+      await onSaveAppPreferences({
+        ...appPreferences,
+        connectTimeoutSecs: c,
+        httpRequestTimeoutSecs: h,
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTimeoutsSaving(false);
+    }
+  };
+
   const [sshHostStarServerAliveInterval, setSshHostStarServerAliveInterval] = useState("");
   const [sshHostStarServerAliveCountMax, setSshHostStarServerAliveCountMax] = useState("");
   const [sshHostStarTcpKeepAlive, setSshHostStarTcpKeepAlive] = useState<"" | "yes" | "no">("");
@@ -106,6 +147,62 @@ export function AppSettingsSshTab({
           </button>
           <button type="button" className="btn btn-settings-tool" onClick={() => void onResetSshDirOverride()}>
             Use default
+          </button>
+        </div>
+      </section>
+      <section className="settings-card">
+        <header className="settings-card-head">
+          <div className="settings-card-head-row">
+            <h3>Timeouts</h3>
+            <SettingsHelpHint
+              topic="Connection and API timeouts"
+              description={`Connection timeout caps initial TCP/TLS handshake, SSH ConnectTimeout, SFTP connect, Proxmox HTTP connect, the local WebSocket bridge, and in-app console WebSocket open waits (${MIN_CONNECT_TIMEOUT_SECS}–${MAX_CONNECT_TIMEOUT_SECS} seconds). HTTP request timeout is the overall Proxmox API request budget, including large responses (${MIN_HTTP_REQUEST_TIMEOUT_SECS}–${MAX_HTTP_REQUEST_TIMEOUT_SECS} seconds). Values are clamped when saved.`}
+            />
+          </div>
+          <p className="settings-card-lead">
+            Connection attempts and Proxmox API calls use these limits. Short values fail faster on bad networks; raise them for high latency or slow clusters.
+          </p>
+        </header>
+        <div className="host-form-grid settings-ssh-hoststar-grid">
+          <label className="field">
+            <span className="field-label">Connection timeout (seconds)</span>
+            <input
+              className="input settings-numeric-input"
+              value={connectTimeoutDraft}
+              onChange={(event) => setConnectTimeoutDraft(event.target.value)}
+              inputMode="numeric"
+              min={MIN_CONNECT_TIMEOUT_SECS}
+              max={MAX_CONNECT_TIMEOUT_SECS}
+              aria-describedby="timeout-connect-hint"
+            />
+            <span id="timeout-connect-hint" className="field-hint muted-copy">
+              {MIN_CONNECT_TIMEOUT_SECS}–{MAX_CONNECT_TIMEOUT_SECS} — SSH, SFTP TCP connect, Proxmox connect, console WebSockets
+            </span>
+          </label>
+          <label className="field">
+            <span className="field-label">HTTP request timeout (seconds)</span>
+            <input
+              className="input settings-numeric-input"
+              value={httpRequestTimeoutDraft}
+              onChange={(event) => setHttpRequestTimeoutDraft(event.target.value)}
+              inputMode="numeric"
+              min={MIN_HTTP_REQUEST_TIMEOUT_SECS}
+              max={MAX_HTTP_REQUEST_TIMEOUT_SECS}
+              aria-describedby="timeout-http-hint"
+            />
+            <span id="timeout-http-hint" className="field-hint muted-copy">
+              {MIN_HTTP_REQUEST_TIMEOUT_SECS}–{MAX_HTTP_REQUEST_TIMEOUT_SECS} — full Proxmox API request including response body
+            </span>
+          </label>
+        </div>
+        <div className="action-row">
+          <button
+            type="button"
+            className="btn btn-settings-commit"
+            disabled={timeoutsSaving}
+            onClick={() => void saveTimeouts()}
+          >
+            {timeoutsSaving ? "Saving…" : "Save timeouts"}
           </button>
         </div>
       </section>

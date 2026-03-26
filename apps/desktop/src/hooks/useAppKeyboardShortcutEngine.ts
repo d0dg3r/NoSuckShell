@@ -18,7 +18,6 @@ export type KeyboardShortcutEngineActions = {
   openSettings: () => void;
   toggleSidebar: () => void;
   openQuickConnect: () => void;
-  openLayoutCommandCenter: () => void;
   focusNextPane: () => void;
   focusPreviousPane: () => void;
   dismissPrimaryOverlay: () => void;
@@ -128,7 +127,6 @@ export function useAppKeyboardShortcutEngine(
           a.openQuickConnect();
           break;
         case "openLayoutCommandCenter":
-          a.openLayoutCommandCenter();
           break;
         case "focusNextPane":
           a.focusNextPane();
