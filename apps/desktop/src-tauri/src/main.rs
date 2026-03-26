@@ -59,6 +59,7 @@ use sftp::{
     sftp_read_text_file as sftp_read_text_file_backend,
     sftp_rename_entry as sftp_rename_entry_backend,
     sftp_write_text_file as sftp_write_text_file_backend,
+    remove_known_host_entries as sftp_remove_known_host_entries_backend,
     upload_remote_file as sftp_upload_remote_file_backend,
     write_local_text_file as sftp_write_local_text_file_backend,
     DeleteEntryMode,
@@ -751,6 +752,11 @@ fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: String) -
 }
 
 #[tauri::command]
+fn sftp_remove_known_host_entries(hosts: Vec<String>) -> Result<(), String> {
+    sftp_remove_known_host_entries_backend(hosts)
+}
+
+#[tauri::command]
 fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
     sftp_delete_entry_backend(spec, parent_path, name)
 }
@@ -1105,6 +1111,7 @@ fn main() {
             write_local_text_file,
             create_local_text_file,
             sftp_create_dir,
+            sftp_remove_known_host_entries,
             sftp_delete_entry,
             sftp_delete_entry_with_mode,
             sftp_rename_entry,

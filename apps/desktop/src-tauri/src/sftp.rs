@@ -162,6 +162,36 @@ fn effective_known_hosts_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".ssh/known_hosts"))
 }
 
+/// Loads the same host key sources OpenSSH uses by default: user `known_hosts` (+ legacy
+/// `known_hosts2`), then system `ssh_known_hosts` (+ `ssh_known_hosts2` on Unix, or
+/// `%ProgramData%\ssh\ssh_known_hosts` on Windows). Multiple `read_file` calls merge into one set.
+fn load_known_hosts_for_verify(kh: &mut ssh2::KnownHosts) {
+    let mut load = |path: &Path| {
+        if path.is_file() {
+            let _ = kh.read_file(path, ssh2::KnownHostFileKind::OpenSSH);
+        }
+    };
+
+    load(&effective_known_hosts_path());
+    if let Ok(dir) = crate::ssh_home::effective_ssh_dir() {
+        load(&dir.join("known_hosts2"));
+    }
+    #[cfg(unix)]
+    {
+        load(Path::new("/etc/ssh/ssh_known_hosts"));
+        load(Path::new("/etc/ssh/ssh_known_hosts2"));
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(pd) = std::env::var("ProgramData") {
+            let t = pd.trim();
+            if !t.is_empty() {
+                load(&Path::new(t).join("ssh").join("ssh_known_hosts"));
+            }
+        }
+    }
+}
+
 fn default_ssh_username() -> String {
     #[cfg(unix)]
     if let Ok(u) = std::env::var("USER") {
@@ -225,26 +255,189 @@ pub(crate) fn normalize_remote_path(raw: &str) -> Result<String, String> {
     }
 }
 
-fn verify_known_host(sess: &Session, host: &str, port: u16) -> Result<(), String> {
+/// Host name variants to try against OpenSSH `known_hosts` (order matters).
+fn known_hosts_check_candidates(host_name: &str, host_alias: &str, connected_ip: &str) -> Vec<String> {
+    let hn = host_name.trim().to_string();
+    let al = host_alias.trim().to_string();
+    let ip = connected_ip.trim().to_string();
+    let mut out: Vec<String> = Vec::new();
+    if !hn.is_empty() {
+        out.push(hn);
+    }
+    if !al.is_empty() && !out.contains(&al) {
+        out.push(al);
+    }
+    if !ip.is_empty() && !out.contains(&ip) {
+        let is_v6 = ip
+            .parse::<std::net::IpAddr>()
+            .map(|a| a.is_ipv6())
+            .unwrap_or(false);
+        out.push(ip.clone());
+        if is_v6 {
+            let bracketed = format!("[{ip}]");
+            if !out.contains(&bracketed) {
+                out.push(bracketed);
+            }
+        }
+    }
+    out
+}
+
+/// Prefix for structured host-key mismatch errors; the frontend detects this and offers interactive
+/// resolution. Everything after the prefix is a JSON `KnownHostMismatchPayload`.
+const KNOWN_HOST_MISMATCH_PREFIX: &str = "KNOWN_HOST_MISMATCH:";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownHostConflictLine {
+    pub host_label: String,
+    pub line_number: usize,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownHostMismatchPayload {
+    pub mismatched_hosts: Vec<String>,
+    pub known_hosts_path: String,
+    pub conflicting_lines: Vec<KnownHostConflictLine>,
+}
+
+/// Searches user + global `known_hosts` files for lines matching the given hostnames. Runs
+/// `ssh-keygen -F <host>` for each name to support both plain-text and hashed entries.
+fn find_conflicting_known_host_lines(hosts: &[String]) -> Vec<KnownHostConflictLine> {
+    let mut out: Vec<KnownHostConflictLine> = Vec::new();
+    for host in hosts {
+        let Ok(output) = std::process::Command::new("ssh-keygen")
+            .args(["-F", host.as_str()])
+            .output()
+        else {
+            continue;
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut pending_line_number: Option<usize> = None;
+        for raw_line in stdout.lines() {
+            if let Some(rest) = raw_line.strip_prefix("# Host ") {
+                if let Some(pos) = rest.rfind(" found: line ") {
+                    if let Ok(n) = rest[pos + " found: line ".len()..].trim().parse::<usize>() {
+                        pending_line_number = Some(n);
+                    }
+                }
+                continue;
+            }
+            if raw_line.starts_with('#') || raw_line.trim().is_empty() {
+                continue;
+            }
+            out.push(KnownHostConflictLine {
+                host_label: host.clone(),
+                line_number: pending_line_number.unwrap_or(0),
+                content: raw_line.to_string(),
+            });
+            pending_line_number = None;
+        }
+    }
+    out
+}
+
+/// Verifies the server host key like OpenSSH: loads user + system known-hosts files, then tries
+/// `HostName`, the config `Host` alias when distinct, and the resolved peer IP (and `[ipv6]` form).
+fn verify_known_host(
+    sess: &Session,
+    host_name: &str,
+    port: u16,
+    host_alias: &str,
+    connected_peer_ip: &str,
+) -> Result<(), String> {
     let Some((key_data, _key_type)) = sess.host_key() else {
         return Err("Server sent no host key.".to_string());
     };
     let mut known_hosts = sess.known_hosts().map_err(|e| format!("known_hosts: {e}"))?;
-    let kh_path = effective_known_hosts_path();
-    if kh_path.is_file() {
-        let _ = known_hosts.read_file(&kh_path, ssh2::KnownHostFileKind::OpenSSH);
+    load_known_hosts_for_verify(&mut known_hosts);
+    let host_to_check = host_name.trim();
+    let candidates = known_hosts_check_candidates(host_name, host_alias, connected_peer_ip);
+    let mut mismatch_labels: Vec<String> = Vec::new();
+
+    for name in &candidates {
+        match known_hosts.check_port(name.as_str(), port, key_data) {
+            ssh2::CheckResult::Match => {
+                return Ok(());
+            }
+            ssh2::CheckResult::Mismatch => {
+                mismatch_labels.push(name.clone());
+            }
+            ssh2::CheckResult::Failure => {
+                return Err("Host key verification failed.".to_string());
+            }
+            ssh2::CheckResult::NotFound => {}
+        }
     }
-    let host_to_check = host.trim();
-    let check = known_hosts.check_port(host_to_check, port, key_data);
-    match check {
-        ssh2::CheckResult::Match => Ok(()),
-        ssh2::CheckResult::Mismatch => Err(format!(
-            "Host key mismatch for {host_to_check}. Remove the stale key from known_hosts or fix the server."
-        )),
-        ssh2::CheckResult::NotFound => Err(format!(
-            "Host key for {host_to_check} is not in known_hosts. Connect once in the terminal and accept the key, then try again."
-        )),
-        ssh2::CheckResult::Failure => Err("Host key verification failed.".to_string()),
+
+    if !mismatch_labels.is_empty() {
+        let kh_path = effective_known_hosts_path()
+            .to_string_lossy()
+            .into_owned();
+        let conflicting_lines = find_conflicting_known_host_lines(&mismatch_labels);
+        let payload = KnownHostMismatchPayload {
+            mismatched_hosts: mismatch_labels,
+            known_hosts_path: kh_path,
+            conflicting_lines,
+        };
+        if let Ok(json) = serde_json::to_string(&payload) {
+            return Err(format!("{KNOWN_HOST_MISMATCH_PREFIX}{json}"));
+        }
+        return Err("Host key mismatch. Remove stale entries from known_hosts.".to_string());
+    }
+    Err(format!(
+        "Host key for {host_to_check} is not in known_hosts. Connect once in the terminal and accept the key, then try again."
+    ))
+}
+
+/// Removes entries for each hostname from every known_hosts file OpenSSH would consult.
+pub fn remove_known_host_entries(hosts: Vec<String>) -> Result<(), String> {
+    let kh_path = effective_known_hosts_path();
+    let mut paths_to_clean: Vec<std::path::PathBuf> = vec![kh_path];
+    if let Ok(dir) = crate::ssh_home::effective_ssh_dir() {
+        let kh2 = dir.join("known_hosts2");
+        if kh2.is_file() {
+            paths_to_clean.push(kh2);
+        }
+    }
+    #[cfg(unix)]
+    {
+        let g = Path::new("/etc/ssh/ssh_known_hosts");
+        if g.is_file() {
+            paths_to_clean.push(g.to_path_buf());
+        }
+    }
+    let mut errors: Vec<String> = Vec::new();
+    for host in &hosts {
+        for kh in &paths_to_clean {
+            let res = std::process::Command::new("ssh-keygen")
+                .args([
+                    "-R",
+                    host.as_str(),
+                    "-f",
+                    &kh.to_string_lossy(),
+                ])
+                .output();
+            match res {
+                Ok(out) if !out.status.success() => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    if !stderr.trim().is_empty() {
+                        errors.push(format!("{host} ({}): {}", kh.display(), stderr.trim()));
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("{host}: {e}"));
+                }
+                _ => {}
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
 }
 
@@ -284,6 +477,7 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
     let addr = addrs
         .next()
         .ok_or_else(|| format!("Could not resolve {host_name}"))?;
+    let peer_ip = addr.ip().to_string();
     let tcp = TcpStream::connect_timeout(&addr, crate::app_prefs::connect_timeout_duration())
         .map_err(|e| format!("TCP connect to {addr_label}: {e}"))?;
     let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
@@ -291,9 +485,10 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
 
     let mut sess = Session::new().map_err(|e| format!("SSH session: {e}"))?;
     sess.set_tcp_stream(tcp);
+    sess.set_timeout(crate::app_prefs::libssh2_session_timeout_ms());
     sess.handshake()
         .map_err(|e| format!("SSH handshake failed: {e}"))?;
-    verify_known_host(&sess, host_name, host.port)?;
+    verify_known_host(&sess, host_name, host.port, &host.host, &peer_ip)?;
     let username = resolve_username(host);
     authenticate(&sess, &username, host)?;
     Ok(sess)

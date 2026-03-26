@@ -356,6 +356,9 @@ export const createLocalTextFile = (parentPathKey: string, name: string, content
 export const sftpCreateDir = (spec: RemoteSshSpec, parentPath: string, dirName: string): Promise<void> =>
   invoke("sftp_create_dir", { spec, parentPath, dirName });
 
+export const sftpRemoveKnownHostEntries = (hosts: string[]): Promise<void> =>
+  invoke("sftp_remove_known_host_entries", { hosts });
+
 export const sftpDeleteEntry = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<void> =>
   invoke("sftp_delete_entry", { spec, parentPath, name });
 

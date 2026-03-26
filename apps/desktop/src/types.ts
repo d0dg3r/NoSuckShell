@@ -336,3 +336,28 @@ export type HetznerServerRow = {
   ip4: string;
   ip6: string;
 };
+
+export type KnownHostConflictLine = {
+  hostLabel: string;
+  lineNumber: number;
+  content: string;
+};
+
+export type KnownHostMismatchPayload = {
+  mismatchedHosts: string[];
+  knownHostsPath: string;
+  conflictingLines: KnownHostConflictLine[];
+};
+
+const KNOWN_HOST_MISMATCH_PREFIX = "KNOWN_HOST_MISMATCH:";
+
+export function parseKnownHostMismatch(error: string): KnownHostMismatchPayload | null {
+  if (!error.startsWith(KNOWN_HOST_MISMATCH_PREFIX)) {
+    return null;
+  }
+  try {
+    return JSON.parse(error.slice(KNOWN_HOST_MISMATCH_PREFIX.length)) as KnownHostMismatchPayload;
+  } catch {
+    return null;
+  }
+}

@@ -36,9 +36,11 @@ import {
   sftpDeleteEntryWithMode,
   sftpListRemoteDir,
   sftpReadTextFile,
+  sftpRemoveKnownHostEntries,
   sftpRenameEntry,
   sftpWriteTextFile,
 } from "../tauri-api";
+import { parseKnownHostMismatch, type KnownHostMismatchPayload } from "../types";
 import type { RemoteSshSpec, SftpDirEntry } from "../types";
 import type { FileExportArchiveFormat } from "./settings/app-settings-types";
 import type { FilePaneContextMenuAction } from "./FilePaneContextMenu";
@@ -131,6 +133,8 @@ export function RemoteFilePane({
   const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
+  const [hostKeyMismatch, setHostKeyMismatch] = useState<KnownHostMismatchPayload | null>(null);
+  const [hostKeyFixBusy, setHostKeyFixBusy] = useState(false);
 
   /** Parent often passes a new `spec` object each render (`remoteSshSpecForPane`); never use `spec` as a hook dependency. */
   const remoteSpecIdentityKey =
@@ -164,11 +168,18 @@ export function RemoteFilePane({
     setLoading(true);
     setError(null);
     setLastOk(null);
+    setHostKeyMismatch(null);
     try {
       const list = await sftpListRemoteDir(spec, path);
       setEntries(list);
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      const mismatch = parseKnownHostMismatch(msg);
+      if (mismatch) {
+        setHostKeyMismatch(mismatch);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -736,8 +747,8 @@ export function RemoteFilePane({
       ) : null}
       {loading ? (
         <div className="file-pane-loading">
-          <InlineSpinner label="Loading remote directory" />
-          <span>Loading…</span>
+          <InlineSpinner label="Connecting to remote server" />
+          <span>Connecting…</span>
         </div>
       ) : (
         <div className="file-pane-table-wrap" ref={tableWrapRef}>
@@ -1010,6 +1021,78 @@ export function RemoteFilePane({
           <strong>Make writable + retry</strong>: set owner write/read permissions first, then retry strict delete.
         </p>
         <p>{deleteRecovery?.firstError ?? ""}</p>
+      </FilePaneConfirmDialog>
+
+      <FilePaneConfirmDialog
+        open={hostKeyMismatch !== null}
+        title="Host key mismatch"
+        confirmLabel="Remove and reconnect"
+        cancelLabel="Cancel"
+        confirmDanger
+        onCancel={() => {
+          setHostKeyMismatch(null);
+          setError("Connection cancelled — host key mismatch was not resolved.");
+        }}
+        onConfirm={() => {
+          const mismatch = hostKeyMismatch;
+          setHostKeyMismatch(null);
+          if (!mismatch) {
+            return;
+          }
+          void (async () => {
+            setHostKeyFixBusy(true);
+            setError(null);
+            try {
+              await sftpRemoveKnownHostEntries(mismatch.mismatchedHosts);
+              setLastOk("Stale host key entries removed. Reconnecting…");
+              await load();
+            } catch (e) {
+              setError(`Failed to remove entries: ${String(e)}`);
+            } finally {
+              setHostKeyFixBusy(false);
+            }
+          })();
+        }}
+      >
+        <p>
+          The server's host key does not match the key stored in{" "}
+          <code>{hostKeyMismatch?.knownHostsPath ?? "known_hosts"}</code>.
+        </p>
+        {hostKeyMismatch?.conflictingLines && hostKeyMismatch.conflictingLines.length > 0 ? (
+          <div style={{ marginTop: 8, marginBottom: 8 }}>
+            <strong>Conflicting entries:</strong>
+            <ul style={{ margin: "4px 0", paddingLeft: 20, listStyle: "disc", fontSize: "0.85em" }}>
+              {hostKeyMismatch.conflictingLines.map((line, i) => (
+                <li key={i}>
+                  <strong>{line.hostLabel}</strong>
+                  {line.lineNumber > 0 ? ` (line ${line.lineNumber})` : ""}
+                  {line.content ? (
+                    <>
+                      :{" "}
+                      <code style={{ wordBreak: "break-all", fontSize: "0.9em" }}>
+                        {line.content.length > 120 ? `${line.content.slice(0, 120)}…` : line.content}
+                      </code>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p>
+            Affected hosts: <strong>{hostKeyMismatch?.mismatchedHosts.join(", ") ?? ""}</strong>
+          </p>
+        )}
+        <p>
+          <strong>Remove and reconnect</strong> runs{" "}
+          <code>ssh-keygen -R</code> for each listed host and retries.
+        </p>
+        {hostKeyFixBusy ? (
+          <div style={{ marginTop: 8 }}>
+            <InlineSpinner label="Removing entries" />
+            <span> Removing…</span>
+          </div>
+        ) : null}
       </FilePaneConfirmDialog>
 
       <FilePaneDoubleDeleteDialog
