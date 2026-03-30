@@ -40,7 +40,7 @@ fs2 = "0.4"
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["serde", "alloc"] }
 hex = "0.4.3"
 open = "5.3"
-sha2 = "0.10"
+sha2 = "0.11"
 # Peer chain inspection (full chain for fetch); aligns with OpenSSL used by native-tls/reqwest.
 openssl = "0.10"
 
