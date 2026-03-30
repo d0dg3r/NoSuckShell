@@ -138,7 +138,7 @@ jobs:
           (cd "$out" && zip -r -q ../marketing-screenshots.zip .)
 
       - name: Upload marketing screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: marketing-screenshots
           if-no-files-found: error
@@ -273,7 +273,7 @@ jobs:
         run: npm run tauri:build
 
       - name: Upload platform bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.artifact_name }}
           if-no-files-found: warn
@@ -322,7 +322,7 @@ jobs:
                      sudo -u builduser makepkg --noconfirm"
 
       - name: Upload Arch Linux package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-linux-arch
           if-no-files-found: error
