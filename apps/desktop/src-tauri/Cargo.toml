@@ -45,7 +45,7 @@ sha2 = "0.11"
 openssl = "0.10"
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-soup3 = "0.5.0"
+soup3 = "0.9.0"
 webkit2gtk = { version = "2.0.2", features = ["v2_32"] }
 
 [dev-dependencies]
