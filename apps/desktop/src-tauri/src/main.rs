@@ -314,7 +314,7 @@ fn try_fire_proxmox_auto_console<R: tauri::Runtime>(
     target_os = "netbsd",
     target_os = "openbsd",
 ))]
-fn proxmox_cookie_list_has_auth_ticket(cookies: &mut [soup::Cookie]) -> bool {
+fn proxmox_cookie_list_has_auth_ticket(cookies: &mut [soup::auto::cookie::Cookie]) -> bool {
     for c in cookies.iter_mut() {
         if let Some(n) = c.name() {
             let s = n.as_str();
@@ -337,7 +337,7 @@ fn try_fire_proxmox_auto_console_when_cookies_have_ticket<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     webview_label: &str,
     state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
-    cookies: &mut [soup::Cookie],
+    cookies: &mut [soup::auto::cookie::Cookie],
     trigger: &'static str,
 ) {
     if !proxmox_cookie_list_has_auth_ticket(cookies) {
@@ -395,7 +395,7 @@ fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
                     &app_probe,
                     &label_probe,
                     &state_probe,
-                    &mut list,
+                    &mut list[..],
                     "pve_auth_cookie_probe",
                 );
             }
@@ -416,7 +416,7 @@ fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
                         &app_c,
                         &label_c,
                         &state_c,
-                        &mut list,
+                        &mut list[..],
                         "pve_auth_cookie_changed",
                     );
                 }
