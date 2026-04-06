@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { parseOsc7WorkingDirectoryPayload } from "../features/terminal-osc7-path";
-import { resizeSession } from "../tauri-api";
+import { readTerminalMiddleClickPasteText, resizeSession } from "../tauri-api";
 import { subscribeSessionOutput } from "../session-output-bridge";
 import type { SessionOutputEvent } from "../types";
 
@@ -33,6 +34,26 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
   const lastEnterKeyupAtRef = useRef<number | null>(null);
   const lastManualEnterSendAtRef = useRef<number | null>(null);
   const lastRepeatKeydownAtByKeyRef = useRef<Map<string, number>>(new Map());
+
+  const handleTerminalHostPointerDownCapture = useCallback(async (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    if (event.button !== 1) {
+      return;
+    }
+    event.preventDefault();
+    const term = terminalRef.current;
+    if (!term) {
+      return;
+    }
+    try {
+      const text = await readTerminalMiddleClickPasteText();
+      if (text) {
+        term.paste(text);
+      }
+    } catch {
+      /* Clipboard unavailable in this environment */
+    }
+  }, []);
 
   useEffect(() => {
     onUserInputRef.current = onUserInput;
@@ -237,7 +258,12 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
 
   return (
     <div ref={rootRef} className="terminal-root">
-      <div ref={terminalHostRef} className="terminal-host" data-nosuckshell-terminal-host="true" />
+      <div
+        ref={terminalHostRef}
+        className="terminal-host"
+        data-nosuckshell-terminal-host="true"
+        onPointerDownCapture={handleTerminalHostPointerDownCapture}
+      />
     </div>
   );
 }

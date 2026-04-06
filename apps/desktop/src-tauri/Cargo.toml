@@ -10,6 +10,7 @@ tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
 anyhow = "1.0.102"
+arboard = { version = "3.6", default-features = false }
 argon2 = "0.5"
 base64 = "0.22"
 chacha20poly1305 = { version = "0.10", features = ["std"] }
@@ -45,7 +46,6 @@ sha2 = "0.11"
 openssl = "0.10"
 
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-soup3 = "0.5.0"
 webkit2gtk = { version = "2.0.2", features = ["v2_32"] }
 
 [dev-dependencies]

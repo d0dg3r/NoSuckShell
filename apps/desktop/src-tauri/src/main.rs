@@ -177,6 +177,23 @@ fn open_external_url(url: String) -> Result<(), String> {
     open::that(url.trim()).map_err(|e| e.to_string())
 }
 
+/// Clipboard text for terminal middle-click paste (X11/Wayland primary on Linux; standard clipboard fallback).
+#[tauri::command]
+fn read_terminal_middle_click_paste_text() -> Option<String> {
+    use arboard::Clipboard;
+    let mut clipboard = Clipboard::new().ok()?;
+    #[cfg(target_os = "linux")]
+    {
+        use arboard::{GetExtLinux, LinuxClipboardKind};
+        if let Ok(primary) = clipboard.get().clipboard(LinuxClipboardKind::Primary).text() {
+            if !primary.is_empty() {
+                return Some(primary);
+            }
+        }
+    }
+    clipboard.get_text().ok()
+}
+
 #[cfg(any(
     target_os = "linux",
     target_os = "dragonfly",
@@ -314,18 +331,6 @@ fn try_fire_proxmox_auto_console<R: tauri::Runtime>(
     target_os = "netbsd",
     target_os = "openbsd",
 ))]
-fn proxmox_cookie_list_has_auth_ticket(cookies: &mut [soup::Cookie]) -> bool {
-    for c in cookies.iter_mut() {
-        if let Some(n) = c.name() {
-            let s = n.as_str();
-            if s == "PVEAuthCookie" || s.ends_with("PVEAuthCookie") {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 #[cfg(any(
     target_os = "linux",
     target_os = "dragonfly",
@@ -337,10 +342,10 @@ fn try_fire_proxmox_auto_console_when_cookies_have_ticket<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     webview_label: &str,
     state: &Arc<Mutex<PendingProxmoxAutoConsole>>,
-    cookies: &mut [soup::Cookie],
+    has_pve_auth_cookie: bool,
     trigger: &'static str,
 ) {
-    if !proxmox_cookie_list_has_auth_ticket(cookies) {
+    if !has_pve_auth_cookie {
         return;
     }
 
@@ -391,11 +396,16 @@ fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
         let state_probe = Arc::clone(&state);
         cm_probe.cookies(&probe_uri, None::<&gio::Cancellable>, move |res| {
             if let Ok(mut list) = res {
+                let has_ticket = list.iter_mut().any(|c| {
+                    c.name()
+                        .as_ref()
+                        .is_some_and(|n| n.as_str() == "PVEAuthCookie" || n.as_str().ends_with("PVEAuthCookie"))
+                });
                 try_fire_proxmox_auto_console_when_cookies_have_ticket(
                     &app_probe,
                     &label_probe,
                     &state_probe,
-                    &mut list,
+                    has_ticket,
                     "pve_auth_cookie_probe",
                 );
             }
@@ -412,11 +422,16 @@ fn webkit_attach_proxmox_pve_auth_cookie_listener<R: tauri::Runtime>(
             let state_c = Arc::clone(&state0);
             cm.cookies(&uri, None::<&gio::Cancellable>, move |res| {
                 if let Ok(mut list) = res {
+                    let has_ticket = list.iter_mut().any(|c| {
+                        c.name().as_ref().is_some_and(|n| {
+                            n.as_str() == "PVEAuthCookie" || n.as_str().ends_with("PVEAuthCookie")
+                        })
+                    });
                     try_fire_proxmox_auto_console_when_cookies_have_ticket(
                         &app_c,
                         &label_c,
                         &state_c,
-                        &mut list,
+                        has_ticket,
                         "pve_auth_cookie_changed",
                     );
                 }
@@ -1102,6 +1117,7 @@ fn main() {
             save_host_metadata,
             touch_host_last_used,
             open_external_url,
+            read_terminal_middle_click_paste_text,
             open_in_app_webview_window,
             navigate_in_app_webview_window,
             open_proxmox_native_console_window,

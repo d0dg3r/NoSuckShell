@@ -272,6 +272,15 @@ jobs:
           NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
         run: npm run tauri:build
 
+      - name: Post-process Linux AppImage (strip bundled libpcre2-8)
+        if: matrix.artifact_name == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl fuse3 squashfs-tools
+          bash scripts/postprocess-linux-appimage-libs.sh
+
       - name: Upload platform bundles
         uses: actions/upload-artifact@v7
         with:

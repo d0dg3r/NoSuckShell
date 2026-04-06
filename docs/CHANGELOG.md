@@ -4,10 +4,16 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [0.3.2] - 2026-03-27
 
+### Added
+
+- **Linux / Flatpak** — Local repack of the Tauri `.deb` into a single-file bundle (`scripts/build-local-flatpak.sh`, manifest under `flatpak/`); see [flatpak/README.md](../flatpak/README.md).
+
 ### Fixed
 
 - **Build** — Removed unused `InlineSpinner` import in `LocalFilePane.tsx` that was causing `tsc` to fail.
 - **E2E Tests** — Corrected the smoke test selector for the new `Workspace Command Bar` to use the accessible title “Workspaces and layouts”.
+- **Linux / AppImage** — Release and manual CI runs strip bundled `libpcre2-8` from the AppImage after build so host tools that use `libgit2` no longer pick up an incompatible `libpcre2` from the mount (see `scripts/postprocess-linux-appimage-libs.sh` and [releases.md](releases.md)).
+- **Terminal** — Mouse events no longer bubble to the split-pane chrome (restores xterm selection); middle-click paste uses the X11/Wayland primary selection (and clipboard fallback) via a Tauri command.
 
 ## [0.3.1] - 2026-03-26
 
