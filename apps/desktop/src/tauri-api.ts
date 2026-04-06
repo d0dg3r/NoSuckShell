@@ -444,3 +444,7 @@ export const activateLicense = (token: string): Promise<LicensePayload> =>
 export const licenseStatus = (): Promise<LicenseStatus> => invoke("license_status");
 
 export const clearLicense = (): Promise<void> => invoke("clear_license");
+
+/** Primary selection on Linux (and clipboard fallback) for terminal middle-click paste. */
+export const readTerminalMiddleClickPasteText = (): Promise<string | null> =>
+  invoke("read_terminal_middle_click_paste_text");

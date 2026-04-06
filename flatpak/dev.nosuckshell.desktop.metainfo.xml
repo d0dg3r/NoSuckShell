@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.nosuckshell.desktop</id>
+  <metadata_license>MIT</metadata_license>
+  <name>NoSuckShell</name>
+  <summary>Cross-platform SSH manager</summary>
+  <description>
+    <p>NoSuckShell is a desktop SSH manager built with Tauri. This Flatpak is produced locally from a release-style .deb produced by Tauri; it is not the same artifact as a future Flathub build.</p>
+  </description>
+  <url type="homepage">https://github.com/d0dg3r/NoSuckShell</url>
+  <url type="bugtracker">https://github.com/d0dg3r/NoSuckShell/issues</url>
+  <developer_name>NoSuckShell contributors</developer_name>
+  <content_rating type="oars-1.1"/>
+  <launchable type="desktop-id">dev.nosuckshell.desktop.desktop</launchable>
+  <releases>
+    <release version="0.3.2" date="2026-03-27"/>
+  </releases>
+</component>

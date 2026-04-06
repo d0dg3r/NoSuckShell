@@ -12,3 +12,9 @@ apps/desktop/src-tauri/gen
 Cargo.lock
 # .cursor/ is no longer ignored because it contains shared rules for agents
 .cursor/debug-*.log
+
+# Local Flatpak repack (scripts/build-local-flatpak.sh)
+flatpak/stage/
+flatpak/build-dir/
+flatpak/repo-local/
+flatpak/*.flatpak
