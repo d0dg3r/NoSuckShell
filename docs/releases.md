@@ -123,6 +123,23 @@ Current workflow builds and publishes unsigned artifacts. For production distrib
 - Linux:
   - AppImage generally works unsigned, but optional signature/provenance can be added in a hardened pipeline.
 
+### AppImage and host shared libraries (`libpcre2` / `libgit2`)
+
+Some rolling distros ship **`libgit2`** that expects a **version-tagged** **`libpcre2`** from the system. The AppImage bundles its own `libpcre2` under the mount (`/tmp/.mount_*/usr/lib/...`). If anything in your environment puts that mount on the **library search path** while a **host** binary loads **`/usr/lib/libgit2.so.*`**, the dynamic linker can mix **host `libgit2` + AppImage `libpcre2`**, which triggers warnings such as:
+
+`no version information available (required by /usr/lib/libgit2.so.*)`
+
+Typical triggers:
+
+- **`LD_LIBRARY_PATH`** (or similar) still containing the AppImage mount in a shell where you run **git-aware** tools (for example **`eza` / `exa` / `lsd`** aliased as `ll`).
+- Running those tools in the **same** environment while the AppImage payload is mounted.
+
+Mitigations:
+
+- Prefer the **native Arch package** (`.pkg.tar.zst` from CI) on Arch-based systems when you hit this; it avoids AppImage library injection.
+- Use a **clean shell** without AppImage paths in `LD_LIBRARY_PATH` for unrelated CLI tools.
+- Official **release** AppImages are **post-processed** in CI to **remove bundled `libpcre2-8`** so the loader can pick the **system** `libpcre2` that matches your distro’s `libgit2` (see `scripts/postprocess-linux-appimage-libs.sh`).
+
 Recommended next step:
 
 1. Add secrets for signing credentials.

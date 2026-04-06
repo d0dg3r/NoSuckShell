@@ -1,0 +1,56 @@
+# Local Flatpak: repackages the Tauri-generated Debian bundle (see scripts/build-local-flatpak.sh).
+# Not published on Flathub; for developer / side-channel installs only.
+app-id: dev.nosuckshell.desktop
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: nosuckshell
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=xdg-run/keyring
+  - --filesystem=~/.ssh:rw
+  - --filesystem=xdg-run/gnupg:ro
+  - --filesystem=home
+  - --talk-name=org.freedesktop.secrets
+
+modules:
+  - name: nosuckshell
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: stage
+      - type: file
+        path: dev.nosuckshell.desktop.metainfo.xml
+    build-commands:
+      - |
+        set -euo pipefail
+        main=$(find usr/bin -maxdepth 1 -type f -executable | head -1)
+        if [[ -z "${main}" ]]; then
+          echo "No executable under usr/bin in stage" >&2
+          exit 1
+        fi
+        install -Dm755 "${main}" /app/bin/nosuckshell
+      - |
+        set -euo pipefail
+        if [[ -d usr/lib ]]; then
+          mkdir -p /app/lib
+          cp -a usr/lib/. /app/lib/
+        fi
+      - |
+        set -euo pipefail
+        mkdir -p /app/share/applications /app/share/icons /app/share/metainfo
+        if compgen -G "usr/share/applications/*.desktop" > /dev/null; then
+          for f in usr/share/applications/*.desktop; do
+            install -Dm644 "$f" /app/share/applications/dev.nosuckshell.desktop.desktop
+          done
+          sed -i 's/^Exec=.*/Exec=nosuckshell/' /app/share/applications/dev.nosuckshell.desktop.desktop || true
+        fi
+        if [[ -d usr/share/icons ]]; then
+          cp -a usr/share/icons/. /app/share/icons/
+        fi
+      - install -Dm644 dev.nosuckshell.desktop.metainfo.xml /app/share/metainfo/dev.nosuckshell.desktop.metainfo.xml

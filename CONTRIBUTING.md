@@ -25,6 +25,10 @@ You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:de
 
 Releases may include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS** in the root [README.md](README.md) Install section.
 
+## Local Flatpak (Linux)
+
+To build a single-file `.flatpak` from the Tauri `.deb` and install it with `flatpak --user install --bundle`, see [flatpak/README.md](flatpak/README.md) and run `bash scripts/build-local-flatpak.sh` from the repository root.
+
 ## Style and code
 
 - **Product copy and documentation tone:** [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)
