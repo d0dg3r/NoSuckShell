@@ -448,3 +448,7 @@ export const clearLicense = (): Promise<void> => invoke("clear_license");
 /** Primary selection on Linux (and clipboard fallback) for terminal middle-click paste. */
 export const readTerminalMiddleClickPasteText = (): Promise<string | null> =>
   invoke("read_terminal_middle_click_paste_text");
+
+/** Push terminal selection to the system clipboard (and primary on Linux). Use Ctrl+Shift+C in the terminal. */
+export const writeTerminalSelectionClipboard = (text: string): Promise<void> =>
+  invoke("write_terminal_selection_clipboard", { text });

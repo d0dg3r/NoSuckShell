@@ -2,6 +2,17 @@
 
 All notable changes to **NoSuckShell** are documented here. Version numbers follow the desktop app (`apps/desktop`); GitHub releases are created from `v*` tags (see [releases.md](releases.md)).
 
+## [Unreleased]
+
+## [0.3.3] - 2026-04-07
+
+### Fixed
+
+- **Linux / Terminal** — Rewrote clipboard access for middle-click paste and added explicit **Ctrl+Shift+V** support. Primary selection and clipboard are now read via subprocess calls to `wl-paste` (Wayland) and `xclip` (X11) instead of the in-process `wl-clipboard-rs` crate, which conflicted with the WebKit/GTK Wayland event loop and could crash the app. arboard remains as a last-resort X11 fallback wrapped in `catch_unwind`.
+- **Linux / Terminal** — Clipboard subprocesses use a **1s `timeout`** so a stuck `wl-paste` cannot freeze the UI. **`wl-paste` prefers `text/plain`** (then untyped fallback); **`xclip` tries `UTF8_STRING`** first. Pasted text is **sanitized** (NUL/control stripping, reject UTF-8 replacement chars) so binary data does not corrupt the xterm buffer or trigger **Gdk selection / broken-pipe** issues when copying from the terminal.
+- **Linux / GTK** — Install a **GLib log handler** for the `Gdk` domain that drops only the noisy WebKitGTK warning *“Error writing selection data … Broken pipe”* (Wayland selection peer disconnect); all other Gdk warnings still go to the default handler.
+- **Terminal** — **Ctrl+Shift+C** and **Ctrl+Insert** copy the xterm selection to the system clipboard via a Tauri command (`wl-copy` / `xclip` on Linux, arboard elsewhere). **Selecting text** also syncs to the clipboard and primary selection (debounced) so **middle-click paste** matches typical Linux terminals without an extra copy shortcut. **Ctrl+Shift+V** and **Shift+Insert** paste from the clipboard. **Ctrl+C** remains interrupt for the shell (documented in Help).
+
 ## [0.3.2] - 2026-03-27
 
 ### Added
@@ -262,4 +273,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.0]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.0
 [v0.3.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.1
 [v0.3.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.2
+[v0.3.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.3
 
