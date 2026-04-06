@@ -21,6 +21,10 @@ On Linux, `WEBKIT_DISABLE_DMABUF_RENDERER=1` matches the workflow documented in 
 
 You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:dev`); the root scripts ensure dependencies are present when you use the root commands.
 
+## Arch Linux package (install / local `makepkg`)
+
+Releases may include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS** in the root [README.md](README.md) Install section.
+
 ## Local Flatpak (Linux)
 
 To build a single-file `.flatpak` from the Tauri `.deb` and install it with `flatpak --user install --bundle`, see [flatpak/README.md](flatpak/README.md) and run `bash scripts/build-local-flatpak.sh` from the repository root.
