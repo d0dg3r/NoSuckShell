@@ -223,6 +223,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return undefined;
     case "read_terminal_middle_click_paste_text":
       return null;
+    case "write_terminal_selection_clipboard":
+      return undefined;
     case "start_local_session": {
       const session_id = nextSessionId("local");
       emitShellBanner(session_id, "\r\nNoSuckShell local demo shell\r\n$ ");

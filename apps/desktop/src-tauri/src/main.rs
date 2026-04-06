@@ -1,6 +1,9 @@
 //! On Windows, the default console subsystem spawns a second (blank) window next to the WebView.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+#[cfg(target_os = "linux")]
+mod gdk_log_suppress;
+
 mod app_prefs;
 mod backup;
 mod license;
@@ -177,21 +180,177 @@ fn open_external_url(url: String) -> Result<(), String> {
     open::that(url.trim()).map_err(|e| e.to_string())
 }
 
-/// Clipboard text for terminal middle-click paste (X11/Wayland primary on Linux; standard clipboard fallback).
+fn sanitize_terminal_clipboard_text(s: String) -> Option<String> {
+    if s.contains('\u{FFFD}') {
+        return None;
+    }
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch == '\0' {
+            continue;
+        }
+        if matches!(ch, '\n' | '\r' | '\t') {
+            out.push(ch);
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        out.push(ch);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Read primary selection (middle-click) or clipboard text.
+///
+/// On Linux the function shells out to `wl-paste` (Wayland) / `xclip` (X11)
+/// because the in-process `wl-clipboard-rs` crate conflicts with the
+/// WebKit/GTK Wayland event loop and can crash or deadlock the app.
+/// Subprocess calls are isolated, fast (<5 ms), and work on every compositor.
+/// `wl-paste` / `xclip` use explicit **text** targets so binary offers are skipped.
+/// Returned text is sanitized (no NUL / control bytes) so xterm and GTK selection export stay stable.
+/// arboard (X11-only, no Wayland backend) is the last-resort fallback,
+/// wrapped in `catch_unwind` so a panic can never take down the process.
 #[tauri::command]
 fn read_terminal_middle_click_paste_text() -> Option<String> {
-    use arboard::Clipboard;
-    let mut clipboard = Clipboard::new().ok()?;
     #[cfg(target_os = "linux")]
     {
-        use arboard::{GetExtLinux, LinuxClipboardKind};
-        if let Ok(primary) = clipboard.get().clipboard(LinuxClipboardKind::Primary).text() {
-            if !primary.is_empty() {
-                return Some(primary);
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            if let Some(t) = clipboard_from_command(
+                "wl-paste",
+                &["--primary", "--no-newline", "--type", "text/plain"],
+            ) {
+                return sanitize_terminal_clipboard_text(t);
+            }
+            if let Some(t) = clipboard_from_command("wl-paste", &["--no-newline", "--type", "text/plain"]) {
+                return sanitize_terminal_clipboard_text(t);
+            }
+            if let Some(t) = clipboard_from_command("wl-paste", &["--primary", "--no-newline"]) {
+                return sanitize_terminal_clipboard_text(t);
+            }
+            if let Some(t) = clipboard_from_command("wl-paste", &["--no-newline"]) {
+                return sanitize_terminal_clipboard_text(t);
             }
         }
+        if let Some(t) = clipboard_from_command("xclip", &["-selection", "primary", "-t", "UTF8_STRING", "-o"]) {
+            return sanitize_terminal_clipboard_text(t);
+        }
+        if let Some(t) = clipboard_from_command("xclip", &["-selection", "primary", "-o"]) {
+            return sanitize_terminal_clipboard_text(t);
+        }
+        if let Some(t) = clipboard_from_command("xclip", &["-selection", "clipboard", "-t", "UTF8_STRING", "-o"]) {
+            return sanitize_terminal_clipboard_text(t);
+        }
+        if let Some(t) = clipboard_from_command("xclip", &["-selection", "clipboard", "-o"]) {
+            return sanitize_terminal_clipboard_text(t);
+        }
     }
-    clipboard.get_text().ok()
+    let fallback = std::panic::catch_unwind(|| {
+        use arboard::Clipboard;
+        let mut cb = Clipboard::new().ok()?;
+        cb.get_text().ok().filter(|s| !s.is_empty())
+    })
+    .ok()
+    .flatten();
+    fallback.and_then(sanitize_terminal_clipboard_text)
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_from_command(cmd: &str, args: &[&str]) -> Option<String> {
+    let mut timeout_args: Vec<&str> = vec!["--kill-after=2", "1", cmd];
+    timeout_args.extend(args);
+    let output = std::process::Command::new("timeout")
+        .args(&timeout_args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// Copy terminal selection to the system clipboard (and primary on Linux) so **Ctrl+Shift+C** works
+/// without relying on the WebView clipboard API. Uses `wl-copy` / `xclip` on Linux (same family as
+/// paste) and arboard elsewhere.
+#[tauri::command]
+fn write_terminal_selection_clipboard(text: String) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            if clipboard_write_wl_copy(false, &text).is_ok() {
+                let _ = clipboard_write_wl_copy(true, &text);
+                return Ok(());
+            }
+        }
+        if clipboard_write_xclip_stdin("clipboard", &text).is_ok() {
+            let _ = clipboard_write_xclip_stdin("primary", &text);
+            return Ok(());
+        }
+    }
+    arboard_set_clipboard_text(&text)
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_write_wl_copy(primary: bool, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("timeout");
+    cmd.args(["--kill-after=2", "5", "wl-copy"]);
+    if primary {
+        cmd.arg("--primary");
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().ok_or_else(|| "wl-copy stdin".to_string())?;
+    stdin.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    drop(stdin);
+    let st = child.wait().map_err(|e| e.to_string())?;
+    if st.success() {
+        Ok(())
+    } else {
+        Err(format!("wl-copy failed: {st}"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_write_xclip_stdin(selection: &str, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("timeout");
+    cmd.args(["--kill-after=2", "5", "xclip", "-selection", selection]);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().ok_or_else(|| "xclip stdin".to_string())?;
+    stdin.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    drop(stdin);
+    let st = child.wait().map_err(|e| e.to_string())?;
+    if st.success() {
+        Ok(())
+    } else {
+        Err(format!("xclip failed: {st}"))
+    }
+}
+
+fn arboard_set_clipboard_text(text: &str) -> Result<(), String> {
+    std::panic::catch_unwind(|| {
+        use arboard::Clipboard;
+        let mut cb = Clipboard::new().ok()?;
+        cb.set_text(text.to_owned()).ok()
+    })
+    .ok()
+    .flatten()
+    .ok_or_else(|| "clipboard unavailable".to_string())
 }
 
 #[cfg(any(
@@ -1102,6 +1261,8 @@ fn take_proxmox_standalone_payload(label: String) -> Result<Option<String>, Stri
 
 fn main() {
     plugins::register_builtin_plugins();
+    #[cfg(target_os = "linux")]
+    gdk_log_suppress::install_gdk_broken_pipe_selection_filter();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionState::default())
@@ -1118,6 +1279,7 @@ fn main() {
             touch_host_last_used,
             open_external_url,
             read_terminal_middle_click_paste_text,
+            write_terminal_selection_clipboard,
             open_in_app_webview_window,
             navigate_in_app_webview_window,
             open_proxmox_native_console_window,

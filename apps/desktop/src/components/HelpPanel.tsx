@@ -110,6 +110,11 @@ const interactionSections: HelpSection[] = [
         mouse: "With focus in the terminal, keys go to the shell unless a chord is handled globally.",
         keys: "—",
       },
+      {
+        action: "Copy / paste in the terminal",
+        mouse: "Select text, then use the shortcuts below. On Linux, middle-click paste still uses the primary selection.",
+        keys: "Selecting text syncs to the clipboard and primary selection (Linux) so middle-click paste works; Ctrl+Shift+C / Ctrl+Insert also copy. Ctrl+Shift+V or Shift+Insert paste. Ctrl+C sends interrupt (SIGINT) to the shell — that is normal.",
+      },
     ],
   },
   {

@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { parseOsc7WorkingDirectoryPayload } from "../features/terminal-osc7-path";
-import { readTerminalMiddleClickPasteText, resizeSession } from "../tauri-api";
+import { sanitizeTerminalPaste } from "../features/terminal-paste-sanitize";
+import { readTerminalMiddleClickPasteText, resizeSession, writeTerminalSelectionClipboard } from "../tauri-api";
 import { subscribeSessionOutput } from "../session-output-bridge";
 import type { SessionOutputEvent } from "../types";
 
@@ -20,6 +21,8 @@ const sessionBuffers = new Map<string, string>();
 const MAX_BUFFER_CHARS = 250_000;
 const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
 const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
+/** Debounce wl-copy/xclip while the user is still dragging a selection. */
+const SELECTION_CLIPBOARD_DEBOUNCE_MS = 120;
 export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectoryChange, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -48,10 +51,10 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     try {
       const text = await readTerminalMiddleClickPasteText();
       if (text) {
-        term.paste(text);
+        const clean = sanitizeTerminalPaste(text);
+        if (clean) term.paste(clean);
       }
     } catch {
-      /* Clipboard unavailable in this environment */
     }
   }, []);
 
@@ -118,7 +121,47 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
       lastEnterKeyupAtRef.current = Date.now();
     };
     window.addEventListener("keyup", onWindowKeyup);
+
+    const pasteTerminalFromClipboard = () => {
+      navigator.clipboard.readText().then((text) => {
+        if (!text) return;
+        const clean = sanitizeTerminalPaste(text);
+        if (clean) terminal.paste(clean);
+      }).catch(() => {});
+    };
+
+    const pushTerminalSelectionToSystemClipboard = (sel: string) => {
+      if (!sel) {
+        return;
+      }
+      void writeTerminalSelectionClipboard(sel).catch(() => {
+        void navigator.clipboard.writeText(sel).catch(() => {});
+      });
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type === "keydown" && (event.key === "c" || event.key === "C") && event.ctrlKey && event.shiftKey) {
+        const sel = terminal.getSelection();
+        if (sel) {
+          pushTerminalSelectionToSystemClipboard(sel);
+        }
+        return false;
+      }
+      if (event.type === "keydown" && event.key === "Insert" && event.ctrlKey && !event.shiftKey) {
+        const sel = terminal.getSelection();
+        if (sel) {
+          pushTerminalSelectionToSystemClipboard(sel);
+        }
+        return false;
+      }
+      if (event.type === "keydown" && event.key === "v" && event.ctrlKey && event.shiftKey) {
+        pasteTerminalFromClipboard();
+        return false;
+      }
+      if (event.type === "keydown" && event.key === "Insert" && event.shiftKey && !event.ctrlKey) {
+        pasteTerminalFromClipboard();
+        return false;
+      }
       if (event.type === "keydown" && event.repeat && event.key !== "Enter") {
         const keyId = `${event.code}:${event.key}`;
         const now = Date.now();
@@ -151,6 +194,18 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
         return false;
       }
       return true;
+    });
+
+    let selectionSyncDebounceTimer: number | null = null;
+    const selectionChangeDisposable = terminal.onSelectionChange(() => {
+      if (selectionSyncDebounceTimer !== null) {
+        window.clearTimeout(selectionSyncDebounceTimer);
+      }
+      selectionSyncDebounceTimer = window.setTimeout(() => {
+        selectionSyncDebounceTimer = null;
+        const sel = terminal.getSelection();
+        pushTerminalSelectionToSystemClipboard(sel);
+      }, SELECTION_CLIPBOARD_DEBOUNCE_MS);
     });
 
     const unsubscribeOutput = subscribeSessionOutput(sessionId, (payload: SessionOutputEvent) => {
@@ -251,6 +306,10 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
         window.cancelAnimationFrame(fitFrameRef.current);
       }
       osc7Disposable.dispose();
+      if (selectionSyncDebounceTimer !== null) {
+        window.clearTimeout(selectionSyncDebounceTimer);
+      }
+      selectionChangeDisposable.dispose();
       unsubscribeOutput();
       terminal.dispose();
     };
