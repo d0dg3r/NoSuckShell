@@ -10,6 +10,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Keep PR file coverage for Code Scanning (default will skip it from April 2026 for performance).
+  CODEQL_ACTION_FILE_COVERAGE_ON_PRS: "true"
 
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
