@@ -8,7 +8,9 @@ import {
   mkdirEnabled,
   newTextFileEnabled,
   renameEnabled,
+  viewInSystemEnabled,
 } from "../features/nss-commander-file-ops-bar";
+import { useNssCommanderFileOpKeyboardShortcuts } from "../features/useNssCommanderFileOpKeyboardShortcuts";
 
 export type NssCommanderFileOpsBarProps = {
   leftPaneIndex: number;
@@ -24,11 +26,13 @@ export type NssCommanderFileOpsBarProps = {
   onMoveToRight: () => void;
   onDelete: () => void;
   onRename: () => void;
+  onViewFile: () => void;
   onMkdir: () => void;
   onNewTextFile: () => void;
   onEditTextFile: () => void;
   onArchive: () => void;
   onRefresh: () => void;
+  onCopyMoveNoSelection?: () => void;
 };
 
 function IconBtn({
@@ -108,6 +112,20 @@ function IconPencil() {
     <svg className="nss-commander-ops-svg" width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconViewExternal() {
+  return (
+    <svg className="nss-commander-ops-svg" width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M14 3h7v7M10 14L21 3M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5"
         stroke="currentColor"
         strokeWidth="1.75"
         strokeLinecap="round"
@@ -223,12 +241,36 @@ export function NssCommanderFileOpsBar({
   onMoveToRight,
   onDelete,
   onRename,
+  onViewFile,
   onMkdir,
   onNewTextFile,
   onEditTextFile,
   onArchive,
   onRefresh,
+  onCopyMoveNoSelection,
 }: NssCommanderFileOpsBarProps) {
+  useNssCommanderFileOpKeyboardShortcuts({
+    leftPaneIndex,
+    rightPaneIndex,
+    activePaneIndex,
+    leftKind,
+    rightKind,
+    leftSelection,
+    rightSelection,
+    onCopyToLeft,
+    onCopyToRight,
+    onMoveToLeft,
+    onMoveToRight,
+    onDelete,
+    onRename,
+    onViewFile,
+    onMkdir,
+    onEditTextFile,
+    onArchive,
+    onRefresh,
+    onCopyMoveNoSelection,
+  });
+
   const activeKind: NssOpsPaneKind =
     activePaneIndex === leftPaneIndex ? leftKind : activePaneIndex === rightPaneIndex ? rightKind : "terminal";
   const activeSelectionSize =
@@ -251,6 +293,7 @@ export function NssCommanderFileOpsBar({
 
   const delDisabled = !deleteEnabled(activeSelectionSize, activeKind);
   const renDisabled = !renameEnabled(activeSelectionSize, activeKind);
+  const viewDisabled = !viewInSystemEnabled(activeSelectionSize, activeKind);
   const mkDisabled = !mkdirEnabled(activeKind);
   const newTextDisabled = !newTextFileEnabled(activeKind);
   const editTextDisabled = !editTextFileEnabled(activeSelectionSize, activeKind);
@@ -308,8 +351,16 @@ export function NssCommanderFileOpsBar({
       <IconBtn title="Delete selected in focused pane" ariaLabel="Delete selected" disabled={delDisabled} onClick={onDelete}>
         <IconTrash />
       </IconBtn>
-      <IconBtn title="Rename selected item in focused pane" ariaLabel="Rename" disabled={renDisabled} onClick={onRename}>
+      <IconBtn title="Rename selected item in focused pane (F2)" ariaLabel="Rename" disabled={renDisabled} onClick={onRename}>
         <IconPencil />
+      </IconBtn>
+      <IconBtn
+        title="Open selection in system viewer (F3)"
+        ariaLabel="View in system"
+        disabled={viewDisabled}
+        onClick={onViewFile}
+      >
+        <IconViewExternal />
       </IconBtn>
       <IconBtn title="New folder in focused pane" ariaLabel="New folder" disabled={mkDisabled} onClick={onMkdir}>
         <IconFolderPlus />
@@ -323,7 +374,7 @@ export function NssCommanderFileOpsBar({
         <IconFilePlus />
       </IconBtn>
       <IconBtn
-        title="Edit selected file in focused pane"
+        title="Edit selected file in focused pane (F4)"
         ariaLabel="Edit text file"
         disabled={editTextDisabled}
         onClick={onEditTextFile}

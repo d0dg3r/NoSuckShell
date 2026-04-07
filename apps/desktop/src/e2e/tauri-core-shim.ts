@@ -131,6 +131,8 @@ function emitShellBanner(sessionId: string, lines: string): void {
 
 export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
+    case "get_launch_cli_profile":
+      return { localCommander: false, singleLocalShell: false, error: null };
     case "get_app_preferences":
       return { ...e2eAppPreferences };
     case "save_app_preferences": {
@@ -316,6 +318,9 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return "/home/e2e";
     case "sftp_download_file":
       return "/home/e2e/Downloads/mock-download.bin";
+    case "nss_xfer_cancel":
+    case "nss_xfer_set_paused":
+      return undefined;
     case "sftp_export_paths_archive":
       return "/home/e2e/Downloads/mock-export.tar.gz";
     case "local_export_paths_archive":

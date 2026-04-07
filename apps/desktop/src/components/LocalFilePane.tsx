@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { createPortal } from "react-dom";
 import {
   formatFileSize,
+  isDotHiddenFileName,
   isLocalUpDisabled,
   joinLocalPath,
   localFolderTitleShort,
@@ -85,11 +86,13 @@ type Props = {
   /** One-shot op from the vertical ops bar for this pane. */
   nssCommanderPaneOpRequest?: {
     requestId: number;
-    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile";
     names: string[];
   } | null;
   /** NSS-Commander: distance from split-pane top to table header row (for center ops strip alignment). */
   onFilePaneTableHeadOffsetInSplitPane?: (paneIndex: number, offsetPx: number | null) => void;
+  /** NSS-Commander: host-driven path sync (e.g. copy destination dialog). */
+  nssCommanderSyncPath?: { requestId: number; pathKey: string } | null;
 };
 
 function SaveRowIcon() {
@@ -119,9 +122,11 @@ export function LocalFilePane({
   nssCommanderReloadAllKey = 0,
   nssCommanderPaneOpRequest,
   onFilePaneTableHeadOffsetInSplitPane,
+  nssCommanderSyncPath = null,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const lastNssPaneOpRequestIdRef = useRef(0);
+  const lastNssSyncPathRequestIdRef = useRef(0);
   const [path, setPath] = useState("");
   const [homeCanon, setHomeCanon] = useState<string | null>(null);
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
@@ -129,6 +134,15 @@ export function LocalFilePane({
   const [error, setError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<string | null>(null);
   const [lastOk, setLastOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!lastOk) {
+      return;
+    }
+    const id = window.setTimeout(() => setLastOk(null), 2000);
+    return () => window.clearTimeout(id);
+  }, [lastOk]);
+
   const [transferBusy, setTransferBusy] = useState(false);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(() => new Set());
   const [lastRangeIndex, setLastRangeIndex] = useState<number | null>(null);
@@ -139,6 +153,7 @@ export function LocalFilePane({
   const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
 
   useEffect(() => {
     setSelectedNames(new Set());
@@ -153,6 +168,14 @@ export function LocalFilePane({
       .then(setHomeCanon)
       .catch(() => setHomeCanon(null));
   }, []);
+
+  useEffect(() => {
+    if (!nssCommanderSyncPath || nssCommanderSyncPath.requestId === lastNssSyncPathRequestIdRef.current) {
+      return;
+    }
+    lastNssSyncPathRequestIdRef.current = nssCommanderSyncPath.requestId;
+    setPath(nssCommanderSyncPath.pathKey);
+  }, [nssCommanderSyncPath]);
 
   useEffect(() => {
     onPathChange(path);
@@ -185,6 +208,7 @@ export function LocalFilePane({
     async (name: string) => {
       const row = entries.find((e) => e.name === name);
       if (!row || row.isDir) {
+        setError(row?.isDir ? `"${name}" is a folder; open a file to edit.` : `"${name}" is not in this folder. Refresh the list and try again.`);
         return;
       }
       setCtxMenu(null);
@@ -335,6 +359,10 @@ export function LocalFilePane({
     setPath("/");
   };
 
+  const goHome = () => {
+    setPath("");
+  };
+
   const titlePath = localPathResolvedForTitle(homeCanon, path);
   const upDisabled = isLocalUpDisabled(path, homeCanon);
 
@@ -398,6 +426,15 @@ export function LocalFilePane({
       void openEditorForExistingFile(req.names[0]!);
       return;
     }
+    if (req.op === "viewFile") {
+      if (req.names.length !== 1) {
+        return;
+      }
+      setCtxMenu(null);
+      setError(null);
+      void openLocalEntryInOs(path, req.names[0]!).catch((e) => setError(String(e)));
+      return;
+    }
     if (req.op === "rename") {
       if (req.names.length !== 1) {
         return;
@@ -425,13 +462,30 @@ export function LocalFilePane({
     }
   }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, openEditorForExistingFile]);
 
+  const displayEntries = useMemo(
+    () => (showHiddenFiles ? entries : entries.filter((e) => !isDotHiddenFileName(e.name))),
+    [entries, showHiddenFiles],
+  );
+
+  const toggleShowHiddenFiles = useCallback(() => {
+    setShowHiddenFiles((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedNames((s) => new Set([...s].filter((n) => !isDotHiddenFileName(n))));
+        setActiveName((a) => (a && isDotHiddenFileName(a) ? null : a));
+        setLastRangeIndex(null);
+      }
+      return next;
+    });
+  }, []);
+
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
       const lo = Math.min(index, lastRangeIndex);
       const hi = Math.max(index, lastRangeIndex);
       const next = new Set(selectedNames);
       for (let i = lo; i <= hi; i++) {
-        const row = entries[i];
+        const row = displayEntries[i];
         if (row) {
           next.add(row.name);
         }
@@ -628,6 +682,11 @@ export function LocalFilePane({
       case "delete":
         startDelete();
         break;
+      case "editFile":
+        if (soleSelectedFile) {
+          void openEditorForExistingFile(soleSelectedFile.name);
+        }
+        break;
       case "openInOs":
         openSelectionInOs();
         break;
@@ -675,6 +734,7 @@ export function LocalFilePane({
       onRefresh={() => void load()}
       onTerminal={onBack}
       onRoot={goRoot}
+      onHome={goHome}
       onNewFolder={startNewFolder}
       onNewFile={startNewFile}
       onEditFile={() => soleSelectedFile && void openEditorForExistingFile(soleSelectedFile.name)}
@@ -688,6 +748,8 @@ export function LocalFilePane({
       onExportSelection={() => void exportNames(exportSelectedOrder())}
       exportSelectionDisabled={exportSelectionDisabled}
       showBackToTerminalButton={!nssCmd}
+      showHiddenFiles={showHiddenFiles}
+      onToggleShowHiddenFiles={toggleShowHiddenFiles}
     />
   );
 
@@ -771,7 +833,7 @@ export function LocalFilePane({
               optimalWidthsDisabled={loading}
             />
             <tbody>
-              {entries.map((row, index) => {
+              {displayEntries.map((row, index) => {
                 const permCell = filePanePermCell(widths.perm, row);
                 const nameKind = semanticFileNameColors ? filePaneNameKind(row) : "default";
                 const nameKindClass = semanticFileNameColors ? filePaneNameKindClassName(nameKind) : "";

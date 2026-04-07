@@ -115,6 +115,54 @@ npm install
 npm run tauri:dev
 ```
 
+### CLI launch profiles (optional)
+
+Passing extra arguments to the desktop binary requests a **one-shot** layout after startup (the app still restores saved workspaces from the previous run first, then applies the profile).
+
+**Help:**
+
+```bash
+nosuckshell --help
+# or: nosuckshell -h
+```
+
+Prints options to stdout and exits (no window). With `-h` / `--help`, other flags are ignored.
+
+**Launch modes** (use at most one):
+
+| | Short | Long | Deprecated alias |
+|---|-------|------|-------------------|
+| NSS-Commander workspace (dual **local** file panes at home); host sidebar collapsed | `-c` | `--local-commander` | `--commander` |
+| Single **Main** workspace, one **local** terminal; host sidebar collapsed | `-t` | `--local-terminal` | `--single-shell` |
+
+Do not combine `--local-commander` / `-c` and `--local-terminal` / `-t` (or their aliases); the app reports an error and applies neither.
+
+**Installed binary** (Arch package, `.deb`, etc.):
+
+```bash
+nosuckshell --local-commander
+nosuckshell -c
+nosuckshell --local-terminal
+nosuckshell -t
+```
+
+**Development (repo root):** pass flags after `npm run tauri:dev --`. The root script forwards them so they reach the app (Tauri requires an extra `--` between runner and app args; the wrapper adds that for you):
+
+```bash
+npm run tauri:dev -- --local-terminal
+npm run tauri:dev -- -c
+```
+
+**From `apps/desktop` directly**, include the Tauri separators yourself (`tauri dev -- [runner] -- [app]`; with an empty runner section that is **three** `--` tokens before your flag):
+
+```bash
+cd apps/desktop
+npm run tauri:dev -- -- -- --local-commander
+npm run tauri:dev -- -- -- -t
+```
+
+**Flatpak** (and similar launchers) usually need an extra `--` before these flags, for example: `flatpak run … dev.nosuckshell.NoSuckShell -- --local-terminal`.
+
 ## Validate locally
 
 ```bash

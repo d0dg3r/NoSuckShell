@@ -33,7 +33,7 @@ export function AppSettingsNssCommanderTab({
             <div className="settings-radio-content">
               <span className="settings-radio-label">Horizontal F-key bar (bottom)</span>
               <span className="settings-radio-desc muted-copy">
-                Compact bar at the bottom of the workspace. Keyboard-driven with F4–F10 keys.
+                Compact bar at the bottom of the workspace. Keyboard-driven with F2–F9 keys.
                 Copy/Move auto-direction from focused pane; Shift reverses.
               </span>
             </div>

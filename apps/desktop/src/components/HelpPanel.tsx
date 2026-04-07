@@ -177,18 +177,29 @@ const interactionSections: HelpSection[] = [
       {
         action: "Copy to other pane (file browser)",
         mouse: "Copy selection from focused pane to other pane. Shift+F5 reverses direction.",
-        keys: "-",
+        keys: "F5",
       },
       {
         action: "Move to other pane",
         mouse: "Move selection from focused pane to other pane. Shift+F6 reverses direction.",
         keys: "F6",
       },
-      { action: "Edit file", mouse: "Open selected file in the text editor.", keys: "F4" },
+      {
+        action: "Copy / move dialogs and transfer progress",
+        mouse:
+          "Confirm with an editable destination path (F5 / Esc). During transfer: F5 pause or resume, F4 cancel, F10 toggle details and the message log.",
+        keys: "F5 · F4 · F10 · Esc",
+      },
+      { action: "Rename", mouse: "Rename the single selected item in the focused pane.", keys: "F2" },
+      {
+        action: "View in system",
+        mouse: "Open the selected file or folder with the default system application (remote files download to a temp file first).",
+        keys: "F3",
+      },
+      { action: "Edit file", mouse: "Open the selected file in the text editor.", keys: "F4" },
       { action: "New folder", mouse: "Create a new directory in the focused pane.", keys: "F7" },
       { action: "Delete", mouse: "Delete selected items in the focused pane.", keys: "F8" },
       { action: "Pack archive", mouse: "Archive selected items in the focused pane.", keys: "F9" },
-      { action: "Rename", mouse: "Rename selected item in the focused pane.", keys: "F10" },
       {
         action: "Switch file pane (file browser)",
         mouse: "Move focus between local and remote file panes in the workspace.",

@@ -17,9 +17,11 @@ mod sftp_export;
 mod key_crypto;
 mod quick_ssh;
 mod sftp;
+mod sftp_transfer_ops;
 #[cfg(test)]
 mod testutil;
 mod layout_profiles;
+mod launch_cli;
 mod secure_store;
 mod session;
 mod ssh_config;
@@ -56,6 +58,7 @@ use sftp::{
     list_local_dir as sftp_list_local_dir_backend,
     list_remote_dir as sftp_list_remote_dir_backend,
     open_local_entry_in_os as sftp_open_local_entry_in_os_backend,
+    open_remote_file_in_os as sftp_open_remote_file_in_os_backend,
     read_local_text_file as sftp_read_local_text_file_backend,
     rename_local_entry as sftp_rename_local_entry_backend,
     sftp_create_dir as sftp_create_dir_backend,
@@ -819,8 +822,19 @@ fn get_local_home_canonical_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn sftp_download_file(spec: RemoteSshSpec, remote_file_path: String, dest_dir_path: String) -> Result<String, String> {
-    sftp_download_remote_file_backend(spec, remote_file_path, dest_dir_path)
+fn sftp_download_file(
+    app: tauri::AppHandle,
+    spec: RemoteSshSpec,
+    remote_file_path: String,
+    dest_dir_path: String,
+    transfer_id: Option<String>,
+) -> Result<String, String> {
+    sftp_download_remote_file_backend(&app, spec, remote_file_path, dest_dir_path, transfer_id)
+}
+
+#[tauri::command]
+fn sftp_open_remote_file_in_os(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+    sftp_open_remote_file_in_os_backend(spec, parent_path, name)
 }
 
 #[tauri::command]
@@ -861,22 +875,61 @@ fn local_export_paths_archive(
 
 #[tauri::command]
 fn sftp_upload_file(
+    app: tauri::AppHandle,
     spec: RemoteSshSpec,
     local_dir_path: String,
     local_file_name: String,
     remote_file_path: String,
+    transfer_id: Option<String>,
 ) -> Result<(), String> {
-    sftp_upload_remote_file_backend(spec, local_dir_path, local_file_name, remote_file_path)
+    sftp_upload_remote_file_backend(
+        &app,
+        spec,
+        local_dir_path,
+        local_file_name,
+        remote_file_path,
+        transfer_id,
+    )
 }
 
 #[tauri::command]
 fn copy_local_file(
+    app: tauri::AppHandle,
     src_dir_path: String,
     src_name: String,
     dest_dir_path: String,
     dest_name: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
-    sftp_copy_local_file_backend(src_dir_path, src_name, dest_dir_path, dest_name)
+    sftp_copy_local_file_backend(&app, src_dir_path, src_name, dest_dir_path, dest_name, transfer_id)
+}
+
+#[tauri::command]
+fn nss_xfer_cancel(transfer_id: String) -> Result<(), String> {
+    if let Some(h) = sftp_transfer_ops::try_handles(&transfer_id) {
+        h.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn nss_xfer_set_paused(transfer_id: String, paused: bool) -> Result<(), String> {
+    if let Some(h) = sftp_transfer_ops::try_handles(&transfer_id) {
+        h.pause.store(paused, std::sync::atomic::Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn nss_xfer_begin_transfer(transfer_id: String) -> Result<(), String> {
+    sftp_transfer_ops::ensure_registered(&transfer_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn nss_xfer_release_transfer(transfer_id: String) -> Result<(), String> {
+    sftp_transfer_ops::release_transfer(&transfer_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1261,7 +1314,18 @@ fn take_proxmox_standalone_payload(label: String) -> Result<Option<String>, Stri
     Ok(map.remove(&label))
 }
 
+#[tauri::command]
+fn get_launch_cli_profile() -> launch_cli::LaunchCliProfile {
+    launch_cli::current_profile()
+}
+
 fn main() {
+    let cli_args: Vec<String> = std::env::args().skip(1).collect();
+    if launch_cli::wants_help(&cli_args) {
+        launch_cli::print_help();
+        std::process::exit(0);
+    }
+    launch_cli::init_from_args(&cli_args);
     #[cfg(target_os = "linux")]
     linux_webkit_env::apply_wayland_dmabuf_default();
     plugins::register_builtin_plugins();
@@ -1296,6 +1360,11 @@ fn main() {
             list_local_dir,
             get_local_home_canonical_path,
             sftp_download_file,
+            nss_xfer_cancel,
+            nss_xfer_set_paused,
+            nss_xfer_begin_transfer,
+            nss_xfer_release_transfer,
+            sftp_open_remote_file_in_os,
             sftp_export_paths_archive,
             local_export_paths_archive,
             sftp_upload_file,
@@ -1353,7 +1422,8 @@ fn main() {
             license_status,
             clear_license,
             get_app_preferences,
-            save_app_preferences
+            save_app_preferences,
+            get_launch_cli_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoSuckShell");

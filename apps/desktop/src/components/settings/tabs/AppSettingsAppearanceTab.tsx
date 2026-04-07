@@ -124,7 +124,10 @@ export function AppSettingsAppearanceTab({
           <label className="field">
             <span className="field-label field-label-inline-hint">
               Terminal font preset
-              <SettingsHelpHint topic="Terminal font preset" description="Nerd font fallbacks remain active for symbols." />
+              <SettingsHelpHint
+                topic="Terminal font preset"
+                description="Nerd font fallbacks remain active for symbols. The same family is used for local and remote file browser list views."
+              />
             </span>
             <select
               className="input density-profile-select"
@@ -141,7 +144,7 @@ export function AppSettingsAppearanceTab({
               Terminal density fine tune
               <SettingsHelpHint
                 topic="Terminal density fine tune"
-                description={`Keep your selected density preset and fine-tune terminal readability. Current terminal size: ${terminalFontSize}px.`}
+                description={`Keep your selected density preset and fine-tune terminal readability. Current terminal size: ${terminalFontSize}px. The same size applies to local and remote file browser list views.`}
               />
             </span>
             <input

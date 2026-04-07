@@ -12,6 +12,11 @@ const LEADER_ARM_MS = 1400;
 
 export type KeyboardShortcutEngineSnapshot = {
   overlayOpen: boolean;
+  /**
+   * When true, F5/Tab NSS bindings are handled by `useNssCommanderFileOpKeyboardShortcuts`;
+   * the global engine must not consume them first.
+   */
+  nssCommanderDeferChordShortcuts: boolean;
 };
 
 export type KeyboardShortcutEngineActions = {
@@ -23,6 +28,23 @@ export type KeyboardShortcutEngineActions = {
   dismissPrimaryOverlay: () => void;
   openSettingsKeyboardTab: () => void;
 };
+
+/**
+ * Whether the engine should preventDefault and run the command. When false, another capture listener
+ * (e.g. NSS-Commander file ops) may handle the key.
+ */
+export function keyboardEngineShouldConsumeResolvedCommand(
+  resolved: KeyboardShortcutCommandId,
+  snapshot: Pick<KeyboardShortcutEngineSnapshot, "nssCommanderDeferChordShortcuts">,
+): boolean {
+  if (resolved === "nssCommanderCopy" && snapshot.nssCommanderDeferChordShortcuts) {
+    return false;
+  }
+  if (resolved === "nssCommanderSwitchPane") {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Global capture-phase shortcuts. Uses refs for snapshot/actions so the listener is registered once.
@@ -109,6 +131,10 @@ export function useAppKeyboardShortcutEngine(
       }
 
       if (!resolved) {
+        return;
+      }
+
+      if (!keyboardEngineShouldConsumeResolvedCommand(resolved, getSnapshotRef.current())) {
         return;
       }
 

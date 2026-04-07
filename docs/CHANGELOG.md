@@ -4,6 +4,10 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+### Changed
+
+- **NSS-Commander** — Copy/move flow uses a terminal-style dialog (green title bar, monospace) with an **editable destination path**, listing validation, and synced pane paths. Transfer progress is shown in a detailed popup (segmented bar, ETA/speed from live byte progress, scrollable message log). **F5** confirms the path dialog and pauses or resumes the active transfer; **F4** cancels the transfer; **F10** toggles details. Single-file SFTP downloads/uploads and local file copies emit progress events and honor **pause** and **cancel** from the backend.
+
 ## [0.3.4] - 2026-04-07
 
 ### Added

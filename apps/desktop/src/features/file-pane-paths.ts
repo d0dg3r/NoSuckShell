@@ -270,3 +270,8 @@ export function localPathBreadcrumbSegments(pathKey: string): PathBreadcrumbSegm
   }
   return out;
 }
+
+/** Dot-prefixed names (typical “hidden” entries). `.` / `..` are not returned by our directory listings. */
+export function isDotHiddenFileName(name: string): boolean {
+  return name.startsWith(".");
+}

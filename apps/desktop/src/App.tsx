@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -54,7 +56,16 @@ import {
   openVirtViewerFromSpicePayload,
   pluginInvoke,
   sftpDeleteEntry,
+  sftpListRemoteDir,
+  listLocalDir,
+  getLaunchCliProfile,
+  nssXferBeginTransfer,
+  nssXferCancel,
+  nssXferReleaseTransfer,
+  nssXferSetPaused,
 } from "./tauri-api";
+import { FilePaneConfirmDialog, NssCommanderPreXferDialog } from "./components/FilePaneDialogs";
+import { NssCommanderXferProgressDialog } from "./components/NssCommanderXferProgressDialog";
 import { HostContextMenu } from "./components/HostContextMenu";
 import { HostSidebar } from "./components/HostSidebar";
 import { PaneContextMenu } from "./components/PaneContextMenu";
@@ -137,6 +148,7 @@ import {
 import { setFileTransferClipboardFromEvent } from "./features/file-transfer-clipboard";
 import type { NssOpsPaneKind } from "./features/nss-commander-file-ops-bar";
 import { runFilePaneTransfer } from "./features/file-pane-transfer";
+import { remotePathBarFullDisplay } from "./features/file-pane-paths";
 import {
   buildQuickConnectUserCandidates,
   parseHostPortInput,
@@ -745,6 +757,19 @@ export function App() {
   const removeConfirmResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeAllConfirmResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideSidebarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const launchCliLayoutAppliedRef = useRef(false);
+  const launchCliDepsRef = useRef<{
+    closeAllSessions: (withLayoutReset: boolean) => Promise<void>;
+    connectLocalShellInPane: (paneIndex: number) => Promise<void>;
+    createNssCommanderWorkspace: () => Promise<void>;
+    applyWorkspaceSnapshot: (snapshot: WorkspaceSnapshot) => void;
+    clearSidebarHideTimeout: () => void;
+    setWorkspaceOrder: Dispatch<SetStateAction<string[]>>;
+    setWorkspaceSnapshots: Dispatch<SetStateAction<Record<string, WorkspaceSnapshot>>>;
+    setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
+    setIsSidebarVisible: Dispatch<SetStateAction<boolean>>;
+    setError: Dispatch<SetStateAction<string>>;
+  } | null>(null);
   const pendingProfileLoadSessionIdsRef = useRef<Set<string> | null>(null);
   const sessionsRef = useRef<SessionTab[]>([]);
   const metadataStoreRef = useRef<HostMetadataStore>(createDefaultMetadataStore());
@@ -759,10 +784,73 @@ export function App() {
   const [nssPaneOpRequest, setNssPaneOpRequest] = useState<{
     paneIndex: number;
     requestId: number;
-    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile";
     names: string[];
   } | null>(null);
   const [nssFilePaneReloadAllKey, setNssFilePaneReloadAllKey] = useState(0);
+  type NssCommanderXferUiState = {
+    phase: "copy" | "move";
+    index: number;
+    total: number;
+    name: string;
+    /** True when this batch item is a directory copied as a tree (not a single file). */
+    folderTree: boolean;
+    /** Basename of the file currently being copied inside a tree, from backend progress. */
+    activeFileName: string | null;
+    transferId: string | null;
+    batchSummary: string | null;
+    bytesDone: number;
+    bytesTotal: number;
+    fileBytesDone: number;
+    fileBytesTotal: number;
+    speedBps: number;
+    etaSeconds: number | null;
+    messages: string[];
+    paused: boolean;
+  };
+  const [nssCommanderXferUi, setNssCommanderXferUi] = useState<NssCommanderXferUiState | null>(null);
+  const nssXferListenTidRef = useRef<string | null>(null);
+  const nssXferSpeedSampleRef = useRef<{ t: number; bytes: number } | null>(null);
+  const nssXferBatchBytesDoneRef = useRef(0);
+  const nssXferBatchBytesTotalRef = useRef(0);
+  /** Bytes finished for prior files within the current batch item (e.g. directory tree). */
+  const nssXferIntraItemBytesRef = useRef(0);
+  /** Last file reported by `nss_sftp_transfer_progress` for the current batch item. */
+  const nssXferProgressFileRef = useRef<{ label: string; total: number; bytesDone: number }>({
+    label: "",
+    total: 0,
+    bytesDone: 0,
+  });
+  const [nssCmdLocalPathSyncByPane, setNssCmdLocalPathSyncByPane] = useState<
+    Record<number, { requestId: number; pathKey: string }>
+  >({});
+  const [nssCmdRemotePathSyncByPane, setNssCmdRemotePathSyncByPane] = useState<
+    Record<number, { requestId: number; path: string }>
+  >({});
+  const nssPathSyncSeqRef = useRef(0);
+  const [nssPreXferError, setNssPreXferError] = useState<string | null>(null);
+  type NssXferDialogState =
+    | {
+        kind: "pre_copy";
+        sourceLabel: string;
+        destLabel: string;
+        count: number;
+        destPaneIndex: number;
+        destView: "local" | "remote";
+      }
+    | {
+        kind: "pre_move";
+        sourceLabel: string;
+        destLabel: string;
+        count: number;
+        destPaneIndex: number;
+        destView: "local" | "remote";
+      }
+    | { kind: "overwrite"; fileName: string };
+  const [nssXferDialog, setNssXferDialog] = useState<NssXferDialogState | null>(null);
+  const preXferResolveRef = useRef<null | ((ok: boolean) => void)>(null);
+  const owXferResolveRef = useRef<null | ((choice: "replace" | "skip" | "cancel" | "all") => void)>(null);
+  const nssXferUserCancelledRef = useRef(false);
   const [nssFileTableHeadOffsetByPane, setNssFileTableHeadOffsetByPane] = useState<Record<number, number>>({});
   const filePaneTitlesRef = useRef<Record<number, { short: string; full: string }>>({});
   const [filePaneTitleEpoch, setFilePaneTitleEpoch] = useState(0);
@@ -1082,6 +1170,79 @@ export function App() {
       };
     });
   }, [activeWorkspaceId, splitTree, workspaceSnapshots]);
+
+  useEffect(() => {
+    const isNssCommander = workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander";
+    document.body.classList.toggle("nss-commander-workspace", isNssCommander);
+    return () => document.body.classList.remove("nss-commander-workspace");
+  }, [activeWorkspaceId, workspaceSnapshots]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<{
+      transferId: string;
+      phase: string;
+      bytesDone: number;
+      bytesTotal: number;
+      fileName: string;
+    }>("nss_sftp_transfer_progress", (event) => {
+      const p = event.payload;
+      if (p.transferId !== nssXferListenTidRef.current) {
+        return;
+      }
+      const now = performance.now();
+      const lastFile = nssXferProgressFileRef.current;
+      if (lastFile.label && p.fileName !== lastFile.label) {
+        nssXferIntraItemBytesRef.current += lastFile.total;
+      }
+      nssXferProgressFileRef.current = {
+        label: p.fileName,
+        total: p.bytesTotal,
+        bytesDone: p.bytesDone,
+      };
+
+      const intra = nssXferIntraItemBytesRef.current;
+      const priorBatch = nssXferBatchBytesDoneRef.current;
+      const batchDoneMonotonic = priorBatch + intra + p.bytesDone;
+      const batchTotal = nssXferBatchBytesTotalRef.current;
+
+      setNssCommanderXferUi((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        let speedBps = prev.speedBps;
+        const sample = nssXferSpeedSampleRef.current;
+        const deltaBytes = batchDoneMonotonic - (sample?.bytes ?? batchDoneMonotonic);
+        const deltaT = (now - (sample?.t ?? now)) / 1000;
+        if (sample && deltaT > 0.08 && deltaBytes >= 0) {
+          const inst = deltaBytes / deltaT;
+          speedBps = speedBps === 0 ? inst : speedBps * 0.62 + inst * 0.38;
+        }
+        nssXferSpeedSampleRef.current = { t: now, bytes: batchDoneMonotonic };
+
+        let etaSeconds: number | null = null;
+        if (speedBps > 512 && batchTotal > batchDoneMonotonic) {
+          etaSeconds = (batchTotal - batchDoneMonotonic) / speedBps;
+        }
+
+        return {
+          ...prev,
+          fileBytesDone: p.bytesDone,
+          fileBytesTotal: p.bytesTotal,
+          activeFileName: p.fileName.trim() ? p.fileName : prev.activeFileName,
+          bytesDone: batchTotal > 0 ? batchDoneMonotonic : 0,
+          bytesTotal: batchTotal > 0 ? batchTotal : 0,
+          speedBps,
+          etaSeconds,
+        };
+      });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -4254,6 +4415,65 @@ export function App() {
       setError(String(e));
     }
   }, [activePaneIndex, activeSession, activeWorkspaceId, applyWorkspaceSnapshot, paneLayouts, splitSlots, splitTree]);
+  launchCliDepsRef.current = {
+    closeAllSessions,
+    connectLocalShellInPane,
+    createNssCommanderWorkspace,
+    applyWorkspaceSnapshot,
+    clearSidebarHideTimeout,
+    setWorkspaceOrder,
+    setWorkspaceSnapshots,
+    setActiveWorkspaceId,
+    setIsSidebarVisible,
+    setError,
+  };
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        if (launchCliLayoutAppliedRef.current) {
+          return;
+        }
+        let profile: Awaited<ReturnType<typeof getLaunchCliProfile>>;
+        try {
+          profile = await getLaunchCliProfile();
+        } catch {
+          return;
+        }
+        const d = launchCliDepsRef.current;
+        if (!d) {
+          return;
+        }
+        if (profile.error) {
+          launchCliLayoutAppliedRef.current = true;
+          d.setError(profile.error);
+          return;
+        }
+        if (!profile.localCommander && !profile.singleLocalShell) {
+          return;
+        }
+        launchCliLayoutAppliedRef.current = true;
+        if (profile.localCommander) {
+          await d.createNssCommanderWorkspace();
+          d.clearSidebarHideTimeout();
+          d.setIsSidebarVisible(false);
+          return;
+        }
+        await d.closeAllSessions(true);
+        const mainSnapshot = createEmptyWorkspaceSnapshot(DEFAULT_WORKSPACE_ID, "Main");
+        d.setWorkspaceOrder([DEFAULT_WORKSPACE_ID]);
+        d.setWorkspaceSnapshots({ [DEFAULT_WORKSPACE_ID]: mainSnapshot });
+        d.setActiveWorkspaceId(DEFAULT_WORKSPACE_ID);
+        d.applyWorkspaceSnapshot(mainSnapshot);
+        await d.connectLocalShellInPane(0);
+        d.clearSidebarHideTimeout();
+        d.setIsSidebarVisible(false);
+      })();
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, []);
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
       if (workspaceOrder.length <= 1) {
@@ -4764,7 +4984,7 @@ export function App() {
     }
   }, [paneOrder, activePaneIndex, splitSlots, requestTerminalFocus]);
 
-  const shortcutSnapshotRef = useRef({ overlayOpen: false });
+  const shortcutSnapshotRef = useRef({ overlayOpen: false, nssCommanderDeferChordShortcuts: false });
   const keyboardShortcutSuspendEscapeRef = useRef(false);
   const shortcutActionsRef = useRef<KeyboardShortcutEngineActions>({
     openSettings: () => {},
@@ -4783,7 +5003,9 @@ export function App() {
       Boolean(activeTrustPrompt) ||
       isQuickConnectModalOpen ||
       isAddHostModalOpen ||
-      isAppSettingsOpen,
+      isAppSettingsOpen ||
+      Boolean(nssXferDialog) || Boolean(nssCommanderXferUi),
+    nssCommanderDeferChordShortcuts: workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander",
   };
 
   shortcutActionsRef.current = {
@@ -4793,6 +5015,31 @@ export function App() {
     focusNextPane: () => focusNextPaneFromShortcut(),
     focusPreviousPane: () => focusPreviousPaneFromShortcut(),
     dismissPrimaryOverlay: () => {
+      if (nssCommanderXferUi) {
+        nssXferUserCancelledRef.current = true;
+        if (nssCommanderXferUi.transferId) {
+          void nssXferCancel(nssCommanderXferUi.transferId);
+        }
+        setNssCommanderXferUi(null);
+        return;
+      }
+      if (nssXferDialog) {
+        if (nssXferDialog.kind === "pre_copy" || nssXferDialog.kind === "pre_move") {
+          const r = preXferResolveRef.current;
+          preXferResolveRef.current = null;
+          setNssXferDialog(null);
+          setNssPreXferError(null);
+          r?.(false);
+          return;
+        }
+        if (nssXferDialog.kind === "overwrite") {
+          const r = owXferResolveRef.current;
+          owXferResolveRef.current = null;
+          setNssXferDialog(null);
+          r?.("cancel");
+          return;
+        }
+      }
       if (hostContextMenu) {
         setHostContextMenu(null);
         return;
@@ -5402,10 +5649,16 @@ export function App() {
   }, []);
 
   const runCommanderPaneFileTransfer = useCallback(
-    async (sourcePaneIndex: number, destPaneIndex: number, names: string[]) => {
+    async (
+      sourcePaneIndex: number,
+      destPaneIndex: number,
+      names: string[],
+      opts?: { isMove?: boolean },
+    ) => {
       if (names.length === 0) {
         return;
       }
+      const isMove = opts?.isMove === true;
       const sourceView = sessionFileViews[splitSlots[sourcePaneIndex] ?? ""];
       const destView = sessionFileViews[splitSlots[destPaneIndex] ?? ""];
       if (sourceView !== "local" && sourceView !== "remote") {
@@ -5417,66 +5670,299 @@ export function App() {
       if (sourceView === "remote" && destView === "remote") {
         throw new Error("Remote-to-remote file transfer is not implemented yet.");
       }
-      if (sourceView === "local") {
-        const sourcePath = localFilePanePathsRef.current[sourcePaneIndex] ?? "";
-        for (const name of names) {
+
+      const labelForPane = (paneIndex: number): string => {
+        const view = sessionFileViews[splitSlots[paneIndex] ?? ""];
+        if (view === "local") {
+          const key = localFilePanePathsRef.current[paneIndex] ?? "";
+          return key === "" ? "Home" : key;
+        }
+        if (view === "remote") {
+          const spec = remoteSshSpecForPane(paneIndex);
+          if (!spec) {
+            return "Remote";
+          }
+          const p = remoteFilePanePathsRef.current[paneIndex] ?? ".";
+          return remotePathBarFullDisplay(spec, p);
+        }
+        return "—";
+      };
+
+      const loadDestExistingNames = async (): Promise<Set<string>> => {
+        const set = new Set<string>();
+        if (destView === "local") {
+          const key = localFilePanePathsRef.current[destPaneIndex] ?? "";
+          const list = await listLocalDir(key);
+          for (const e of list) {
+            set.add(e.name);
+          }
+          return set;
+        }
+        const destSpec = remoteSshSpecForPane(destPaneIndex);
+        if (!destSpec) {
+          return set;
+        }
+        const destPath = remoteFilePanePathsRef.current[destPaneIndex] ?? ".";
+        const list = await sftpListRemoteDir(destSpec, destPath);
+        for (const e of list) {
+          set.add(e.name);
+        }
+        return set;
+      };
+
+      const transferOne = async (name: string, transferId: string) => {
+        const removeDestIfExists = existingAtStart.has(name);
+        const xferOpts = {
+          removeDestIfExists,
+          transferId,
+          transferCancelled: () => nssXferUserCancelledRef.current,
+        };
+        if (sourceView === "local") {
+          const sourcePath = localFilePanePathsRef.current[sourcePaneIndex] ?? "";
           if (destView === "remote") {
             const destSpec = remoteSshSpecForPane(destPaneIndex);
             if (!destSpec) {
-              continue;
+              return;
             }
             const destPath = remoteFilePanePathsRef.current[destPaneIndex] ?? ".";
             await runFilePaneTransfer(
               { kind: "local", pathKey: sourcePath, name },
               { kind: "remote", spec: destSpec, parentPath: destPath },
+              xferOpts,
             );
           } else {
             const destPath = localFilePanePathsRef.current[destPaneIndex] ?? "";
-            await runFilePaneTransfer({ kind: "local", pathKey: sourcePath, name }, { kind: "local", pathKey: destPath });
+            await runFilePaneTransfer(
+              { kind: "local", pathKey: sourcePath, name },
+              { kind: "local", pathKey: destPath },
+              xferOpts,
+            );
           }
+          return;
         }
-        return;
-      }
-      const sourceSpec = remoteSshSpecForPane(sourcePaneIndex);
-      if (!sourceSpec) {
-        return;
-      }
-      const sourcePath = remoteFilePanePathsRef.current[sourcePaneIndex] ?? ".";
-      const destPath = localFilePanePathsRef.current[destPaneIndex] ?? "";
-      for (const name of names) {
+        const sourceSpec = remoteSshSpecForPane(sourcePaneIndex);
+        if (!sourceSpec) {
+          return;
+        }
+        const sourcePath = remoteFilePanePathsRef.current[sourcePaneIndex] ?? ".";
+        const destPath = localFilePanePathsRef.current[destPaneIndex] ?? "";
         await runFilePaneTransfer(
           { kind: "remote", spec: sourceSpec, parentPath: sourcePath, name },
           { kind: "local", pathKey: destPath },
+          xferOpts,
         );
+      };
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        preXferResolveRef.current = (ok: boolean) => {
+          preXferResolveRef.current = null;
+          resolve(ok);
+        };
+        setNssPreXferError(null);
+        const sourceLabel = labelForPane(sourcePaneIndex);
+        const destLabel = labelForPane(destPaneIndex);
+        if (isMove) {
+          setNssXferDialog({
+            kind: "pre_move",
+            sourceLabel,
+            destLabel,
+            count: names.length,
+            destPaneIndex,
+            destView: destView === "local" ? "local" : "remote",
+          });
+        } else {
+          setNssXferDialog({
+            kind: "pre_copy",
+            sourceLabel,
+            destLabel,
+            count: names.length,
+            destPaneIndex,
+            destView: destView === "local" ? "local" : "remote",
+          });
+        }
+      });
+      if (!confirmed) {
+        setNssXferDialog(null);
+        return;
+      }
+      setNssXferDialog(null);
+
+      const phase: "copy" | "move" = isMove ? "move" : "copy";
+      let existingAtStart: Set<string>;
+      try {
+        existingAtStart = await loadDestExistingNames();
+      } catch {
+        setError("Could not read the destination folder to check for existing files.");
+        return;
+      }
+
+      const nameToSize = new Map<string, number>();
+      const nameIsDir = new Map<string, boolean>();
+      const prefetchListing = async () => {
+        try {
+          if (sourceView === "local") {
+            const key = localFilePanePathsRef.current[sourcePaneIndex] ?? "";
+            const list = await listLocalDir(key);
+            for (const n of names) {
+              const row = list.find((e) => e.name === n);
+              if (row) {
+                nameIsDir.set(n, row.isDir);
+                if (!row.isDir) {
+                  nameToSize.set(n, row.size);
+                }
+              }
+            }
+          } else {
+            const spec = remoteSshSpecForPane(sourcePaneIndex);
+            if (!spec) {
+              return;
+            }
+            const p = remoteFilePanePathsRef.current[sourcePaneIndex] ?? ".";
+            const list = await sftpListRemoteDir(spec, p);
+            for (const n of names) {
+              const row = list.find((e) => e.name === n);
+              if (row) {
+                nameIsDir.set(n, row.isDir);
+                if (!row.isDir) {
+                  nameToSize.set(n, row.size);
+                }
+              }
+            }
+          }
+        } catch {
+          /* best-effort for ETA */
+        }
+      };
+      await prefetchListing();
+      const batchBytesTotal = names.reduce((acc, n) => acc + (nameToSize.get(n) ?? 0), 0);
+      nssXferBatchBytesTotalRef.current = batchBytesTotal;
+      nssXferBatchBytesDoneRef.current = 0;
+
+      let replaceAll = false;
+      const transferredNames: string[] = [];
+      nssXferUserCancelledRef.current = false;
+
+      const batchSummary =
+        batchBytesTotal > 0
+          ? `${phase === "move" ? "Moving" : "Copying"} ${names.length} ${names.length === 1 ? "item" : "items"} (${batchBytesTotal} bytes estimated)`
+          : `${phase === "move" ? "Moving" : "Copying"} ${names.length} ${names.length === 1 ? "item" : "items"}`;
+
+      const pushLog = (line: string) => {
+        setNssCommanderXferUi((prev) =>
+          prev ? { ...prev, messages: [...prev.messages, line] } : prev,
+        );
+      };
+
+      try {
+        for (let i = 0; i < names.length; i++) {
+          if (nssXferUserCancelledRef.current) {
+            pushLog("Canceled by user.");
+            break;
+          }
+          const name = names[i]!;
+          const transferId = crypto.randomUUID();
+          try {
+            await nssXferBeginTransfer(transferId);
+            nssXferListenTidRef.current = transferId;
+            nssXferSpeedSampleRef.current = null;
+            nssXferIntraItemBytesRef.current = 0;
+            nssXferProgressFileRef.current = { label: "", total: 0, bytesDone: 0 };
+
+            setNssCommanderXferUi((prev) => ({
+              phase,
+              index: i + 1,
+              total: names.length,
+              name,
+              folderTree: nameIsDir.get(name) === true,
+              activeFileName: null,
+              transferId,
+              batchSummary,
+              bytesDone: nssXferBatchBytesDoneRef.current,
+              bytesTotal: nssXferBatchBytesTotalRef.current || 0,
+              fileBytesDone: 0,
+              fileBytesTotal: nameToSize.get(name) ?? 0,
+              speedBps: 0,
+              etaSeconds: null,
+              messages:
+                prev && prev.messages.length > 0
+                  ? prev.messages
+                  : [`Started ${phase} of ${names.length} ${names.length === 1 ? "item" : "items"}.`],
+              paused: false,
+            }));
+
+            if (existingAtStart.has(name) && !replaceAll) {
+              const choice = await new Promise<"replace" | "skip" | "cancel" | "all">((resolve) => {
+                owXferResolveRef.current = (c) => {
+                  owXferResolveRef.current = null;
+                  resolve(c);
+                };
+                setNssXferDialog({ kind: "overwrite", fileName: name });
+              });
+              setNssXferDialog(null);
+              if (choice === "cancel") {
+                pushLog(`Canceled on conflict: ${name}`);
+                return;
+              }
+              if (choice === "skip") {
+                pushLog(`Skipped (destination exists): ${name}`);
+                continue;
+              }
+              if (choice === "all") {
+                replaceAll = true;
+                pushLog("Replace all selected for further conflicts.");
+              }
+            }
+
+            try {
+              await transferOne(name, transferId);
+              transferredNames.push(name);
+              const fromProgress =
+                nssXferIntraItemBytesRef.current + nssXferProgressFileRef.current.bytesDone;
+              const sz = nameToSize.get(name) ?? 0;
+              nssXferBatchBytesDoneRef.current += Math.max(fromProgress, sz);
+              pushLog(`Done: ${name}`);
+            } catch (err) {
+              const msg = String(err);
+              pushLog(`Error: ${name} — ${msg}`);
+              if (!/transfer canceled/i.test(msg)) {
+                setError(msg);
+              }
+              break;
+            }
+          } finally {
+            await nssXferReleaseTransfer(transferId);
+          }
+        }
+
+        if (isMove) {
+          if (sourceView === "local") {
+            const sourcePath = localFilePanePathsRef.current[sourcePaneIndex] ?? "";
+            for (const name of transferredNames) {
+              await deleteLocalEntry(sourcePath, name);
+            }
+          } else if (sourceView === "remote") {
+            const spec = remoteSshSpecForPane(sourcePaneIndex);
+            if (spec) {
+              const sourcePath = remoteFilePanePathsRef.current[sourcePaneIndex] ?? ".";
+              for (const name of transferredNames) {
+                await sftpDeleteEntry(spec, sourcePath, name);
+              }
+            }
+          }
+        }
+      } finally {
+        nssXferListenTidRef.current = null;
+        setNssCommanderXferUi(null);
       }
     },
-    [remoteSshSpecForPane, sessionFileViews, splitSlots],
+    [remoteSshSpecForPane, sessionFileViews, splitSlots, setError],
   );
 
   const runCommanderPaneMove = useCallback(
     async (sourcePaneIndex: number, destPaneIndex: number, names: string[]) => {
-      if (names.length === 0) {
-        return;
-      }
-      await runCommanderPaneFileTransfer(sourcePaneIndex, destPaneIndex, names);
-      const sourceView = sessionFileViews[splitSlots[sourcePaneIndex] ?? ""];
-      if (sourceView === "local") {
-        const sourcePath = localFilePanePathsRef.current[sourcePaneIndex] ?? "";
-        for (const name of names) {
-          await deleteLocalEntry(sourcePath, name);
-        }
-      } else if (sourceView === "remote") {
-        const spec = remoteSshSpecForPane(sourcePaneIndex);
-        if (!spec) {
-          return;
-        }
-        const sourcePath = remoteFilePanePathsRef.current[sourcePaneIndex] ?? ".";
-        for (const name of names) {
-          await sftpDeleteEntry(spec, sourcePath, name);
-        }
-      }
+      await runCommanderPaneFileTransfer(sourcePaneIndex, destPaneIndex, names, { isMove: true });
     },
-    [remoteSshSpecForPane, runCommanderPaneFileTransfer, sessionFileViews, splitSlots],
+    [runCommanderPaneFileTransfer],
   );
 
   const onLocalFilePaneF5Copy = useCallback(
@@ -5603,7 +6089,7 @@ export function App() {
   );
 
   const fireNssFilePaneOp = useCallback(
-    (op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile") => {
+    (op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile") => {
       const left = commanderPaneIndices[0];
       const right = commanderPaneIndices[1];
       if (left == null || right == null) {
@@ -5620,6 +6106,9 @@ export function App() {
       if (op === "editTextFile" && names.length !== 1) {
         return;
       }
+      if (op === "viewFile" && names.length !== 1) {
+        return;
+      }
       nssPaneOpRequestIdRef.current += 1;
       setNssPaneOpRequest({
         paneIndex,
@@ -5630,6 +6119,10 @@ export function App() {
     },
     [commanderPaneIndices, nssCommanderActiveFilePaneIndex, nssPaneSelection],
   );
+
+  const notifyNssCommanderCopyMoveNoSelection = useCallback(() => {
+    setError("Select files in at least one file pane first.");
+  }, []);
 
   const renderNssCommanderSplitDividerContent = useCallback(
     (leftPaneIndex: number, rightPaneIndex: number) => {
@@ -5713,11 +6206,13 @@ export function App() {
           }}
           onDelete={() => fireNssFilePaneOp("delete")}
           onRename={() => fireNssFilePaneOp("rename")}
+          onViewFile={() => fireNssFilePaneOp("viewFile")}
           onMkdir={() => fireNssFilePaneOp("mkdir")}
           onNewTextFile={() => fireNssFilePaneOp("newTextFile")}
           onEditTextFile={() => fireNssFilePaneOp("editTextFile")}
           onArchive={() => fireNssFilePaneOp("archive")}
           onRefresh={() => setNssFilePaneReloadAllKey((k) => k + 1)}
+          onCopyMoveNoSelection={notifyNssCommanderCopyMoveNoSelection}
         />
         </Suspense>
       );
@@ -5727,6 +6222,7 @@ export function App() {
       activeWorkspaceId,
       commanderPaneIndices,
       fireNssFilePaneOp,
+      notifyNssCommanderCopyMoveNoSelection,
       nssOpsPaneKindForPane,
       nssPaneSelection,
       runCommanderPaneFileTransfer,
@@ -5789,10 +6285,12 @@ export function App() {
           }}
           onDelete={() => fireNssFilePaneOp("delete")}
           onRename={() => fireNssFilePaneOp("rename")}
+          onViewFile={() => fireNssFilePaneOp("viewFile")}
           onMkdir={() => fireNssFilePaneOp("mkdir")}
           onEditTextFile={() => fireNssFilePaneOp("editTextFile")}
           onArchive={() => fireNssFilePaneOp("archive")}
           onRefresh={() => setNssFilePaneReloadAllKey((k) => k + 1)}
+          onCopyMoveNoSelection={notifyNssCommanderCopyMoveNoSelection}
         />
       </Suspense>
     );
@@ -5802,6 +6300,7 @@ export function App() {
     appPreferences.nssCommanderUseClassicGutter,
     commanderPaneIndices,
     fireNssFilePaneOp,
+    notifyNssCommanderCopyMoveNoSelection,
     nssOpsPaneKindForPane,
     nssPaneSelection,
     runCommanderPaneFileTransfer,
@@ -6158,6 +6657,14 @@ export function App() {
       workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander" ? onNssFilePaneTableHeadOffsetInSplitPane : undefined,
     nssCommanderFilePaneReloadAllKey:
       workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander" ? nssFilePaneReloadAllKey : undefined,
+    nssCommanderLocalPathSyncForPane:
+      workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander"
+        ? (paneIndex: number) => nssCmdLocalPathSyncByPane[paneIndex] ?? null
+        : undefined,
+    nssCommanderRemotePathSyncForPane:
+      workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander"
+        ? (paneIndex: number) => nssCmdRemotePathSyncByPane[paneIndex] ?? null
+        : undefined,
     resolveNssCommanderPaneOpRequest:
       workspaceSnapshots[activeWorkspaceId]?.kind === "nss-commander"
         ? (paneIndex: number) =>
@@ -6201,6 +6708,8 @@ export function App() {
     "--sidebar-layout-width": isSidebarOpen ? `${sidebarWidth}px` : "18px",
     "--shell-grid-gap": isSidebarOpen ? "var(--space-2)" : "var(--space-1)",
     "--sidebar-resize-track-width": isSidebarOpen ? "12px" : "0px",
+    "--file-pane-terminal-font-size": `${terminalFontSize}px`,
+    "--file-pane-terminal-font-family": terminalFontFamily,
   } as CSSProperties;
   const contextMenuPaneSessionId =
     contextMenu.paneIndex !== null && contextMenu.paneIndex >= 0 ? (splitSlots[contextMenu.paneIndex] ?? null) : null;
@@ -6267,6 +6776,148 @@ export function App() {
             </button>
           </div>
         </div>
+      ) : null}
+      {nssCommanderXferUi ? (
+        <NssCommanderXferProgressDialog
+          phase={nssCommanderXferUi.phase}
+          fileIndex={nssCommanderXferUi.index}
+          fileTotal={nssCommanderXferUi.total}
+          currentName={nssCommanderXferUi.name}
+          folderTree={nssCommanderXferUi.folderTree}
+          activeFileName={nssCommanderXferUi.activeFileName}
+          batchSummary={nssCommanderXferUi.batchSummary}
+          bytesDone={nssCommanderXferUi.bytesDone}
+          bytesTotal={nssCommanderXferUi.bytesTotal}
+          fileBytesDone={nssCommanderXferUi.fileBytesDone}
+          fileBytesTotal={nssCommanderXferUi.fileBytesTotal}
+          speedBps={nssCommanderXferUi.speedBps}
+          etaSeconds={nssCommanderXferUi.etaSeconds}
+          messages={nssCommanderXferUi.messages}
+          paused={nssCommanderXferUi.paused}
+          canPause={Boolean(nssCommanderXferUi.transferId)}
+          onTogglePause={() => {
+            const tid = nssCommanderXferUi.transferId;
+            if (!tid) {
+              return;
+            }
+            const next = !nssCommanderXferUi.paused;
+            void nssXferSetPaused(tid, next);
+            setNssCommanderXferUi((p) => (p ? { ...p, paused: next } : p));
+          }}
+          onCancel={() => {
+            nssXferUserCancelledRef.current = true;
+            const tid = nssCommanderXferUi.transferId;
+            if (tid) {
+              void nssXferCancel(tid);
+            }
+            setNssCommanderXferUi((p) =>
+              p ? { ...p, messages: [...p.messages, "Cancel requested."] } : p,
+            );
+          }}
+        />
+      ) : null}
+      {nssXferDialog && (nssXferDialog.kind === "pre_copy" || nssXferDialog.kind === "pre_move") ? (
+        <NssCommanderPreXferDialog
+          open
+          mode={nssXferDialog.kind === "pre_move" ? "move" : "copy"}
+          sourceLabel={nssXferDialog.sourceLabel}
+          initialDestPath={
+            nssXferDialog.destView === "local"
+              ? localFilePanePathsRef.current[nssXferDialog.destPaneIndex] ?? ""
+              : remoteFilePanePathsRef.current[nssXferDialog.destPaneIndex] ?? "."
+          }
+          itemCount={nssXferDialog.count}
+          errorMessage={nssPreXferError}
+          onCancel={() => {
+            setNssPreXferError(null);
+            const r = preXferResolveRef.current;
+            preXferResolveRef.current = null;
+            setNssXferDialog(null);
+            r?.(false);
+          }}
+          onConfirm={(destPath) => {
+            void (async () => {
+              const d = nssXferDialog;
+              if (d.kind !== "pre_copy" && d.kind !== "pre_move") {
+                return;
+              }
+              const pane = d.destPaneIndex;
+              const view = d.destView;
+              setNssPreXferError(null);
+              try {
+                if (view === "local") {
+                  await listLocalDir(destPath);
+                  localFilePanePathsRef.current[pane] = destPath;
+                  nssPathSyncSeqRef.current += 1;
+                  setNssCmdLocalPathSyncByPane((prev) => ({
+                    ...prev,
+                    [pane]: { requestId: nssPathSyncSeqRef.current, pathKey: destPath },
+                  }));
+                } else {
+                  const spec = remoteSshSpecForPane(pane);
+                  if (!spec) {
+                    setNssPreXferError("Remote session is not ready for this pane.");
+                    return;
+                  }
+                  const rp = destPath.trim() === "" ? "." : destPath.trim();
+                  await sftpListRemoteDir(spec, rp);
+                  remoteFilePanePathsRef.current[pane] = rp;
+                  nssPathSyncSeqRef.current += 1;
+                  setNssCmdRemotePathSyncByPane((prev) => ({
+                    ...prev,
+                    [pane]: { requestId: nssPathSyncSeqRef.current, path: rp },
+                  }));
+                }
+              } catch {
+                setNssPreXferError("Could not open that destination folder.");
+                return;
+              }
+              const r = preXferResolveRef.current;
+              preXferResolveRef.current = null;
+              setNssXferDialog(null);
+              r?.(true);
+            })();
+          }}
+        />
+      ) : null}
+      {nssXferDialog?.kind === "overwrite" ? (
+        <FilePaneConfirmDialog
+          open
+          title="Replace existing file?"
+          confirmLabel="Replace"
+          confirmDanger
+          skipLabel="Skip"
+          alternateLabel="Replace all"
+          cancelLabel="Cancel"
+          onCancel={() => {
+            const r = owXferResolveRef.current;
+            owXferResolveRef.current = null;
+            setNssXferDialog(null);
+            r?.("cancel");
+          }}
+          onSkip={() => {
+            const r = owXferResolveRef.current;
+            owXferResolveRef.current = null;
+            setNssXferDialog(null);
+            r?.("skip");
+          }}
+          onAlternate={() => {
+            const r = owXferResolveRef.current;
+            owXferResolveRef.current = null;
+            setNssXferDialog(null);
+            r?.("all");
+          }}
+          onConfirm={() => {
+            const r = owXferResolveRef.current;
+            owXferResolveRef.current = null;
+            setNssXferDialog(null);
+            r?.("replace");
+          }}
+        >
+          <p>
+            A file named <strong>{nssXferDialog.fileName}</strong> already exists in the destination folder.
+          </p>
+        </FilePaneConfirmDialog>
       ) : null}
       <div
         className={`left-rail-edge-strip${isSidebarOpen ? "" : " left-rail-edge-strip--collapsed"}`}

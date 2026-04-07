@@ -7,8 +7,11 @@ import {
   editTextFileEnabled,
   mkdirEnabled,
   renameEnabled,
-  resolveAutoDirection,
+  resolveNssCommanderCopyMoveBaseDirection,
+  reverseNssCommanderCopyMoveDirection,
+  viewInSystemEnabled,
 } from "../features/nss-commander-file-ops-bar";
+import { useNssCommanderFileOpKeyboardShortcuts } from "../features/useNssCommanderFileOpKeyboardShortcuts";
 
 export type NssCommanderFKeyBarProps = {
   leftPaneIndex: number;
@@ -24,10 +27,12 @@ export type NssCommanderFKeyBarProps = {
   onMoveToRight: () => void;
   onDelete: () => void;
   onRename: () => void;
+  onViewFile: () => void;
   onMkdir: () => void;
   onEditTextFile: () => void;
   onArchive: () => void;
   onRefresh: () => void;
+  onCopyMoveNoSelection?: () => void;
 };
 
 export function NssCommanderFKeyBar({
@@ -44,16 +49,44 @@ export function NssCommanderFKeyBar({
   onMoveToRight,
   onDelete,
   onRename,
+  onViewFile,
   onMkdir,
   onEditTextFile,
   onArchive,
   onRefresh,
+  onCopyMoveNoSelection,
 }: NssCommanderFKeyBarProps) {
+  useNssCommanderFileOpKeyboardShortcuts({
+    leftPaneIndex,
+    rightPaneIndex,
+    activePaneIndex,
+    leftKind,
+    rightKind,
+    leftSelection,
+    rightSelection,
+    onCopyToLeft,
+    onCopyToRight,
+    onMoveToLeft,
+    onMoveToRight,
+    onDelete,
+    onRename,
+    onViewFile,
+    onMkdir,
+    onEditTextFile,
+    onArchive,
+    onRefresh,
+    onCopyMoveNoSelection,
+  });
+
   const [shiftHeld, setShiftHeld] = useState(false);
 
   useEffect(() => {
-    const onDown = (e: KeyboardEvent) => { if (e.key === "Shift") setShiftHeld(true); };
-    const onUp = (e: KeyboardEvent) => { if (e.key === "Shift") setShiftHeld(false); };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(true);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(false);
+    };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
@@ -62,43 +95,70 @@ export function NssCommanderFKeyBar({
     };
   }, []);
 
-  const autoDir = resolveAutoDirection(activePaneIndex, leftPaneIndex, rightPaneIndex);
-  const reverseDir = autoDir === "left" ? "right" : "left";
-  const dir = shiftHeld ? reverseDir : autoDir;
+  const baseCopyDir = resolveNssCommanderCopyMoveBaseDirection({
+    activePaneIndex,
+    leftPaneIndex,
+    rightPaneIndex,
+    leftSelectionCount: leftSelection.length,
+    rightSelectionCount: rightSelection.length,
+  });
+  const dir: "left" | "right" | null =
+    baseCopyDir === null ? null : shiftHeld ? reverseNssCommanderCopyMoveDirection(baseCopyDir) : baseCopyDir;
 
   const activeKind: NssOpsPaneKind =
     activePaneIndex === leftPaneIndex ? leftKind : activePaneIndex === rightPaneIndex ? rightKind : "terminal";
   const activeSelectionSize =
     activePaneIndex === leftPaneIndex ? leftSelection.length : activePaneIndex === rightPaneIndex ? rightSelection.length : 0;
 
-  const sourceSelectionForDir = dir === "right" ? leftSelection.length : rightSelection.length;
+  const sourceSelectionForDir = dir === null ? 0 : dir === "right" ? leftSelection.length : rightSelection.length;
 
-  const copyDisabled = !canCopyOrMoveInDirection({
-    leftKind,
-    rightKind,
-    direction: dir,
-    sourceSelectionSize: sourceSelectionForDir,
-  });
+  const copyDisabled =
+    dir === null ||
+    !canCopyOrMoveInDirection({
+      leftKind,
+      rightKind,
+      direction: dir,
+      sourceSelectionSize: sourceSelectionForDir,
+    });
   const moveDisabled = copyDisabled;
   const delDisabled = !deleteEnabled(activeSelectionSize, activeKind);
   const renDisabled = !renameEnabled(activeSelectionSize, activeKind);
+  const viewDisabled = !viewInSystemEnabled(activeSelectionSize, activeKind);
   const mkDisabled = !mkdirEnabled(activeKind);
   const editDisabled = !editTextFileEnabled(activeSelectionSize, activeKind);
   const archDisabled = !archiveEnabled(activeSelectionSize, activeKind, false);
 
-  const copyHandler = dir === "left" ? onCopyToLeft : onCopyToRight;
-  const moveHandler = dir === "left" ? onMoveToLeft : onMoveToRight;
-  const dirArrow = dir === "left" ? "←" : "→";
+  const copyHandler = dir === "left" ? onCopyToLeft : dir === "right" ? onCopyToRight : () => {};
+  const moveHandler = dir === "left" ? onMoveToLeft : dir === "right" ? onMoveToRight : () => {};
+  const dirArrow = dir === "left" ? "←" : dir === "right" ? "→" : "·";
 
   return (
     <div className="nss-commander-fkey-bar" role="toolbar" aria-label="File operations (F-keys)">
+      <button type="button" className="nss-commander-fkey-btn" disabled={renDisabled} onClick={onRename} title="Rename selected (F2)">
+        <kbd>F2</kbd> Ren
+      </button>
+      <button type="button" className="nss-commander-fkey-btn" disabled={viewDisabled} onClick={onViewFile} title="Open in system viewer (F3)">
+        <kbd>F3</kbd> View
+      </button>
       <button type="button" className="nss-commander-fkey-btn" disabled={editDisabled} onClick={onEditTextFile} title="Edit selected file (F4)">
         <kbd>F4</kbd> Edit
       </button>
-      <button type="button" className="nss-commander-fkey-btn" disabled={copyDisabled} onClick={copyHandler} title={`Copy ${dirArrow} (F5, Shift+F5 reverse)`}>
+      <button
+        type="button"
+        className="nss-commander-fkey-btn"
+        disabled={copyDisabled}
+        onClick={copyHandler}
+        title={`Copy ${dirArrow} (F5, Shift+F5 reverse). When both panes have a selection, the focused pane is the source.`}
+      >
         <kbd>F5</kbd> Copy {dirArrow}
       </button>
-      <button type="button" className="nss-commander-fkey-btn" disabled={moveDisabled} onClick={moveHandler} title={`Move ${dirArrow} (F6, Shift+F6 reverse)`}>
+      <button
+        type="button"
+        className="nss-commander-fkey-btn"
+        disabled={moveDisabled}
+        onClick={moveHandler}
+        title={`Move ${dirArrow} (F6, Shift+F6 reverse). When both panes have a selection, the focused pane is the source.`}
+      >
         <kbd>F6</kbd> Move {dirArrow}
       </button>
       <button type="button" className="nss-commander-fkey-btn" disabled={mkDisabled} onClick={onMkdir} title="New folder (F7)">
@@ -109,9 +169,6 @@ export function NssCommanderFKeyBar({
       </button>
       <button type="button" className="nss-commander-fkey-btn" disabled={archDisabled} onClick={onArchive} title="Pack archive (F9)">
         <kbd>F9</kbd> Arch
-      </button>
-      <button type="button" className="nss-commander-fkey-btn" disabled={renDisabled} onClick={onRename} title="Rename selected (F10)">
-        <kbd>F10</kbd> Ren
       </button>
       <button type="button" className="nss-commander-fkey-btn nss-commander-fkey-btn--refresh" onClick={onRefresh} title="Refresh both panes (Ctrl+R)">
         ↻

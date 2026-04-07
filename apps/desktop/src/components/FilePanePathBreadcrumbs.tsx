@@ -21,9 +21,12 @@ export function FilePanePathBreadcrumbs({
       {prefix ? <span className="file-pane-path-prefix">{prefix}</span> : null}
       {segments.map((segment, index) => {
         const isCurrent = index === segments.length - 1;
+        const prev = index > 0 ? segments[index - 1] : undefined;
+        // Root crumb is already a "/"; skip extra separator so "/app" reads as "/ app" not "/ / app".
+        const showSeparator = index > 0 && prev?.label !== "/";
         return (
           <span key={`${segment.path}-${index}`} className="file-pane-path-segment">
-            {index > 0 ? (
+            {showSeparator ? (
               <span className="file-pane-path-separator" aria-hidden="true">
                 /
               </span>

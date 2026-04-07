@@ -10,6 +10,7 @@ import { runRemoteFilePaneExport } from "../features/file-pane-export";
 import { monacoLanguageFromFileName } from "../features/file-pane-editor-language";
 import {
   formatFileSize,
+  isDotHiddenFileName,
   joinRemotePath,
   remoteFolderTitleShort,
   remoteParentDir,
@@ -39,6 +40,7 @@ import {
   sftpReadTextFile,
   sftpRemoveKnownHostEntries,
   addKnownHostEntry,
+  sftpOpenRemoteFileInOs,
   sftpRenameEntry,
   sftpWriteTextFile,
 } from "../tauri-api";
@@ -83,10 +85,11 @@ type Props = {
   nssCommanderReloadAllKey?: number;
   nssCommanderPaneOpRequest?: {
     requestId: number;
-    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile";
     names: string[];
   } | null;
   onFilePaneTableHeadOffsetInSplitPane?: (paneIndex: number, offsetPx: number | null) => void;
+  nssCommanderSyncPath?: { requestId: number; path: string } | null;
 };
 
 function SaveRowIcon() {
@@ -116,15 +119,26 @@ export function RemoteFilePane({
   nssCommanderReloadAllKey = 0,
   nssCommanderPaneOpRequest,
   onFilePaneTableHeadOffsetInSplitPane,
+  nssCommanderSyncPath = null,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const lastNssPaneOpRequestIdRef = useRef(0);
+  const lastNssSyncPathRequestIdRef = useRef(0);
   const [path, setPath] = useState(".");
   const [entries, setEntries] = useState<SftpDirEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<string | null>(null);
   const [lastOk, setLastOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!lastOk) {
+      return;
+    }
+    const id = window.setTimeout(() => setLastOk(null), 2000);
+    return () => window.clearTimeout(id);
+  }, [lastOk]);
+
   const [transferBusy, setTransferBusy] = useState(false);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(() => new Set());
   const [lastRangeIndex, setLastRangeIndex] = useState<number | null>(null);
@@ -135,6 +149,7 @@ export function RemoteFilePane({
   const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
   const [hostKeyMismatch, setHostKeyMismatch] = useState<KnownHostMismatchPayload | null>(null);
   const [hostKeyFixBusy, setHostKeyFixBusy] = useState(false);
   const [hostKeyUnknown, setHostKeyUnknown] = useState<KnownHostUnknownPayload | null>(null);
@@ -153,6 +168,14 @@ export function RemoteFilePane({
     setBulkDeletePendingNames(null);
     setDeleteRecovery(null);
   }, [path, remoteSpecIdentityKey]);
+
+  useEffect(() => {
+    if (!nssCommanderSyncPath || nssCommanderSyncPath.requestId === lastNssSyncPathRequestIdRef.current) {
+      return;
+    }
+    lastNssSyncPathRequestIdRef.current = nssCommanderSyncPath.requestId;
+    setPath(nssCommanderSyncPath.path);
+  }, [nssCommanderSyncPath]);
 
   useEffect(() => {
     onPathChange?.(path);
@@ -199,6 +222,7 @@ export function RemoteFilePane({
     async (name: string) => {
       const row = entries.find((e) => e.name === name);
       if (!row || row.isDir) {
+        setError(row?.isDir ? `"${name}" is a folder; open a file to edit.` : `"${name}" is not in this folder. Refresh the list and try again.`);
         return;
       }
       setCtxMenu(null);
@@ -343,6 +367,10 @@ export function RemoteFilePane({
     setPath("/");
   };
 
+  const goHome = () => {
+    setPath(".");
+  };
+
   const exportNames = useCallback(
     async (names: string[]) => {
       if (names.length === 0) {
@@ -404,6 +432,25 @@ export function RemoteFilePane({
       void openEditorForExistingFile(req.names[0]!);
       return;
     }
+    if (req.op === "viewFile") {
+      if (req.names.length !== 1) {
+        return;
+      }
+      const name = req.names[0]!;
+      const row = entries.find((e) => e.name === name);
+      if (!row) {
+        setError(`"${name}" is not in this folder. Refresh the list and try again.`);
+        return;
+      }
+      if (row.isDir) {
+        setError("Opening remote folders in the system file manager is not supported.");
+        return;
+      }
+      setCtxMenu(null);
+      setError(null);
+      void sftpOpenRemoteFileInOs(spec, path, name).catch((e) => setError(String(e)));
+      return;
+    }
     if (req.op === "rename") {
       if (req.names.length !== 1) {
         return;
@@ -429,7 +476,24 @@ export function RemoteFilePane({
     if (req.op === "archive") {
       void exportNames(req.names);
     }
-  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, remoteSpecIdentityKey, openEditorForExistingFile]);
+  }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, remoteSpecIdentityKey, openEditorForExistingFile, spec]);
+
+  const displayEntries = useMemo(
+    () => (showHiddenFiles ? entries : entries.filter((e) => !isDotHiddenFileName(e.name))),
+    [entries, showHiddenFiles],
+  );
+
+  const toggleShowHiddenFiles = useCallback(() => {
+    setShowHiddenFiles((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedNames((s) => new Set([...s].filter((n) => !isDotHiddenFileName(n))));
+        setActiveName((a) => (a && isDotHiddenFileName(a) ? null : a));
+        setLastRangeIndex(null);
+      }
+      return next;
+    });
+  }, []);
 
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
@@ -437,7 +501,7 @@ export function RemoteFilePane({
       const hi = Math.max(index, lastRangeIndex);
       const next = new Set(selectedNames);
       for (let i = lo; i <= hi; i++) {
-        const row = entries[i];
+        const row = displayEntries[i];
         if (row) {
           next.add(row.name);
         }
@@ -677,6 +741,7 @@ export function RemoteFilePane({
       onRefresh={() => void load()}
       onTerminal={onBack}
       onRoot={goRoot}
+      onHome={goHome}
       onNewFolder={startNewFolder}
       onNewFile={startNewFile}
       onEditFile={() => soleSelectedFile && void openEditorForExistingFile(soleSelectedFile.name)}
@@ -690,6 +755,8 @@ export function RemoteFilePane({
       onExportSelection={() => void exportNames(exportSelectedOrder())}
       exportSelectionDisabled={exportSelectionDisabled}
       showBackToTerminalButton={!nssCmd}
+      showHiddenFiles={showHiddenFiles}
+      onToggleShowHiddenFiles={toggleShowHiddenFiles}
     />
   );
 
@@ -775,7 +842,7 @@ export function RemoteFilePane({
               optimalWidthsDisabled={loading}
             />
             <tbody>
-              {entries.map((row, index) => {
+              {displayEntries.map((row, index) => {
                 const permCell = filePanePermCell(widths.perm, row);
                 const nameKind = semanticFileNameColors ? filePaneNameKind(row) : "default";
                 const nameKindClass = semanticFileNameColors ? filePaneNameKindClassName(nameKind) : "";
