@@ -1,0 +1,33 @@
+# Maintainer: Joe <joe@nosuckshell.dev>
+# Upstream release assets: https://github.com/d0dg3r/NoSuckShell/releases
+pkgname=nosuckshell-bin
+pkgver=0.3.3
+pkgrel=1
+pkgdesc="Cross-platform SSH manager desktop app (pre-built binary)"
+arch=('x86_64')
+url="https://github.com/d0dg3r/NoSuckShell"
+license=('MIT')
+depends=('gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator' 'librsvg' 'libsoup3' 'openssl')
+provides=('nosuckshell')
+conflicts=('nosuckshell')
+options=('!strip')
+# Remote name avoids collisions; makepkg saves it as nosuckshell-bin-${pkgver}.deb
+source=("${pkgname}-${pkgver}.deb::https://github.com/d0dg3r/NoSuckShell/releases/download/v${pkgver}/NoSuckShell_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  cd "${srcdir}"
+  ar x "${pkgname}-${pkgver}.deb"
+  tar xf data.tar.* -C "${pkgdir}"
+
+  # Match CI / Arch repackage: lowercase binary name
+  if [[ -f "${pkgdir}/usr/bin/NoSuckShell" && ! -f "${pkgdir}/usr/bin/nosuckshell" ]]; then
+    mv "${pkgdir}/usr/bin/NoSuckShell" "${pkgdir}/usr/bin/nosuckshell"
+  fi
+
+  # Align .desktop launcher with /usr/bin/nosuckshell
+  shopt -s nullglob
+  for f in "${pkgdir}/usr/share/applications/"*.desktop; do
+    sed -i 's/^Exec=.*/Exec=nosuckshell/' "$f"
+  done
+}

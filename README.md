@@ -73,7 +73,15 @@ More sizes (Flathub downscales, Microsoft/Snap 1920×1080), captions for AppStre
 
 Download the latest **Release** or **Pre-release** asset for your platform from the [Releases](https://github.com/d0dg3r/NoSuckShell/releases) page.
 
-**Arch Linux / CachyOS** — Releases may include **`nosuckshell-….pkg.tar.zst`**. Install or upgrade locally:
+**Arch Linux / CachyOS (AUR)** — Install the pre-built package with an AUR helper:
+
+```bash
+yay -S nosuckshell-bin
+```
+
+The AUR `PKGBUILD` is maintained in [`aur/nosuckshell-bin/`](aur/nosuckshell-bin/); see [`aur/README.md`](aur/README.md) for maintainer setup.
+
+**Arch Linux / CachyOS (manual `.pkg.tar.zst`)** — Releases may include **`nosuckshell-….pkg.tar.zst`**. Install or upgrade locally:
 
 ```bash
 sudo pacman -U ./nosuckshell-<version>-1-x86_64.pkg.tar.zst

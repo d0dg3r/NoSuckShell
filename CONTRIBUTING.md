@@ -23,7 +23,11 @@ You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:de
 
 ## Arch Linux package (install / local `makepkg`)
 
-Releases may include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS** in the root [README.md](README.md) Install section.
+**AUR:** `yay -S nosuckshell-bin` — see [aur/README.md](aur/README.md) and [aur/nosuckshell-bin/PKGBUILD](aur/nosuckshell-bin/PKGBUILD).
+
+Releases may also include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS (manual)** in the root [README.md](README.md) Install section.
+
+**Maintainers:** After a GitHub Release is published, [`.github/workflows/aur-publish.yml`](.github/workflows/aur-publish.yml) can push updates to the AUR when the `AUR_SSH_PRIVATE_KEY` repository secret is configured (see [aur/README.md](aur/README.md)).
 
 ## Local Flatpak (Linux)
 
