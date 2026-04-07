@@ -4,9 +4,11 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-04-07
+
 ### Added
 
-- **Linux / AUR** — Documented and added [`aur/nosuckshell-bin/PKGBUILD`](../aur/nosuckshell-bin/PKGBUILD) for installing via `yay -S nosuckshell-bin` (pre-built `.deb` from GitHub Releases). Optional [`.github/workflows/aur-publish.yml`](../.github/workflows/aur-publish.yml) publishes to the AUR after each release when `AUR_SSH_PRIVATE_KEY` is configured; see [`aur/README.md`](../aur/README.md).
+- **Linux / AUR** — Documented and added [`aur/nosuckshell-bin/PKGBUILD`](../aur/nosuckshell-bin/PKGBUILD) for installing via `yay -S nosuckshell-bin` (pre-built `.deb` from GitHub Releases). Optional [`.github/workflows/aur-publish.yml`](../.github/workflows/aur-publish.yml) publishes to the AUR after each published GitHub Release when `AUR_SSH_PRIVATE_KEY` is configured; see [`aur/README.md`](../aur/README.md).
 
 ### Fixed
 
@@ -282,4 +284,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.1
 [v0.3.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.2
 [v0.3.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.3
+[v0.3.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.4
 
