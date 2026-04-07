@@ -1,7 +1,7 @@
 # Maintainer: Joe <joe@nosuckshell.dev>
 # Upstream release assets: https://github.com/d0dg3r/NoSuckShell/releases
 pkgname=nosuckshell-bin
-pkgver=0.3.3
+pkgver=0.3.4
 pkgrel=1
 pkgdesc="Cross-platform SSH manager desktop app (pre-built binary)"
 arch=('x86_64')
