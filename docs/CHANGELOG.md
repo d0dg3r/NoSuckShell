@@ -4,6 +4,10 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linux / WebKit** — On Wayland, the app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at process start when that variable is not already in the environment, avoiding blank or unstable WebKitGTK webviews without requiring a manual prefix (e.g. for Arch `.pkg.tar.zst` installs). X11 sessions are unchanged.
+
 ## [0.3.3] - 2026-04-07
 
 ### Fixed

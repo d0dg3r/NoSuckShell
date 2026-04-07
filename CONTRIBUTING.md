@@ -14,10 +14,10 @@ Clone the repository, then from the **repository root**:
 
 ```bash
 npm run desktop:install
-WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev
+npm run tauri:dev
 ```
 
-On Linux, `WEBKIT_DISABLE_DMABUF_RENDERER=1` matches the workflow documented in the root [README.md](README.md) and avoids common WebKit/DRM issues on some setups. Omit or adjust if your environment does not need it.
+On Linux **Wayland**, the binary applies the same `WEBKIT_DISABLE_DMABUF_RENDERER` default as in the root [README.md](README.md) unless you already set that variable. Override it in your environment if you need different behavior.
 
 You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:dev`); the root scripts ensure dependencies are present when you use the root commands.
 
