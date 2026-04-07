@@ -73,7 +73,15 @@ More sizes (Flathub downscales, Microsoft/Snap 1920×1080), captions for AppStre
 
 Download the latest **Release** or **Pre-release** asset for your platform from the [Releases](https://github.com/d0dg3r/NoSuckShell/releases) page.
 
-**Arch Linux / CachyOS** — Releases may include **`nosuckshell-….pkg.tar.zst`**. Install or upgrade locally:
+**Arch Linux / CachyOS (AUR)** — Install the pre-built package with an AUR helper:
+
+```bash
+yay -S nosuckshell-bin
+```
+
+The AUR `PKGBUILD` is maintained in [`aur/nosuckshell-bin/`](aur/nosuckshell-bin/); see [`aur/README.md`](aur/README.md) for maintainer setup.
+
+**Arch Linux / CachyOS (manual `.pkg.tar.zst`)** — Releases may include **`nosuckshell-….pkg.tar.zst`**. Install or upgrade locally:
 
 ```bash
 sudo pacman -U ./nosuckshell-<version>-1-x86_64.pkg.tar.zst
@@ -92,10 +100,10 @@ From the repository root, the first `npm run tauri:dev` / `desktop:build` can in
 
 ```bash
 npm run desktop:install
-WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev
+npm run tauri:dev
 ```
 
-On some Linux setups (e.g. certain WebKit builds), `WEBKIT_DISABLE_DMABUF_RENDERER=1` avoids blank or unstable webviews; omit if you do not need it.
+On **Wayland**, the app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` by default when that variable is not already in the environment (it avoids blank or unstable WebKitGTK webviews on some stacks). On **X11** it leaves the variable unset. You can still export `WEBKIT_DISABLE_DMABUF_RENDERER` yourself before launch to force a specific value.
 
 **AppImage** (`npm run tauri:build`) on rolling distros (Arch, CachyOS, …) may fail with `failed to run linuxdeploy`. From the repo root use **`npm run tauri:build:linux-appimage`** instead, or see [CONTRIBUTING.md](CONTRIBUTING.md) for `APPIMAGE_EXTRACT_AND_RUN` and `NO_STRIP`.
 

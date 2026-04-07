@@ -14,16 +14,20 @@ Clone the repository, then from the **repository root**:
 
 ```bash
 npm run desktop:install
-WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev
+npm run tauri:dev
 ```
 
-On Linux, `WEBKIT_DISABLE_DMABUF_RENDERER=1` matches the workflow documented in the root [README.md](README.md) and avoids common WebKit/DRM issues on some setups. Omit or adjust if your environment does not need it.
+On Linux **Wayland**, the binary applies the same `WEBKIT_DISABLE_DMABUF_RENDERER` default as in the root [README.md](README.md) unless you already set that variable. Override it in your environment if you need different behavior.
 
 You can also work from `apps/desktop` directly (`npm install`, `npm run tauri:dev`); the root scripts ensure dependencies are present when you use the root commands.
 
 ## Arch Linux package (install / local `makepkg`)
 
-Releases may include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS** in the root [README.md](README.md) Install section.
+**AUR:** `yay -S nosuckshell-bin` — see [aur/README.md](aur/README.md) and [aur/nosuckshell-bin/PKGBUILD](aur/nosuckshell-bin/PKGBUILD).
+
+Releases may also include **`nosuckshell-….pkg.tar.zst`**. Installing from GitHub and building the same repackage locally after `tauri:build` (with `pkgver` set in `PKGBUILD`) is documented under **Arch Linux / CachyOS (manual)** in the root [README.md](README.md) Install section.
+
+**Maintainers:** After a GitHub Release is published, [`.github/workflows/aur-publish.yml`](.github/workflows/aur-publish.yml) can push updates to the AUR when the `AUR_SSH_PRIVATE_KEY` repository secret is configured (see [aur/README.md](aur/README.md)).
 
 ## Local Flatpak (Linux)
 

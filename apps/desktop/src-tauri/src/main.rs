@@ -3,6 +3,8 @@
 
 #[cfg(target_os = "linux")]
 mod gdk_log_suppress;
+#[cfg(target_os = "linux")]
+mod linux_webkit_env;
 
 mod app_prefs;
 mod backup;
@@ -1260,6 +1262,8 @@ fn take_proxmox_standalone_payload(label: String) -> Result<Option<String>, Stri
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    linux_webkit_env::apply_wayland_dmabuf_default();
     plugins::register_builtin_plugins();
     #[cfg(target_os = "linux")]
     gdk_log_suppress::install_gdk_broken_pipe_selection_filter();

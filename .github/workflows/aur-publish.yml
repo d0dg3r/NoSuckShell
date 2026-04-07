@@ -1,0 +1,57 @@
+# Pushes `aur/nosuckshell-bin/PKGBUILD` to the AUR after a GitHub Release is published.
+# Requires repository secret: AUR_SSH_PRIVATE_KEY (SSH private key with push access to aur.archlinux.org).
+# One-time: create empty package `nosuckshell-bin` on AUR and register this deploy key.
+
+name: Publish AUR package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+jobs:
+  aur-publish:
+    # Only the upstream repo publishes to the official AUR package; forks skip unless they add secrets.
+    if: github.repository == 'd0dg3r/NoSuckShell'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve version and checksum
+        id: meta
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          URL="https://github.com/d0dg3r/NoSuckShell/releases/download/${TAG_NAME}/NoSuckShell_${VERSION}_amd64.deb"
+          echo "Downloading ${URL}"
+          SHA256=$(curl -fsSL "$URL" | sha256sum | awk '{print $1}')
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Update PKGBUILD
+        run: |
+          set -euo pipefail
+          cd aur/nosuckshell-bin
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.meta.outputs.version }}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${{ steps.meta.outputs.sha256 }}')/" PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
+        with:
+          pkgname: nosuckshell-bin
+          pkgbuild: aur/nosuckshell-bin/PKGBUILD
+          commit_username: NoSuckShell Bot
+          commit_email: bot@nosuckshell.dev
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "nosuckshell-bin ${{ github.event.release.tag_name }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519

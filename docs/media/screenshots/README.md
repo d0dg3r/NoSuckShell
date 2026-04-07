@@ -67,7 +67,7 @@ On **GitHub Releases** (tag `v*`), the [Release workflow](../../../.github/workf
 
 ## Manual capture (Linux, native window)
 
-1. Build/run the desktop app: from repo root `WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri:dev` (if needed on your GPU/WebKit stack).
+1. Build/run the desktop app: from repo root `npm run tauri:dev` (on Wayland the app sets `WEBKIT_DISABLE_DMABUF_RENDERER` by default when unset; prefix it yourself only if you need to override).
 2. **Do not maximize** the window (Flathub: keep shadow and rounded corners).
 3. Use the system **window screenshot** tool (e.g. **GNOME**: capture window; **KDE**: Spectacle window mode; **Hyprland**: `grim -g "…"`) so **title bar + shadow** are included where possible.
 4. Save into `flathub/` or `store-ms-snap/` as listed above.

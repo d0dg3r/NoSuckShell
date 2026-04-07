@@ -74,6 +74,10 @@ Release job:
 3. Mark release as final/prerelease based on parsed tag.
 4. Attach all built artifacts to the release.
 
+### AUR (`nosuckshell-bin`)
+
+When a GitHub **Release** is **published** (not only tag push), [`.github/workflows/aur-publish.yml`](../.github/workflows/aur-publish.yml) can update the [AUR](https://aur.archlinux.org/packages/nosuckshell-bin) package `nosuckshell-bin` using [`aur/nosuckshell-bin/PKGBUILD`](../aur/nosuckshell-bin/PKGBUILD). It runs only on the upstream repository `d0dg3r/NoSuckShell` and requires the **`AUR_SSH_PRIVATE_KEY`** repository secret (SSH key with push access to the AUR). See [`aur/README.md`](../aur/README.md) for one-time setup.
+
 ## Creating a release
 
 Create and push a tag:
