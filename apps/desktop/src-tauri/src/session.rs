@@ -434,15 +434,22 @@ mod tests {
         assert!(rendered.contains("StrictHostKeyChecking=accept-new"));
     }
 
+    // Separate tests per OS: CodeQL Rust extractor warns on `assert!` under mixed `cfg` branches.
     #[test]
-    fn builds_local_shell_command_from_explicit_shell() {
+    #[cfg(not(target_os = "windows"))]
+    fn builds_local_shell_command_from_explicit_shell_posix() {
         let cmd = build_local_shell_command(Some("/usr/bin/fish"));
         let rendered = format!("{cmd:?}");
         assert!(rendered.contains("/usr/bin/fish"));
-        // `-l` (login shell) is only passed on POSIX-like platforms.
-        #[cfg(not(target_os = "windows"))]
         assert!(rendered.contains("-l"));
-        #[cfg(target_os = "windows")]
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn builds_local_shell_command_from_explicit_shell_windows() {
+        let cmd = build_local_shell_command(Some("/usr/bin/fish"));
+        let rendered = format!("{cmd:?}");
+        assert!(rendered.contains("/usr/bin/fish"));
         assert!(!rendered.contains("-l"));
     }
 
