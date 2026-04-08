@@ -130,8 +130,8 @@ Prints options to stdout and exits (no window). With `-h` / `--help`, other flag
 
 **Launch modes** (use at most one):
 
-| | Short | Long | Deprecated alias |
-|---|-------|------|-------------------|
+| Mode | Short | Long | Deprecated alias |
+|------|-------|------|------------------|
 | NSS-Commander workspace (dual **local** file panes at home); host sidebar collapsed | `-c` | `--local-commander` | `--commander` |
 | Single **Main** workspace, one **local** terminal; host sidebar collapsed | `-t` | `--local-terminal` | `--single-shell` |
 
