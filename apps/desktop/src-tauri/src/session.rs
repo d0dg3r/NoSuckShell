@@ -217,7 +217,10 @@ impl SessionState {
                 pixel_height: 0,
             })
             .context("failed to allocate pty")?;
-        let command = build_local_shell_command(None);
+        let mut command = build_local_shell_command(None);
+        if let Some(home_dir) = home::home_dir() {
+            command.cwd(home_dir);
+        }
         self.spawn_and_register_command(app, pair, command)
     }
 

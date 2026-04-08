@@ -4,6 +4,7 @@ type Props = {
   onRefresh: () => void;
   onTerminal: () => void;
   onRoot: () => void;
+  onHome: () => void;
   onNewFolder: () => void;
   onNewFile: () => void;
   onEditFile: () => void;
@@ -20,6 +21,9 @@ type Props = {
   exportSelectionDisabled?: boolean;
   /** When false, hide the terminal / "Back to terminal" control (NSS-Commander file view). */
   showBackToTerminalButton?: boolean;
+  /** When set, shows a toggle for dot-prefixed names (hidden files). */
+  showHiddenFiles?: boolean;
+  onToggleShowHiddenFiles?: () => void;
 };
 
 const iconSize = 16;
@@ -45,7 +49,16 @@ function IconRefresh() {
   );
 }
 
-function IconRoot() {
+/** Filesystem root — slash glyph (not a house). */
+function IconFilesystemRoot() {
+  return (
+    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M9 19L15 5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconHome() {
   return (
     <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <path
@@ -133,12 +146,39 @@ function IconUploadFolder() {
   );
 }
 
+function IconEyeShowHidden() {
+  return (
+    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path
+        d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconEyeHideDotfiles() {
+  return (
+    <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path
+        d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M1 1l22 22" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function FilePaneToolbar({
   onUp,
   upDisabled,
   onRefresh,
   onTerminal,
   onRoot,
+  onHome,
   onNewFolder,
   onNewFile,
   onEditFile,
@@ -153,6 +193,8 @@ export function FilePaneToolbar({
   onExportSelection,
   exportSelectionDisabled = true,
   showBackToTerminalButton = true,
+  showHiddenFiles = false,
+  onToggleShowHiddenFiles,
 }: Props) {
   return (
     <>
@@ -175,16 +217,47 @@ export function FilePaneToolbar({
       >
         <IconRefresh />
       </button>
-      {showRoot ? (
+      {onToggleShowHiddenFiles ? (
         <button
           type="button"
           className="btn file-pane-toolbar-btn"
-          onClick={onRoot}
-          title="Filesystem root (/)"
-          aria-label="Filesystem root"
+          onClick={onToggleShowHiddenFiles}
+          title={
+            showHiddenFiles
+              ? "Hide dot-prefixed names (e.g. .config)"
+              : "Show hidden files (names starting with .)"
+          }
+          aria-label={
+            showHiddenFiles
+              ? "Hide dot-prefixed file names"
+              : "Show hidden files (dot-prefixed names)"
+          }
+          aria-pressed={showHiddenFiles}
         >
-          <IconRoot />
+          {showHiddenFiles ? <IconEyeShowHidden /> : <IconEyeHideDotfiles />}
         </button>
+      ) : null}
+      {showRoot ? (
+        <>
+          <button
+            type="button"
+            className="btn file-pane-toolbar-btn"
+            onClick={onRoot}
+            title="Filesystem root (/)"
+            aria-label="Filesystem root"
+          >
+            <IconFilesystemRoot />
+          </button>
+          <button
+            type="button"
+            className="btn file-pane-toolbar-btn"
+            onClick={onHome}
+            title="User home"
+            aria-label="User home"
+          >
+            <IconHome />
+          </button>
+        </>
       ) : null}
       <button
         type="button"

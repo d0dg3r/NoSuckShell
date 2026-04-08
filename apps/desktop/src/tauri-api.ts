@@ -107,6 +107,14 @@ export const startSession = (host: HostConfig): Promise<SessionStarted> =>
 export const startLocalSession = (): Promise<SessionStarted> =>
   invoke("start_local_session");
 
+export type LaunchCliProfile = {
+  localCommander: boolean;
+  singleLocalShell: boolean;
+  error: string | null;
+};
+
+export const getLaunchCliProfile = (): Promise<LaunchCliProfile> => invoke("get_launch_cli_profile");
+
 export const startQuickSshSession = (request: QuickSshSessionRequest): Promise<SessionStarted> =>
   invoke("start_quick_ssh_session", { request });
 
@@ -220,7 +228,17 @@ export const sftpDownloadFile = (
   spec: RemoteSshSpec,
   remoteFilePath: string,
   destDirPath: string,
-): Promise<string> => invoke("sftp_download_file", { spec, remoteFilePath, destDirPath });
+  transferId?: string | null,
+): Promise<string> =>
+  invoke("sftp_download_file", {
+    spec,
+    remoteFilePath,
+    destDirPath,
+    transferId: transferId ?? null,
+  });
+
+export const sftpOpenRemoteFileInOs = (spec: RemoteSshSpec, parentPath: string, name: string): Promise<void> =>
+  invoke("sftp_open_remote_file_in_os", { spec, parentPath, name });
 
 export const sftpExportPathsArchive = (
   spec: RemoteSshSpec,
@@ -259,15 +277,44 @@ export const sftpUploadFile = (
   localDirPath: string,
   localFileName: string,
   remoteFilePath: string,
+  transferId?: string | null,
 ): Promise<void> =>
-  invoke("sftp_upload_file", { spec, localDirPath, localFileName, remoteFilePath });
+  invoke("sftp_upload_file", {
+    spec,
+    localDirPath,
+    localFileName,
+    remoteFilePath,
+    transferId: transferId ?? null,
+  });
 
 export const copyLocalFile = (
   srcDirPath: string,
   srcName: string,
   destDirPath: string,
   destName: string,
-): Promise<string> => invoke("copy_local_file", { srcDirPath, srcName, destDirPath, destName });
+  transferId?: string | null,
+): Promise<string> =>
+  invoke("copy_local_file", {
+    srcDirPath,
+    srcName,
+    destDirPath,
+    destName,
+    transferId: transferId ?? null,
+  });
+
+export const nssXferCancel = (transferId: string): Promise<void> =>
+  invoke("nss_xfer_cancel", { transferId });
+
+export const nssXferSetPaused = (transferId: string, paused: boolean): Promise<void> =>
+  invoke("nss_xfer_set_paused", { transferId, paused });
+
+/** Registers a transfer session so cancel/pause apply before the first file IPC (directory trees). */
+export const nssXferBeginTransfer = (transferId: string): Promise<void> =>
+  invoke("nss_xfer_begin_transfer", { transferId });
+
+/** Clears the session after one batch item finishes (pair with {@link nssXferBeginTransfer}). */
+export const nssXferReleaseTransfer = (transferId: string): Promise<void> =>
+  invoke("nss_xfer_release_transfer", { transferId });
 
 export const broadcastFileTransferClipboard = (payload: unknown): Promise<void> =>
   invoke("broadcast_file_transfer_clipboard", { payload });

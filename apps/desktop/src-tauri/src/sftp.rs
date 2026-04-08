@@ -5,13 +5,18 @@ use crate::secure_store::resolve_host_config_for_session;
 use crate::ssh_config::HostConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
+use crate::sftp_transfer_ops::ensure_registered;
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::Ordering;
+use std::thread;
 use std::time::UNIX_EPOCH;
+use tauri::{AppHandle, Emitter};
 
 // #region agent log
 fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
@@ -828,6 +833,9 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
 pub struct SftpDirEntry {
     pub name: String,
     pub is_dir: bool,
+    /// True for directories and for symlinks whose target is a directory (listing / sort group).
+    #[serde(rename = "sortWithDirectories")]
+    pub sort_with_directories: bool,
     pub size: u64,
     pub mtime: Option<i64>,
     /// e.g. `drwxr-xr-x`
@@ -906,12 +914,21 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
             continue;
         }
         let is_dir = stat.is_dir();
+        let sort_with_directories = if stat.file_type().is_symlink() {
+            sftp
+                .stat(Path::new(&full_path))
+                .map(|st| st.is_dir())
+                .unwrap_or(false)
+        } else {
+            is_dir
+        };
         let size = stat.size.unwrap_or(0);
         let mtime = stat.mtime.map(|t| t as i64);
         let (mode_display, user_display, group_display, mode_octal) = remote_mode_and_owners(&stat, is_dir);
         out.push(SftpDirEntry {
             name,
             is_dir,
+            sort_with_directories,
             size,
             mtime,
             mode_display,
@@ -921,7 +938,7 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
         });
     }
     out.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
+        match (a.sort_with_directories, b.sort_with_directories) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
@@ -930,11 +947,49 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
     Ok(out)
 }
 
+fn xfer_wait_unpause_or_cancel(tid: &str) -> Result<(), String> {
+    let Some(h) = crate::sftp_transfer_ops::try_handles(tid) else {
+        return Err("Transfer canceled.".to_string());
+    };
+    while h.pause.load(Ordering::SeqCst) {
+        if h.cancel.load(Ordering::SeqCst) {
+            return Err("Transfer canceled.".to_string());
+        }
+        thread::sleep(std::time::Duration::from_millis(40));
+    }
+    if h.cancel.load(Ordering::SeqCst) {
+        return Err("Transfer canceled.".to_string());
+    }
+    Ok(())
+}
+
+fn xfer_emit_progress(
+    app: &AppHandle,
+    tid: &str,
+    phase: &str,
+    bytes_done: u64,
+    bytes_total: u64,
+    file_name: &str,
+) {
+    let _ = app.emit(
+        "nss_sftp_transfer_progress",
+        serde_json::json!({
+            "transferId": tid,
+            "phase": phase,
+            "bytesDone": bytes_done,
+            "bytesTotal": bytes_total,
+            "fileName": file_name,
+        }),
+    );
+}
+
 /// Copies a remote regular file into a local directory (path key semantics match [`list_local_dir`]: `""` = home, relative under home, or absolute).
 pub fn download_remote_file(
+    app: &AppHandle,
     spec: RemoteSshSpec,
     remote_file_path: String,
     dest_dir_path: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
     let host = resolve_remote_spec(spec)?;
     let remote_norm = normalize_remote_path(&remote_file_path)?;
@@ -947,6 +1002,7 @@ pub fn download_remote_file(
         .and_then(|n| n.to_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "Remote path has no file name.".to_string())?;
+    let file_label = file_name.to_string();
 
     let mut dest_base = resolve_local_browser_path(dest_dir_path)?;
     if !dest_base.exists() {
@@ -976,8 +1032,121 @@ pub fn download_remote_file(
         return Err("Cannot download a directory.".to_string());
     }
 
+    let bytes_total = stat.size.unwrap_or(0);
+
     let local_path = dest_dir.join(file_name);
-    let mut out = fs::File::create(&local_path).map_err(|e| format!("Create local file: {e}"))?;
+    let monitored = transfer_id.is_some();
+
+    let outcome = (|| -> Result<String, String> {
+        let mut out = fs::File::create(&local_path).map_err(|e| format!("Create local file: {e}"))?;
+        let mut buf = [0u8; 256 * 1024];
+        let mut total_read: u64 = 0;
+
+        if let Some(tid) = transfer_id.as_deref() {
+            ensure_registered(tid);
+        }
+
+        loop {
+            if let Some(tid) = transfer_id.as_deref() {
+                xfer_wait_unpause_or_cancel(tid)?;
+            }
+            let n = remote_file
+                .read(&mut buf)
+                .map_err(|e| format!("Read remote file: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            out.write_all(&buf[..n])
+                .map_err(|e| format!("Write local file: {e}"))?;
+            total_read += n as u64;
+            if let Some(tid) = transfer_id.as_deref() {
+                xfer_emit_progress(
+                    app,
+                    tid,
+                    "download",
+                    total_read,
+                    bytes_total,
+                    &file_label,
+                );
+            }
+        }
+        Ok(local_path.to_string_lossy().into_owned())
+    })();
+
+    if outcome.is_err() && monitored && local_path.exists() {
+        let _ = fs::remove_file(&local_path);
+    }
+    outcome
+}
+
+/// Opens a local path (file or directory) in the system default application.
+pub fn open_path_in_os(path_str: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(path_str)
+            .spawn()
+            .map_err(|e| format!("Open: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path_str)
+            .spawn()
+            .map_err(|e| format!("Open: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", path_str])
+            .spawn()
+            .map_err(|e| format!("Open: {e}"))?;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )))]
+    {
+        return Err("Opening files is not supported on this platform.".to_string());
+    }
+    Ok(())
+}
+
+/// Downloads a remote file to a temp path and opens it in the system default application (NSS-Commander “View”).
+pub fn open_remote_file_in_os(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+    validate_entry_name(&name)?;
+    let remote_norm = remote_child_path(&parent_path, &name)?;
+    if remote_norm.is_empty() || remote_norm == "." {
+        return Err("Pick a file to open.".to_string());
+    }
+    let remote_ref = Path::new(&remote_norm);
+
+    let host = resolve_remote_spec(spec)?;
+    let sess = connect_session(&host)?;
+    let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
+    let mut remote_file = sftp
+        .open(remote_ref)
+        .map_err(|e| format!("Open remote file: {e}"))?;
+    let stat = remote_file
+        .stat()
+        .map_err(|e| format!("Stat remote file: {e}"))?;
+    if stat.is_dir() {
+        return Err("Opening remote folders in the system file manager is not supported.".to_string());
+    }
+
+    let safe_base: String = name
+        .trim()
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | '\0') { '_' } else { c })
+        .collect();
+    let safe_base = if safe_base.is_empty() {
+        "file".to_string()
+    } else {
+        safe_base
+    };
+    let local_path = std::env::temp_dir().join(format!("nosuckshell-view-{}-{safe_base}", Uuid::new_v4()));
+    let mut out = fs::File::create(&local_path).map_err(|e| format!("Create temp file: {e}"))?;
     let mut buf = [0u8; 256 * 1024];
     loop {
         let n = remote_file
@@ -987,17 +1156,22 @@ pub fn download_remote_file(
             break;
         }
         out.write_all(&buf[..n])
-            .map_err(|e| format!("Write local file: {e}"))?;
+            .map_err(|e| format!("Write temp file: {e}"))?;
     }
-    Ok(local_path.to_string_lossy().into_owned())
+    drop(out);
+
+    let path_str = local_path.to_string_lossy().into_owned();
+    open_path_in_os(&path_str)
 }
 
 /// Uploads a local regular file to a remote path (SFTP).
 pub fn upload_remote_file(
+    app: &AppHandle,
     spec: RemoteSshSpec,
     local_dir_path: String,
     local_file_name: String,
     remote_file_path: String,
+    transfer_id: Option<String>,
 ) -> Result<(), String> {
     validate_entry_name(&local_file_name)?;
     let dir = resolve_local_browser_path(local_dir_path)?;
@@ -1022,10 +1196,8 @@ pub fn upload_remote_file(
             MAX_UPLOAD_BYTES / 1024 / 1024
         ));
     }
-    let cap = size as usize;
-    let mut buf = Vec::with_capacity(cap.max(4096));
-    let mut f = fs::File::open(&src).map_err(|e| format!("Open local file: {e}"))?;
-    f.read_to_end(&mut buf).map_err(|e| format!("Read local file: {e}"))?;
+    let bytes_total = size;
+    let file_label = local_file_name.trim().to_string();
 
     let host = resolve_remote_spec(spec)?;
     let remote_norm = normalize_remote_path(&remote_file_path)?;
@@ -1044,18 +1216,51 @@ pub fn upload_remote_file(
             OpenType::File,
         )
         .map_err(|e| format!("Create remote file: {e}"))?;
-    remote_file
-        .write_all(&buf)
-        .map_err(|e| format!("Write remote file: {e}"))?;
+
+    let mut f = fs::File::open(&src).map_err(|e| format!("Open local file: {e}"))?;
+    let mut buf = [0u8; 256 * 1024];
+    let mut total_written: u64 = 0;
+
+    if let Some(tid) = transfer_id.as_deref() {
+        ensure_registered(tid);
+    }
+
+    loop {
+        if let Some(tid) = transfer_id.as_deref() {
+            xfer_wait_unpause_or_cancel(tid)?;
+        }
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| format!("Read local file: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        remote_file
+            .write_all(&buf[..n])
+            .map_err(|e| format!("Write remote file: {e}"))?;
+        total_written += n as u64;
+        if let Some(tid) = transfer_id.as_deref() {
+            xfer_emit_progress(
+                app,
+                tid,
+                "upload",
+                total_written,
+                bytes_total,
+                &file_label,
+            );
+        }
+    }
     Ok(())
 }
 
 /// Copies a local file into another local directory (path keys match [`list_local_dir`]).
 pub fn copy_local_file(
+    app: &AppHandle,
     src_dir_path: String,
     src_name: String,
     dest_dir_path: String,
     dest_name: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
     validate_entry_name(&src_name)?;
     let dest_name_trim = dest_name.trim();
@@ -1085,8 +1290,51 @@ pub fn copy_local_file(
     if src == dest {
         return Err("Source and destination are the same.".to_string());
     }
-    fs::copy(&src, &dest).map_err(|e| format!("Copy file: {e}"))?;
-    Ok(dest.to_string_lossy().into_owned())
+
+    if transfer_id.is_none() {
+        fs::copy(&src, &dest).map_err(|e| format!("Copy file: {e}"))?;
+        return Ok(dest.to_string_lossy().into_owned());
+    }
+
+    let meta = fs::metadata(&src).map_err(|e| format!("Source file metadata: {e}"))?;
+    let bytes_total = meta.len();
+    let file_label = dest_file_name.to_string();
+
+    let outcome = (|| -> Result<(), String> {
+        let mut in_f = fs::File::open(&src).map_err(|e| format!("Open source: {e}"))?;
+        let mut out_f = fs::File::create(&dest).map_err(|e| format!("Create destination: {e}"))?;
+        let mut buf = [0u8; 256 * 1024];
+        let mut total: u64 = 0;
+
+        if let Some(tid) = transfer_id.as_deref() {
+            ensure_registered(tid);
+        }
+
+        loop {
+            if let Some(tid) = transfer_id.as_deref() {
+                xfer_wait_unpause_or_cancel(tid)?;
+            }
+            let n = in_f
+                .read(&mut buf)
+                .map_err(|e| format!("Read source: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            out_f
+                .write_all(&buf[..n])
+                .map_err(|e| format!("Write destination: {e}"))?;
+            total += n as u64;
+            if let Some(tid) = transfer_id.as_deref() {
+                xfer_emit_progress(app, tid, "local_copy", total, bytes_total, &file_label);
+            }
+        }
+        Ok(())
+    })();
+
+    if outcome.is_err() && dest.exists() {
+        let _ = fs::remove_file(&dest);
+    }
+    outcome.map(|()| dest.to_string_lossy().into_owned())
 }
 
 /// Joins normalized remote parent path with a single entry name (POSIX).
@@ -1112,7 +1360,11 @@ pub fn create_local_dir(parent_path_key: String, dir_name: String) -> Result<(),
     }
     let created = dir.join(dir_name.trim());
     if created.exists() {
-        return Err("A file or folder with that name already exists.".to_string());
+        let meta = fs::symlink_metadata(&created).map_err(|e| format!("Metadata: {e}"))?;
+        if meta.is_dir() {
+            return Ok(());
+        }
+        return Err("A file with that name already exists.".to_string());
     }
     fs::create_dir(&created).map_err(|e| format!("Create directory: {e}"))?;
     Ok(())
@@ -1340,36 +1592,7 @@ pub fn open_local_entry_in_os(parent_path_key: String, name: String) -> Result<(
         return Err("Invalid path.".to_string());
     }
     let path_str = target.to_string_lossy().into_owned();
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path_str)
-            .spawn()
-            .map_err(|e| format!("Open: {e}"))?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path_str)
-            .spawn()
-            .map_err(|e| format!("Open: {e}"))?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path_str])
-            .spawn()
-            .map_err(|e| format!("Open: {e}"))?;
-    }
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )))]
-    {
-        return Err("Opening files is not supported on this platform.".to_string());
-    }
-    Ok(())
+    open_path_in_os(&path_str)
 }
 
 fn check_editor_text_content(content: &str) -> Result<(), String> {
@@ -1652,6 +1875,15 @@ pub fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: Strin
     let sess = connect_session(&host)?;
     let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
     let path_ref = Path::new(&remote_path);
+    match sftp.stat(path_ref) {
+        Ok(st) => {
+            if st.is_dir() {
+                return Ok(());
+            }
+            return Err("A file with that name already exists on the server.".to_string());
+        }
+        Err(_) => {}
+    }
     sftp
         .mkdir(path_ref, 0o755)
         .map_err(|e| format!("Create remote directory: {e}"))?;
@@ -1831,6 +2063,9 @@ pub fn sftp_write_text_file(
 pub struct LocalDirEntry {
     pub name: String,
     pub is_dir: bool,
+    /// True for directories and for symlinks whose target is a directory (listing / sort group).
+    #[serde(rename = "sortWithDirectories")]
+    pub sort_with_directories: bool,
     pub size: u64,
     pub mtime: Option<i64>,
     /// e.g. `drwxr-xr-x`; empty on non-Unix.
@@ -1903,9 +2138,18 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs() as i64));
         let (mode_display, user_display, group_display, mode_octal) = local_mode_and_owners(&meta);
+        let child_path = joined.join(&name);
+        let sort_with_directories = if meta.file_type().is_symlink() {
+            fs::metadata(&child_path)
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
+        } else {
+            meta.is_dir()
+        };
         out.push(LocalDirEntry {
             name,
             is_dir: meta.is_dir(),
+            sort_with_directories,
             size: if meta.is_file() { meta.len() } else { 0 },
             mtime,
             mode_display,
@@ -1914,7 +2158,7 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
             group_display,
         });
     }
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+    out.sort_by(|a, b| match (a.sort_with_directories, b.sort_with_directories) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),

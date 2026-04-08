@@ -2435,9 +2435,12 @@ input.input[type="checkbox"] {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
-  height: 24px;
-  font-size: var(--font-xs);
+  padding: 4px var(--space-2);
+  min-height: 28px;
+  box-sizing: border-box;
+  /* Match file list (.file-pane-table) typography */
+  font-size: var(--file-pane-terminal-font-size, var(--font-md));
+  font-family: var(--file-pane-terminal-font-family, ui-sans-serif, system-ui, sans-serif);
   cursor: pointer;
   white-space: nowrap;
   transition: border-color 0.12s ease, background 0.12s ease;
@@ -2455,7 +2458,7 @@ input.input[type="checkbox"] {
 
 .nss-commander-fkey-btn kbd {
   font-family: inherit;
-  font-size: 10px;
+  font-size: 0.88em;
   font-weight: 700;
   opacity: 0.6;
 }
@@ -2471,8 +2474,8 @@ input.input[type="checkbox"] {
 }
 
 .nss-commander-fkey-btn--refresh {
-  font-size: var(--font-sm);
-  padding: 2px var(--space-2);
+  font-size: inherit;
+  padding: 4px var(--space-2);
 }
 
 /* ── Workspace Popover ── */
@@ -3972,7 +3975,9 @@ input.input[type="checkbox"] {
   padding-right: var(--space-3);
   background: rgba(6, 9, 11, 0.96);
   color: #e8eeea;
-  font-size: var(--font-sm);
+  /* Match terminal Appearance settings (see App.tsx appShellStyle); fall back to UI density tokens */
+  font-size: var(--file-pane-terminal-font-size, var(--font-sm));
+  font-family: var(--file-pane-terminal-font-family, ui-sans-serif, system-ui, sans-serif);
 }
 
 .file-pane-toolbar {
@@ -4065,6 +4070,12 @@ input.input[type="checkbox"] {
 .file-pane-toolbar-btn:disabled {
   opacity: 0.38;
   cursor: not-allowed;
+}
+
+.file-pane-toolbar-btn[aria-pressed="true"] {
+  border-color: var(--icon-wireframe-border-hover-accent);
+  background: rgba(10, 16, 18, 0.92);
+  color: var(--icon-wireframe-fg-hover-accent);
 }
 
 .file-pane-toolbar-btn svg {
@@ -4215,6 +4226,144 @@ input.input[type="checkbox"] {
 .file-pane-banner--ok {
   background: rgba(40, 120, 70, 0.2);
   color: #c8f5d4;
+}
+
+/* NSS-Commander copy/move progress (portaled popup) */
+.nss-commander-xfer-popup-overlay {
+  z-index: 66;
+}
+
+.nss-commander-xfer-popup-panel {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(85vh, 560px);
+}
+
+.nss-commander-xfer-popup-panel .file-pane-dialog__head {
+  margin-bottom: var(--space-4);
+}
+
+.nss-commander-xfer-popup-summary {
+  margin: 0 0 var(--space-3);
+  font-size: 1em;
+  color: rgba(187, 247, 208, 0.88);
+}
+
+.nss-commander-xfer-popup-status {
+  margin: 0 0 var(--space-2);
+  word-break: break-word;
+  font-size: 0.95em;
+}
+
+.nss-commander-xfer-popup-substatus {
+  margin: 0 0 var(--space-4);
+  font-size: 0.85em;
+  color: rgba(187, 247, 208, 0.55);
+}
+
+.nss-commander-xfer-popup-stats {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(0, 20, 8, 0.45);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.nss-commander-xfer-popup-stats-row + .nss-commander-xfer-popup-stats-row {
+  margin-top: var(--space-1);
+}
+
+.nss-commander-xfer-popup-log {
+  margin: 0 0 var(--space-4);
+}
+
+.nss-commander-xfer-popup-log-label {
+  margin: 0 0 var(--space-2);
+  font-size: 0.85em;
+  color: rgba(187, 247, 208, 0.65);
+}
+
+.nss-commander-xfer-popup-log-scroll {
+  max-height: 120px;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  background: rgba(0, 12, 4, 0.65);
+  font-size: 0.82em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nss-commander-xfer-popup-log-line {
+  margin: 0;
+  color: rgba(187, 247, 208, 0.78);
+}
+
+.nss-commander-xfer-popup-log-line + .nss-commander-xfer-popup-log-line {
+  margin-top: 4px;
+}
+
+.nss-commander-xfer-popup-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.nss-commander-xfer-popup-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Segmented progress bar (matrix blocks) */
+.nss-commander-xfer-progress-track {
+  position: relative;
+  height: 28px;
+  border-radius: 0;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(15, 30, 18, 0.95) 0px,
+    rgba(15, 30, 18, 0.95) 5px,
+    rgba(8, 18, 10, 0.98) 5px,
+    rgba(8, 18, 10, 0.98) 10px
+  );
+  overflow: hidden;
+}
+
+.nss-commander-xfer-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    #16a34a 0px,
+    #16a34a 5px,
+    #22c55e 5px,
+    #22c55e 10px
+  );
+  transition: width 0.18s ease-out;
+  min-width: 0;
+}
+
+.nss-commander-xfer-progress-track-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.88em;
+  font-weight: 700;
+  color: #ecfdf5;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .file-pane-loading {
@@ -4427,7 +4576,7 @@ input.input[type="checkbox"] {
   table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-md);
+  font-size: var(--file-pane-terminal-font-size, var(--font-md));
 }
 
 .file-pane-table col.file-pane-col-modified {
@@ -4461,9 +4610,9 @@ input.input[type="checkbox"] {
   font-variant-numeric: tabular-nums;
 }
 
-/* Modified column (6th: Name, Permissions, User, Group, Size, Modified, …) */
-.file-pane-table th:nth-child(6),
-.file-pane-table td:nth-child(6) {
+/* Modified column (position varies when optional columns are shown) */
+.file-pane-table th.file-pane-col-modified,
+.file-pane-table td.file-pane-col-modified {
   /* Override table-cell min-width:auto so long dates do not force horizontal overflow */
   min-width: 0;
   overflow: hidden;
@@ -4471,6 +4620,8 @@ input.input[type="checkbox"] {
   white-space: nowrap;
   max-width: 0;
   vertical-align: middle;
+  font-family: var(--file-pane-terminal-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .file-pane-table th {
@@ -4550,6 +4701,152 @@ input.input[type="checkbox"] {
 
 .file-pane-optimal-widths-btn:disabled {
   opacity: 0.4;
+}
+
+.file-pane-columns-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin: 0;
+  line-height: var(--leading-none);
+  color: rgba(232, 238, 234, 0.7);
+}
+
+.file-pane-columns-btn:hover {
+  color: rgba(232, 238, 234, 0.95);
+}
+
+.file-pane-th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.file-pane-th-sort-btn:hover {
+  color: rgba(232, 238, 234, 0.95);
+}
+
+.file-pane-th-sort-btn:focus-visible {
+  outline: 2px solid rgba(255, 212, 59, 0.45);
+  outline-offset: 1px;
+}
+
+.file-pane-sort-chevron {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.file-pane-columns-popover {
+  min-width: 280px;
+  max-width: min(360px, 100vw - 16px);
+  padding: 10px 12px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(232, 238, 234, 0.12);
+  background: rgba(14, 18, 22, 0.98);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: rgba(232, 238, 234, 0.92);
+}
+
+.file-pane-columns-popover-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.file-pane-columns-popover-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(232, 238, 234, 0.55);
+}
+
+.file-pane-columns-popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-pane-columns-popover-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.file-pane-columns-popover-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-pane-columns-order-btn {
+  min-width: 26px;
+  width: 26px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  margin: 0;
+  line-height: var(--leading-none);
+  font-size: 12px;
+}
+
+.file-pane-columns-popover-label {
+  min-width: 0;
+}
+
+.file-pane-columns-popover-check {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+}
+
+.file-pane-columns-popover-check input {
+  flex-shrink: 0;
+}
+
+.file-pane-columns-popover-fixed {
+  width: 22px;
+  text-align: center;
+  color: rgba(232, 238, 234, 0.35);
+  font-size: 11px;
+}
+
+.file-pane-table td.file-pane-td-octal,
+.file-pane-table td.file-pane-td-kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+body.nss-commander-workspace .file-pane-sort-chevron {
+  color: rgba(120, 255, 180, 0.75);
+}
+
+body.nss-commander-workspace .file-pane-columns-popover {
+  border-color: rgba(120, 255, 180, 0.2);
+  background: rgba(0, 12, 8, 0.98);
 }
 
 .file-pane-table td.file-pane-td-actions {
@@ -5332,6 +5629,14 @@ input.input[type="checkbox"] {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
 }
 
+.file-pane-dialog__head {
+  margin: 0 0 var(--space-3);
+}
+
+.file-pane-dialog__head .file-pane-dialog-title {
+  margin: 0;
+}
+
 .file-pane-dialog-title {
   margin: 0 0 var(--space-3);
   font-size: var(--font-lg);
@@ -5362,6 +5667,138 @@ input.input[type="checkbox"] {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* NSS-Commander workspace: retro terminal-style file dialogs (portaled under body) */
+body.nss-commander-workspace .file-pane-dialog-overlay {
+  background: rgba(0, 8, 2, 0.88);
+  backdrop-filter: blur(2px);
+}
+
+body.nss-commander-workspace .file-pane-dialog.panel {
+  font-family: var(--file-pane-terminal-font-family, "JetBrains Mono", "Fira Code", ui-monospace, monospace);
+  font-size: var(--file-pane-terminal-font-size, 12px);
+  line-height: 1.45;
+  background: #020617;
+  color: rgba(187, 247, 208, 0.92);
+  border: 2px solid rgba(34, 197, 94, 0.85);
+  border-radius: 0;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 12px 40px rgba(0, 0, 0, 0.65);
+}
+
+body.nss-commander-workspace .file-pane-dialog__head {
+  margin: calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: #22c55e;
+  color: #020617;
+}
+
+body.nss-commander-workspace .file-pane-dialog__head .file-pane-dialog-title {
+  font-size: 1.05em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #020617;
+}
+
+body.nss-commander-workspace .file-pane-dialog-body.muted-copy,
+body.nss-commander-workspace .file-pane-dialog-body .muted-copy {
+  color: rgba(187, 247, 208, 0.72);
+}
+
+body.nss-commander-workspace .file-pane-dialog-body strong {
+  color: rgba(220, 252, 231, 0.95);
+}
+
+body.nss-commander-workspace .file-pane-dialog-input {
+  border: 1px solid rgba(34, 197, 94, 0.55);
+  border-radius: 0;
+  background: #020617;
+  color: rgba(220, 252, 231, 0.95);
+  font-family: inherit;
+}
+
+body.nss-commander-workspace .file-pane-dialog-input:focus {
+  outline: 2px solid rgba(34, 197, 94, 0.65);
+  outline-offset: 1px;
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions {
+  justify-content: flex-end;
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm {
+  border-radius: 2px;
+  font-family: inherit;
+  font-weight: 600;
+  min-height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: transparent;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm:hover:not(:disabled) {
+  border-color: rgba(34, 197, 94, 0.55);
+  color: rgba(220, 252, 231, 0.95);
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm:focus-visible {
+  outline: none;
+  border-color: #22c55e;
+  background: #22c55e;
+  color: #020617;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm.btn-primary {
+  border-color: rgba(34, 197, 94, 0.65);
+  background: rgba(34, 197, 94, 0.18);
+  color: rgba(220, 252, 231, 0.95);
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm.btn-primary:focus-visible {
+  background: #22c55e;
+  color: #020617;
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm.action-icon-btn-danger {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  background: transparent;
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .btn.btn-sm.action-icon-btn-danger:focus-visible {
+  background: #f87171;
+  color: #1e0a0a;
+  border-color: #f87171;
+}
+
+body.nss-commander-workspace .file-pane-dialog-actions .nss-commander-dialog-kbd {
+  font-family: inherit;
+  font-size: 0.85em;
+  font-weight: 800;
+  opacity: 0.75;
+  margin-right: 6px;
+}
+
+body.nss-commander-workspace .nss-commander-pre-xfer-error {
+  margin: var(--space-2) 0 0;
+  color: #fecaca;
+  font-size: 0.9em;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .context-menu {

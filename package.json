@@ -11,7 +11,7 @@
   },
   "homepage": "https://github.com/d0dg3r/NoSuckShell#readme",
   "scripts": {
-    "tauri:dev": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run tauri:dev",
+    "tauri:dev": "node scripts/run-tauri-dev.cjs",
     "tauri:build": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run tauri:build",
     "desktop:dev": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run dev",
     "desktop:build": "node scripts/ensure-desktop-deps.cjs && npm --prefix apps/desktop run build",

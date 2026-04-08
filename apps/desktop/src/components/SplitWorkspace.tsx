@@ -187,11 +187,13 @@ export type SplitPaneRendererBridge = {
   /** Report distance from split-pane top to table thead (for NSS divider alignment). */
   onFilePaneTableHeadOffsetInSplitPane?: (paneIndex: number, offsetPx: number | null) => void;
   nssCommanderFilePaneReloadAllKey?: number;
+  nssCommanderLocalPathSyncForPane?: (paneIndex: number) => { requestId: number; pathKey: string } | null;
+  nssCommanderRemotePathSyncForPane?: (paneIndex: number) => { requestId: number; path: string } | null;
   resolveNssCommanderPaneOpRequest?: (
     paneIndex: number,
   ) => {
     requestId: number;
-    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile";
     names: string[];
   } | null;
   registerNssCommanderFilePaneToolbarSlot?: (paneIndex: number, el: HTMLElement | null) => void;
@@ -434,7 +436,10 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
         b.setActivePaneIndex(paneIndex);
         if (paneSessionId) {
           b.setActiveSession(paneSessionId);
-          b.requestTerminalFocus(paneSessionId);
+          // In local/remote file view, focusing the terminal breaks NSS-Commander F-keys and inline editor UX.
+          if (paneFileView === "terminal") {
+            b.requestTerminalFocus(paneSessionId);
+          }
         }
       };
       return (
@@ -1203,6 +1208,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     nssCommanderReloadAllKey={b.nssCommanderFilePaneReloadAllKey ?? 0}
                     nssCommanderPaneOpRequest={b.resolveNssCommanderPaneOpRequest?.(paneIndex) ?? null}
                     onFilePaneTableHeadOffsetInSplitPane={b.onFilePaneTableHeadOffsetInSplitPane}
+                    nssCommanderSyncPath={b.nssCommanderRemotePathSyncForPane?.(paneIndex) ?? null}
                   />
                 </Suspense>
               ) : paneFileView === "local" ? (
@@ -1223,6 +1229,7 @@ export function createSplitPaneRenderer(b: SplitPaneRendererBridge): (node: Spli
                     nssCommanderReloadAllKey={b.nssCommanderFilePaneReloadAllKey ?? 0}
                     nssCommanderPaneOpRequest={b.resolveNssCommanderPaneOpRequest?.(paneIndex) ?? null}
                     onFilePaneTableHeadOffsetInSplitPane={b.onFilePaneTableHeadOffsetInSplitPane}
+                    nssCommanderSyncPath={b.nssCommanderLocalPathSyncForPane?.(paneIndex) ?? null}
                   />
                 </Suspense>
               ) : (

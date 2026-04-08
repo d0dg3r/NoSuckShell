@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { createPortal } from "react-dom";
 import {
   formatFileSize,
+  isDotHiddenFileName,
   isLocalUpDisabled,
   joinLocalPath,
   localFolderTitleShort,
@@ -24,9 +25,26 @@ import {
 import { monacoLanguageFromFileName } from "../features/file-pane-editor-language";
 import { runFilePaneTransfer, type FileDropTarget } from "../features/file-pane-transfer";
 import { copyFileToTransferClipboard, getFileTransferClipboard } from "../features/file-transfer-clipboard";
+import { filePaneEntryKindLabel } from "../features/file-pane-entry-kind";
+import { formatFilePaneModifiedTime } from "../features/file-pane-modified-time";
 import { filePaneNameKind, filePaneNameKindClassName } from "../features/file-pane-name-kind";
 import { filePanePermCell } from "../features/file-pane-perm-cell";
 import { OverlaySpinner } from "./OverlaySpinner";
+import type { FilePaneDataColumnId } from "../features/file-pane-table-columns";
+import {
+  filePaneFixedOptionalWidthPx,
+  filePaneNextSortState,
+  filePaneRowOpensAsDirectory,
+  filePaneSortRows,
+  filePaneVisibleDataColumns,
+  filePaneVisibleResizableKeysFromDisplayOrder,
+  readFilePaneColumnOrder,
+  readFilePaneColumnVisibility,
+  readFilePaneSortState,
+  writeFilePaneColumnOrder,
+  writeFilePaneColumnVisibility,
+  writeFilePaneSortState,
+} from "../features/file-pane-table-columns";
 import { useFilePaneTableResize } from "../hooks/useFilePaneTableResize";
 import { useSplitPaneFilePaneLabelInset } from "../hooks/useSplitPaneFilePaneLabelInset";
 import {
@@ -85,11 +103,13 @@ type Props = {
   /** One-shot op from the vertical ops bar for this pane. */
   nssCommanderPaneOpRequest?: {
     requestId: number;
-    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile";
+    op: "delete" | "rename" | "mkdir" | "archive" | "newTextFile" | "editTextFile" | "viewFile";
     names: string[];
   } | null;
   /** NSS-Commander: distance from split-pane top to table header row (for center ops strip alignment). */
   onFilePaneTableHeadOffsetInSplitPane?: (paneIndex: number, offsetPx: number | null) => void;
+  /** NSS-Commander: host-driven path sync (e.g. copy destination dialog). */
+  nssCommanderSyncPath?: { requestId: number; pathKey: string } | null;
 };
 
 function SaveRowIcon() {
@@ -119,9 +139,11 @@ export function LocalFilePane({
   nssCommanderReloadAllKey = 0,
   nssCommanderPaneOpRequest,
   onFilePaneTableHeadOffsetInSplitPane,
+  nssCommanderSyncPath = null,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const lastNssPaneOpRequestIdRef = useRef(0);
+  const lastNssSyncPathRequestIdRef = useRef(0);
   const [path, setPath] = useState("");
   const [homeCanon, setHomeCanon] = useState<string | null>(null);
   const [entries, setEntries] = useState<LocalDirEntry[]>([]);
@@ -129,6 +151,15 @@ export function LocalFilePane({
   const [error, setError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<string | null>(null);
   const [lastOk, setLastOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!lastOk) {
+      return;
+    }
+    const id = window.setTimeout(() => setLastOk(null), 2000);
+    return () => window.clearTimeout(id);
+  }, [lastOk]);
+
   const [transferBusy, setTransferBusy] = useState(false);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(() => new Set());
   const [lastRangeIndex, setLastRangeIndex] = useState<number | null>(null);
@@ -139,6 +170,50 @@ export function LocalFilePane({
   const [bulkDeletePendingNames, setBulkDeletePendingNames] = useState<string[] | null>(null);
   const [deleteRecovery, setDeleteRecovery] = useState<null | { names: string[]; firstError: string }>(null);
   const [textEditorSession, setTextEditorSession] = useState<TextEditorSession | null>(null);
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
+  const [columnVisibility, setColumnVisibility] = useState(() => readFilePaneColumnVisibility("local"));
+  const [columnOrder, setColumnOrder] = useState(() => readFilePaneColumnOrder("local"));
+  const [sort, setSort] = useState(() => readFilePaneSortState("local"));
+
+  const displayEntries = useMemo(
+    () => (showHiddenFiles ? entries : entries.filter((e) => !isDotHiddenFileName(e.name))),
+    [entries, showHiddenFiles],
+  );
+
+  const visibleDataColumns = useMemo(
+    () => filePaneVisibleDataColumns(columnVisibility, columnOrder),
+    [columnVisibility, columnOrder],
+  );
+  const tableResizeLayout = useMemo(
+    () => ({
+      visibleResizableKeys: filePaneVisibleResizableKeysFromDisplayOrder(visibleDataColumns),
+      fixedOptionalWidthPx: filePaneFixedOptionalWidthPx(columnVisibility),
+    }),
+    [columnVisibility, visibleDataColumns],
+  );
+
+  const sortedDisplayEntries = useMemo(() => filePaneSortRows(displayEntries, sort), [displayEntries, sort]);
+
+  const onToggleColumnVisibility = useCallback((id: FilePaneDataColumnId) => {
+    setColumnVisibility((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      writeFilePaneColumnVisibility("local", next);
+      return next;
+    });
+  }, []);
+
+  const onSortColumnClick = useCallback((col: FilePaneDataColumnId) => {
+    setSort((prev) => {
+      const next = filePaneNextSortState(prev, col);
+      writeFilePaneSortState("local", next);
+      return next;
+    });
+  }, []);
+
+  const onColumnOrderChange = useCallback((next: FilePaneDataColumnId[]) => {
+    setColumnOrder(next);
+    writeFilePaneColumnOrder("local", next);
+  }, []);
 
   useEffect(() => {
     setSelectedNames(new Set());
@@ -153,6 +228,14 @@ export function LocalFilePane({
       .then(setHomeCanon)
       .catch(() => setHomeCanon(null));
   }, []);
+
+  useEffect(() => {
+    if (!nssCommanderSyncPath || nssCommanderSyncPath.requestId === lastNssSyncPathRequestIdRef.current) {
+      return;
+    }
+    lastNssSyncPathRequestIdRef.current = nssCommanderSyncPath.requestId;
+    setPath(nssCommanderSyncPath.pathKey);
+  }, [nssCommanderSyncPath]);
 
   useEffect(() => {
     onPathChange(path);
@@ -184,7 +267,12 @@ export function LocalFilePane({
   const openEditorForExistingFile = useCallback(
     async (name: string) => {
       const row = entries.find((e) => e.name === name);
-      if (!row || row.isDir) {
+      if (!row) {
+        setError(`"${name}" is not in this folder. Refresh the list and try again.`);
+        return;
+      }
+      if (filePaneRowOpensAsDirectory(row)) {
+        setError(`"${name}" is a folder; open a file to edit.`);
         return;
       }
       setCtxMenu(null);
@@ -241,7 +329,7 @@ export function LocalFilePane({
 
   const autoFitSamples = useMemo(
     () => ({
-      name: entries.map((e) => (e.isDir ? `${e.name}/` : e.name)),
+      name: entries.map((e) => (filePaneRowOpensAsDirectory(e) ? `${e.name}/` : e.name)),
       perm: entries.map((e) => {
         const r = e.modeDisplay?.trim();
         const o = e.modeOctal?.trim();
@@ -252,7 +340,7 @@ export function LocalFilePane({
       }),
       user: entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
       group: entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
-      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
+      size: entries.map((e) => (filePaneRowOpensAsDirectory(e) ? "—" : formatFileSize(e.size))),
     }),
     [entries],
   );
@@ -267,7 +355,7 @@ export function LocalFilePane({
   );
 
   const { tableWrapRef, widths, tailCols, onGripPointerDown, onGripDoubleClick, applyOptimalColumnWidths } =
-    useFilePaneTableResize("local", 140, autoFitSamples, userColumnSamples, groupColumnSamples);
+    useFilePaneTableResize("local", 140, autoFitSamples, userColumnSamples, groupColumnSamples, tableResizeLayout);
 
   useLayoutEffect(() => {
     if (nssCommanderSwapFilePaneToolbarWithPaneLabel !== true || !onFilePaneTableHeadOffsetInSplitPane) {
@@ -335,6 +423,10 @@ export function LocalFilePane({
     setPath("/");
   };
 
+  const goHome = () => {
+    setPath("");
+  };
+
   const titlePath = localPathResolvedForTitle(homeCanon, path);
   const upDisabled = isLocalUpDisabled(path, homeCanon);
 
@@ -398,6 +490,15 @@ export function LocalFilePane({
       void openEditorForExistingFile(req.names[0]!);
       return;
     }
+    if (req.op === "viewFile") {
+      if (req.names.length !== 1) {
+        return;
+      }
+      setCtxMenu(null);
+      setError(null);
+      void openLocalEntryInOs(path, req.names[0]!).catch((e) => setError(String(e)));
+      return;
+    }
     if (req.op === "rename") {
       if (req.names.length !== 1) {
         return;
@@ -425,13 +526,25 @@ export function LocalFilePane({
     }
   }, [nssCommanderPaneOpRequest, path, entries, exportNames, load, openEditorForExistingFile]);
 
+  const toggleShowHiddenFiles = useCallback(() => {
+    setShowHiddenFiles((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedNames((s) => new Set([...s].filter((n) => !isDotHiddenFileName(n))));
+        setActiveName((a) => (a && isDotHiddenFileName(a) ? null : a));
+        setLastRangeIndex(null);
+      }
+      return next;
+    });
+  }, []);
+
   const handleRowClick = (name: string, index: number, event: React.MouseEvent) => {
     if (event.shiftKey && lastRangeIndex !== null) {
       const lo = Math.min(index, lastRangeIndex);
       const hi = Math.max(index, lastRangeIndex);
       const next = new Set(selectedNames);
       for (let i = lo; i <= hi; i++) {
-        const row = entries[i];
+        const row = sortedDisplayEntries[i];
         if (row) {
           next.add(row.name);
         }
@@ -557,7 +670,7 @@ export function LocalFilePane({
       return;
     }
     const row = entries.find((e) => e.name === activeName);
-    if (!row || row.isDir) {
+    if (!row || filePaneRowOpensAsDirectory(row)) {
       return;
     }
     const p: FileDragPayload = { kind: "local", pathKey: path, name: activeName };
@@ -628,6 +741,11 @@ export function LocalFilePane({
       case "delete":
         startDelete();
         break;
+      case "editFile":
+        if (soleSelectedFile) {
+          void openEditorForExistingFile(soleSelectedFile.name);
+        }
+        break;
       case "openInOs":
         openSelectionInOs();
         break;
@@ -659,7 +777,9 @@ export function LocalFilePane({
 
   const selectedRow = activeName ? entries.find((e) => e.name === activeName) : undefined;
   const soleSelectedFile =
-    selectedNames.size === 1 ? entries.find((e) => selectedNames.has(e.name) && !e.isDir) : undefined;
+    selectedNames.size === 1
+      ? entries.find((e) => selectedNames.has(e.name) && !filePaneRowOpensAsDirectory(e))
+      : undefined;
   const editFileDisabled = !soleSelectedFile;
   const exportSelectedOrder = () =>
     entries.filter((e) => selectedNames.has(e.name)).map((e) => e.name);
@@ -675,6 +795,7 @@ export function LocalFilePane({
       onRefresh={() => void load()}
       onTerminal={onBack}
       onRoot={goRoot}
+      onHome={goHome}
       onNewFolder={startNewFolder}
       onNewFile={startNewFile}
       onEditFile={() => soleSelectedFile && void openEditorForExistingFile(soleSelectedFile.name)}
@@ -688,6 +809,8 @@ export function LocalFilePane({
       onExportSelection={() => void exportNames(exportSelectedOrder())}
       exportSelectionDisabled={exportSelectionDisabled}
       showBackToTerminalButton={!nssCmd}
+      showHiddenFiles={showHiddenFiles}
+      onToggleShowHiddenFiles={toggleShowHiddenFiles}
     />
   );
 
@@ -758,20 +881,24 @@ export function LocalFilePane({
           <table className="file-pane-table">
             <FilePaneTableHead
               variant="local"
-              nameWidth={widths.name}
-              permWidth={widths.perm}
-              userWidth={widths.user}
-              groupWidth={widths.group}
-              sizeWidth={widths.size}
+              visibleDataColumns={visibleDataColumns}
+              visibleResizableKeys={tableResizeLayout.visibleResizableKeys}
+              widths={widths}
               modifiedColWidth={tailCols.modified}
               actionsColWidth={tailCols.actions}
               onGripPointerDown={onGripPointerDown}
               onGripDoubleClick={onGripDoubleClick}
               onOptimalColumnWidths={applyOptimalColumnWidths}
               optimalWidthsDisabled={loading}
+              sort={sort}
+              onSortColumnClick={onSortColumnClick}
+              columnVisibility={columnVisibility}
+              onToggleColumnVisibility={onToggleColumnVisibility}
+              columnOrder={columnOrder}
+              onColumnOrderChange={onColumnOrderChange}
             />
             <tbody>
-              {entries.map((row, index) => {
+              {sortedDisplayEntries.map((row, index) => {
                 const permCell = filePanePermCell(widths.perm, row);
                 const nameKind = semanticFileNameColors ? filePaneNameKind(row) : "default";
                 const nameKindClass = semanticFileNameColors ? filePaneNameKindClassName(nameKind) : "";
@@ -781,46 +908,86 @@ export function LocalFilePane({
                   className={selectedNames.has(row.name) ? "is-selected" : undefined}
                   onClick={(e) => handleRowClick(row.name, index, e)}
                 >
-                  <td>
-                    {row.isDir ? (
-                      <button
-                        type="button"
-                        className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDirectoryActivate(row.name, index, e);
-                        }}
-                      >
-                        {row.name}/
-                      </button>
-                    ) : (
-                      <span
-                        className={nameKindClass ? `file-pane-filename ${nameKindClass}` : "file-pane-filename"}
-                        draggable
-                        onDragStart={(event) => {
-                          const payload: FileDragPayload = { kind: "local", pathKey: path, name: row.name };
-                          event.dataTransfer.setData(FILE_DND_PAYLOAD_MIME, serializeFileDragPayload(payload));
-                          event.dataTransfer.setData("text/plain", serializeFileDragPayload(payload));
-                          event.dataTransfer.effectAllowed = "copy";
-                        }}
-                      >
-                        {row.name}
-                      </span>
-                    )}
-                  </td>
-                  <td className="file-pane-td-perm" title={permCell.title}>
-                    {permCell.text}
-                  </td>
-                  <td className="file-pane-td-owner" title={row.userDisplay || undefined}>
-                    {row.userDisplay?.trim() ? row.userDisplay : "—"}
-                  </td>
-                  <td className="file-pane-td-owner" title={row.groupDisplay || undefined}>
-                    {row.groupDisplay?.trim() ? row.groupDisplay : "—"}
-                  </td>
-                  <td>{row.isDir ? "—" : formatFileSize(row.size)}</td>
-                  <td>
-                    {row.mtime != null && row.mtime > 0 ? new Date(row.mtime * 1000).toLocaleString() : "—"}
-                  </td>
+                  {visibleDataColumns.map((colId) => {
+                    switch (colId) {
+                      case "name":
+                        return (
+                          <td key={colId}>
+                            {filePaneRowOpensAsDirectory(row) ? (
+                              <button
+                                type="button"
+                                className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDirectoryActivate(row.name, index, e);
+                                }}
+                              >
+                                {row.name}/
+                              </button>
+                            ) : (
+                              <span
+                                className={nameKindClass ? `file-pane-filename ${nameKindClass}` : "file-pane-filename"}
+                                draggable
+                                onDragStart={(event) => {
+                                  const payload: FileDragPayload = { kind: "local", pathKey: path, name: row.name };
+                                  event.dataTransfer.setData(FILE_DND_PAYLOAD_MIME, serializeFileDragPayload(payload));
+                                  event.dataTransfer.setData("text/plain", serializeFileDragPayload(payload));
+                                  event.dataTransfer.effectAllowed = "copy";
+                                }}
+                              >
+                                {row.name}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      case "permissions":
+                        return (
+                          <td key={colId} className="file-pane-td-perm" title={permCell.title}>
+                            {permCell.text}
+                          </td>
+                        );
+                      case "octal":
+                        return (
+                          <td key={colId} className="file-pane-td-octal" title={row.modeOctal || undefined}>
+                            {row.modeOctal?.trim() ? row.modeOctal : "—"}
+                          </td>
+                        );
+                      case "user":
+                        return (
+                          <td key={colId} className="file-pane-td-owner" title={row.userDisplay || undefined}>
+                            {row.userDisplay?.trim() ? row.userDisplay : "—"}
+                          </td>
+                        );
+                      case "group":
+                        return (
+                          <td key={colId} className="file-pane-td-owner" title={row.groupDisplay || undefined}>
+                            {row.groupDisplay?.trim() ? row.groupDisplay : "—"}
+                          </td>
+                        );
+                      case "size":
+                        return (
+                          <td key={colId}>{filePaneRowOpensAsDirectory(row) ? "—" : formatFileSize(row.size)}</td>
+                        );
+                      case "modified":
+                        return (
+                          <td key={colId} className="file-pane-col-modified">
+                            {formatFilePaneModifiedTime(row.mtime)}
+                          </td>
+                        );
+                      case "kind":
+                        return (
+                          <td
+                            key={colId}
+                            className="file-pane-td-kind"
+                            title={row.modeDisplay?.trim() ? row.modeDisplay : undefined}
+                          >
+                            {filePaneEntryKindLabel(row)}
+                          </td>
+                        );
+                      default:
+                        return null;
+                    }
+                  })}
                   <td className="file-pane-td-actions">
                     <button
                       type="button"
@@ -849,7 +1016,7 @@ export function LocalFilePane({
           x={ctxMenu.x}
           y={ctxMenu.y}
           selectedName={activeName}
-          selectedIsDir={Boolean(selectedRow?.isDir)}
+          selectedIsDir={Boolean(selectedRow && filePaneRowOpensAsDirectory(selectedRow))}
           canPaste={getFileTransferClipboard() !== null}
           showOpenInOs
           onDismiss={() => setCtxMenu(null)}

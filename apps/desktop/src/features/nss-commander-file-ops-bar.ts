@@ -42,6 +42,11 @@ export function editTextFileEnabled(selectionSize: number, paneKind: NssOpsPaneK
   return renameEnabled(selectionSize, paneKind);
 }
 
+/** Open in system viewer (F3): one selected item in a file pane; remote folders are rejected in the pane. */
+export function viewInSystemEnabled(selectionSize: number, paneKind: NssOpsPaneKind): boolean {
+  return paneKind !== "terminal" && selectionSize === 1;
+}
+
 export function archiveEnabled(selectionSize: number, paneKind: NssOpsPaneKind, exportBusy: boolean): boolean {
   return !exportBusy && paneKind !== "terminal" && selectionSize > 0;
 }
@@ -59,4 +64,36 @@ export function resolveAutoDirection(
   if (activePaneIndex === rightPaneIndex) return "left";
   if (activePaneIndex === leftPaneIndex) return "right";
   return "right";
+}
+
+/**
+ * Copy/move direction: `"right"` = from left pane toward right, `"left"` = from right toward left.
+ * If only one pane has a selection, that pane is always the source (fixes F5 when focus is on the other pane).
+ * If both have selections, falls back to {@link resolveAutoDirection}.
+ * Returns `null` when neither side has a selection.
+ */
+export function resolveNssCommanderCopyMoveBaseDirection(args: {
+  activePaneIndex: number;
+  leftPaneIndex: number;
+  rightPaneIndex: number;
+  leftSelectionCount: number;
+  rightSelectionCount: number;
+}): "left" | "right" | null {
+  const leftHas = args.leftSelectionCount > 0;
+  const rightHas = args.rightSelectionCount > 0;
+  if (leftHas && !rightHas) {
+    return "right";
+  }
+  if (!leftHas && rightHas) {
+    return "left";
+  }
+  if (!leftHas && !rightHas) {
+    return null;
+  }
+  return resolveAutoDirection(args.activePaneIndex, args.leftPaneIndex, args.rightPaneIndex);
+}
+
+/** Reverse copy/move direction (Shift+F5 / Shift+F6). */
+export function reverseNssCommanderCopyMoveDirection(dir: "left" | "right"): "left" | "right" {
+  return dir === "left" ? "right" : "left";
 }

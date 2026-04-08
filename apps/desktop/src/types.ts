@@ -162,6 +162,8 @@ export type QuickSshSessionRequest = {
 export type SftpDirEntry = {
   name: string;
   isDir: boolean;
+  /** Directories first when sorting; true for dirs and for symlinks pointing at a directory. */
+  sortWithDirectories: boolean;
   size: number;
   mtime: number | null;
   /** Permission mode string only, e.g. `drwxr-xr-x` (owner/group are separate fields). */
@@ -177,6 +179,8 @@ export type SftpDirEntry = {
 export type LocalDirEntry = {
   name: string;
   isDir: boolean;
+  /** Directories first when sorting; true for dirs and for symlinks pointing at a directory. */
+  sortWithDirectories: boolean;
   size: number;
   mtime: number | null;
   /** Permission mode string only; owner/group are in `userDisplay` / `groupDisplay`. */

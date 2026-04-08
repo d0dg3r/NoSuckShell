@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isDotHiddenFileName,
   isLocalUpDisabled,
   joinLocalPath,
   localParentDir,
@@ -12,6 +13,13 @@ import {
 } from "./file-pane-paths";
 
 describe("file-pane-paths local", () => {
+  it("isDotHiddenFileName", () => {
+    expect(isDotHiddenFileName(".bashrc")).toBe(true);
+    expect(isDotHiddenFileName(".config")).toBe(true);
+    expect(isDotHiddenFileName("README")).toBe(false);
+    expect(isDotHiddenFileName("")).toBe(false);
+  });
+
   it("joinLocalPath handles home-relative and absolute parents", () => {
     expect(joinLocalPath("", "Documents")).toBe("Documents");
     expect(joinLocalPath("a", "b")).toBe("a/b");
