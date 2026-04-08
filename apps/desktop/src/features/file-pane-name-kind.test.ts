@@ -6,7 +6,15 @@ import {
   filePaneRowHasUnixExecutableInDisplay,
 } from "./file-pane-name-kind";
 
-function row(p: Partial<{ name: string; isDir: boolean; modeOctal: string; modeDisplay: string }>) {
+function row(
+  p: Partial<{
+    name: string;
+    isDir: boolean;
+    sortWithDirectories: boolean;
+    modeOctal: string;
+    modeDisplay: string;
+  }>,
+) {
   return {
     name: "x",
     isDir: false,
@@ -47,6 +55,20 @@ describe("filePaneRowHasUnixExecutableInDisplay", () => {
 describe("filePaneNameKind", () => {
   it("folders win before extension", () => {
     expect(filePaneNameKind(row({ name: "archive.zip", isDir: true, modeOctal: "755" }))).toBe("folder");
+  });
+
+  it("treats symlink-to-directory as folder color", () => {
+    expect(
+      filePaneNameKind(
+        row({
+          name: "link_to_dir",
+          isDir: false,
+          sortWithDirectories: true,
+          modeDisplay: "lrwxrwxrwx",
+          modeOctal: "777",
+        }),
+      ),
+    ).toBe("folder");
   });
 
   it("archive by extension", () => {

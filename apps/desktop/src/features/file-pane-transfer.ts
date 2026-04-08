@@ -12,6 +12,7 @@ import {
 import type { RemoteSshSpec } from "../types";
 import type { FileDragPayload } from "./file-pane-dnd";
 import { joinLocalPath, joinRemotePath } from "./file-pane-paths";
+import { filePaneRowOpensAsDirectory } from "./file-pane-table-columns";
 
 export type FileDropTarget =
   | { kind: "local"; pathKey: string }
@@ -35,13 +36,13 @@ function throwIfTransferCancelled(opts?: FilePaneTransferOptions): void {
 async function localEntryIsDir(parentPathKey: string, name: string): Promise<boolean> {
   const entries = await listLocalDir(parentPathKey);
   const row = entries.find((e) => e.name === name);
-  return Boolean(row?.isDir);
+  return row ? filePaneRowOpensAsDirectory(row) : false;
 }
 
 async function remoteEntryIsDir(spec: RemoteSshSpec, parentPath: string, name: string): Promise<boolean> {
   const entries = await sftpListRemoteDir(spec, parentPath);
   const row = entries.find((e) => e.name === name);
-  return Boolean(row?.isDir);
+  return row ? filePaneRowOpensAsDirectory(row) : false;
 }
 
 export async function removeTransferDestinationEntry(target: FileDropTarget, name: string): Promise<void> {
@@ -58,7 +59,7 @@ async function copyLocalTreeInto(sourceDirKey: string, destParentKey: string, op
   const entries = await listLocalDir(sourceDirKey);
   for (const e of entries) {
     throwIfTransferCancelled(opts);
-    if (e.isDir) {
+    if (filePaneRowOpensAsDirectory(e)) {
       await createLocalDir(destParentKey, e.name);
       await copyLocalTreeInto(joinLocalPath(sourceDirKey, e.name), joinLocalPath(destParentKey, e.name), opts);
     } else {
@@ -84,7 +85,7 @@ async function copyLocalTreeToRemote(
   const entries = await listLocalDir(localDirKey);
   for (const e of entries) {
     throwIfTransferCancelled(opts);
-    if (e.isDir) {
+    if (filePaneRowOpensAsDirectory(e)) {
       await sftpCreateDir(spec, remoteParentPath, e.name);
       await copyLocalTreeToRemote(
         spec,
@@ -122,7 +123,7 @@ async function copyRemoteTreeToLocal(
   for (const e of entries) {
     throwIfTransferCancelled(opts);
     const childRemote = joinRemotePath(remoteDirPath, e.name);
-    if (e.isDir) {
+    if (filePaneRowOpensAsDirectory(e)) {
       await createLocalDir(destLocalParentKey, e.name);
       await copyRemoteTreeToLocal(spec, childRemote, joinLocalPath(destLocalParentKey, e.name), opts);
     } else {

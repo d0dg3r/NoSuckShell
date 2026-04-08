@@ -33,6 +33,7 @@ import type { FilePaneDataColumnId } from "../features/file-pane-table-columns";
 import {
   filePaneFixedOptionalWidthPx,
   filePaneNextSortState,
+  filePaneRowOpensAsDirectory,
   filePaneSortRows,
   filePaneVisibleDataColumns,
   filePaneVisibleResizableKeysFromDisplayOrder,
@@ -280,8 +281,12 @@ export function RemoteFilePane({
   const openEditorForExistingFile = useCallback(
     async (name: string) => {
       const row = entries.find((e) => e.name === name);
-      if (!row || row.isDir) {
-        setError(row?.isDir ? `"${name}" is a folder; open a file to edit.` : `"${name}" is not in this folder. Refresh the list and try again.`);
+      if (!row) {
+        setError(`"${name}" is not in this folder. Refresh the list and try again.`);
+        return;
+      }
+      if (filePaneRowOpensAsDirectory(row)) {
+        setError(`"${name}" is a folder; open a file to edit.`);
         return;
       }
       setCtxMenu(null);
@@ -338,7 +343,7 @@ export function RemoteFilePane({
 
   const autoFitSamples = useMemo(
     () => ({
-      name: entries.map((e) => (e.isDir ? `${e.name}/` : e.name)),
+      name: entries.map((e) => (filePaneRowOpensAsDirectory(e) ? `${e.name}/` : e.name)),
       perm: entries.map((e) => {
         const r = e.modeDisplay?.trim();
         const o = e.modeOctal?.trim();
@@ -349,7 +354,7 @@ export function RemoteFilePane({
       }),
       user: entries.map((e) => (e.userDisplay?.trim() ? e.userDisplay : "—")),
       group: entries.map((e) => (e.groupDisplay?.trim() ? e.groupDisplay : "—")),
-      size: entries.map((e) => (e.isDir ? "—" : formatFileSize(e.size))),
+      size: entries.map((e) => (filePaneRowOpensAsDirectory(e) ? "—" : formatFileSize(e.size))),
     }),
     [entries],
   );
@@ -501,7 +506,7 @@ export function RemoteFilePane({
         setError(`"${name}" is not in this folder. Refresh the list and try again.`);
         return;
       }
-      if (row.isDir) {
+      if (filePaneRowOpensAsDirectory(row)) {
         setError("Opening remote folders in the system file manager is not supported.");
         return;
       }
@@ -681,7 +686,7 @@ export function RemoteFilePane({
       return;
     }
     const row = entries.find((e) => e.name === activeName);
-    if (!row || row.isDir) {
+    if (!row || filePaneRowOpensAsDirectory(row)) {
       return;
     }
     const p: FileDragPayload = { kind: "remote", spec, parentPath: path, name: activeName };
@@ -780,7 +785,9 @@ export function RemoteFilePane({
   const pathTitle = remotePathBarFullDisplay(spec, path);
   const selectedRow = activeName ? entries.find((e) => e.name === activeName) : undefined;
   const soleSelectedFile =
-    selectedNames.size === 1 ? entries.find((e) => selectedNames.has(e.name) && !e.isDir) : undefined;
+    selectedNames.size === 1
+      ? entries.find((e) => selectedNames.has(e.name) && !filePaneRowOpensAsDirectory(e))
+      : undefined;
   const editFileDisabled = !soleSelectedFile;
   const upDisabled = path === "." || path === "/" || path === "";
   const exportSelectionDisabled = selectedNames.size === 0 || exportBusy !== null;
@@ -915,7 +922,7 @@ export function RemoteFilePane({
                       case "name":
                         return (
                           <td key={colId}>
-                            {row.isDir ? (
+                            {filePaneRowOpensAsDirectory(row) ? (
                               <button
                                 type="button"
                                 className={nameKindClass ? `file-pane-link ${nameKindClass}` : "file-pane-link"}
@@ -972,7 +979,9 @@ export function RemoteFilePane({
                           </td>
                         );
                       case "size":
-                        return <td key={colId}>{row.isDir ? "—" : formatFileSize(row.size)}</td>;
+                        return (
+                          <td key={colId}>{filePaneRowOpensAsDirectory(row) ? "—" : formatFileSize(row.size)}</td>
+                        );
                       case "modified":
                         return (
                           <td key={colId} className="file-pane-col-modified">
@@ -1021,7 +1030,7 @@ export function RemoteFilePane({
           x={ctxMenu.x}
           y={ctxMenu.y}
           selectedName={activeName}
-          selectedIsDir={Boolean(selectedRow?.isDir)}
+          selectedIsDir={Boolean(selectedRow && filePaneRowOpensAsDirectory(selectedRow))}
           canPaste={getFileTransferClipboard() !== null}
           showOpenInOs={false}
           onDismiss={() => setCtxMenu(null)}

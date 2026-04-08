@@ -1,5 +1,3 @@
-import type { LocalDirEntry } from "../types";
-
 export type FilePaneNameKind =
   | "folder"
   | "archive"
@@ -11,7 +9,13 @@ export type FilePaneNameKind =
   | "data"
   | "default";
 
-export type FilePaneNameKindRow = Pick<LocalDirEntry, "name" | "isDir" | "modeOctal" | "modeDisplay">;
+export type FilePaneNameKindRow = {
+  name: string;
+  isDir: boolean;
+  sortWithDirectories?: boolean;
+  modeOctal: string;
+  modeDisplay: string;
+};
 
 /** Kinds that map to a `--file-pane-kind-*` CSS variable (includes `default` / “other files”). */
 export const FILE_PANE_NAME_KINDS_WITH_COLOR: readonly FilePaneNameKind[] = [
@@ -220,7 +224,7 @@ export function filePaneRowHasUnixExecutableInDisplay(modeDisplay: string): bool
 }
 
 export function filePaneNameKind(row: FilePaneNameKindRow): FilePaneNameKind {
-  if (row.isDir) {
+  if (row.sortWithDirectories ?? row.isDir) {
     return "folder";
   }
 

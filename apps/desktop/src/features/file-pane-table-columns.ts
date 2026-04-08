@@ -76,7 +76,10 @@ export type FilePaneDirRow = {
   groupDisplay: string;
 };
 
-function filePaneSortsWithDirectories(row: FilePaneDirRow): boolean {
+/** Directory-like for sort, navigation, transfer, and pane UI (includes symlink → directory). */
+export function filePaneRowOpensAsDirectory(
+  row: Pick<FilePaneDirRow, "isDir" | "sortWithDirectories">,
+): boolean {
   return row.sortWithDirectories ?? row.isDir;
 }
 
@@ -235,8 +238,8 @@ export function filePaneSortRows<T extends FilePaneDirRow>(rows: readonly T[], s
   const dir = sort.direction === "desc" ? -1 : 1;
   const out = [...rows];
   out.sort((a, b) => {
-    if (filePaneSortsWithDirectories(a) !== filePaneSortsWithDirectories(b)) {
-      return filePaneSortsWithDirectories(a) ? -1 : 1;
+    if (filePaneRowOpensAsDirectory(a) !== filePaneRowOpensAsDirectory(b)) {
+      return filePaneRowOpensAsDirectory(a) ? -1 : 1;
     }
     let c = compareByColumn(a, b, col, dir);
     if (c !== 0) {
