@@ -22,4 +22,22 @@ describe("nssCommanderKeyboardShortcutTargetBlocksShortcuts", () => {
     expect(nssCommanderKeyboardShortcutTargetBlocksShortcuts(pane)).toBe(false);
     expect(nssCommanderKeyboardShortcutTargetBlocksShortcuts(document.createElement("div"))).toBe(false);
   });
+
+  it("blocks targets inside an aria-modal dialog", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    const btn = document.createElement("button");
+    dialog.appendChild(btn);
+    expect(nssCommanderKeyboardShortcutTargetBlocksShortcuts(btn)).toBe(true);
+  });
+
+  it("does not block a non-modal dialog element", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    // aria-modal not set
+    const btn = document.createElement("button");
+    dialog.appendChild(btn);
+    expect(nssCommanderKeyboardShortcutTargetBlocksShortcuts(btn)).toBe(false);
+  });
 });

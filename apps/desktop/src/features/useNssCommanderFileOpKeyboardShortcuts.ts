@@ -35,7 +35,7 @@ export type NssCommanderFileOpKeyboardProps = {
   onCopyMoveNoSelection?: () => void;
 };
 
-/** When true, NSS-Commander F2–F9 / Ctrl+R should not steal the key (terminal, editors, form fields). */
+/** When true, NSS-Commander F2–F9 / Ctrl+R should not steal the key (terminal, editors, form fields, modal dialogs). */
 export function nssCommanderKeyboardShortcutTargetBlocksShortcuts(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -53,6 +53,9 @@ export function nssCommanderKeyboardShortcutTargetBlocksShortcuts(target: EventT
   if (target.isContentEditable) {
     return true;
   }
+  if (target.closest('[role="dialog"][aria-modal="true"]')) {
+    return true;
+  }
   return false;
 }
 
@@ -67,6 +70,9 @@ export function useNssCommanderFileOpKeyboardShortcuts(props: NssCommanderFileOp
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) {
+        return;
+      }
+      if (document.querySelector(".file-pane-dialog-overlay") !== null) {
         return;
       }
       if (nssCommanderKeyboardShortcutTargetBlocksShortcuts(e.target)) {
