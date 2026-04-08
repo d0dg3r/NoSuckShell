@@ -7,8 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  FILE_PANE_RESIZABLE_HEADERS,
-  resolveOptimalResizableWidths,
+  resolveOptimalResizableWidthsForKeys,
+  resizableHeaderLabel,
 } from "../features/file-pane-column-sizing";
 
 const STORAGE_PREFIX = "NoSuckShell.filePane.cols.";
@@ -72,12 +72,14 @@ function readStored(key: string): Widths {
 }
 
 type SessionState = {
-  grip: 0 | 1 | 2 | 3 | 4;
+  grip: number;
   startX: number;
   startY: number;
   start: Widths;
   tableW: number;
   minTail: number;
+  fixedExtra: number;
+  visibleKeys: (keyof Widths)[];
   moved: boolean;
 };
 
@@ -106,7 +108,7 @@ function measureTextColumnWidth(header: string, cells: string[], fontCss: string
   return Math.ceil(max + 28);
 }
 
-export const FILE_PANE_OWNER_COL_MIN_PX = 48;
+export const FILE_PANE_OWNER_COL_MIN_PX = 56;
 export const FILE_PANE_OWNER_COL_MAX_PX = 240;
 
 export function measureFilePaneOwnerColumnWidth(header: string, cells: string[], fontCss: string): number {
@@ -120,34 +122,40 @@ function headerMinColumnWidth(header: string, fontCss: string): number {
   return clampCol(measureTextColumnWidth(header, [], fontCss) + TH_RESIZABLE_HEADER_EXTRA_PX);
 }
 
-/** Proportionally shrink all 5 columns so they fit within the available budget. */
-function clampAllColumnsToTable(
+function sumWidthsForKeys(w: Widths, keys: (keyof Widths)[]): number {
+  return keys.reduce((s, k) => s + w[k], 0);
+}
+
+/** Proportionally shrink visible resizable columns to fit the modified column minimum. */
+function clampVisibleColumnsToTable(
   tableWidth: number,
   minTail: number,
+  fixedExtra: number,
   w: Widths,
+  visibleKeys: (keyof Widths)[],
 ): Widths | null {
-  const reserved = ACTION_COL_PX + minTail;
-  const maxFive = tableWidth - reserved;
-  if (maxFive < MIN_COL * 5) {
+  if (visibleKeys.length === 0) {
     return null;
   }
-  const sum = w.name + w.perm + w.user + w.group + w.size;
-  if (sum <= maxFive) {
+  const reserved = ACTION_COL_PX + minTail + fixedExtra;
+  const maxVisible = tableWidth - reserved;
+  if (maxVisible < MIN_COL * visibleKeys.length) {
     return null;
   }
-  const scale = maxFive / sum;
-  const result: Widths = {
-    name: clampCol(Math.floor(w.name * scale)),
-    perm: clampCol(Math.floor(w.perm * scale)),
-    user: clampCol(Math.floor(w.user * scale)),
-    group: clampCol(Math.floor(w.group * scale)),
-    size: clampCol(Math.floor(w.size * scale)),
-  };
-  let s2 = result.name + result.perm + result.user + result.group + result.size;
-  const keys: Array<keyof Widths> = ["size", "group", "user", "perm", "name"];
-  while (s2 > maxFive) {
+  const sum = sumWidthsForKeys(w, visibleKeys);
+  if (sum <= maxVisible) {
+    return null;
+  }
+  const scale = maxVisible / sum;
+  const result: Widths = { ...w };
+  for (const k of visibleKeys) {
+    result[k] = clampCol(Math.floor(w[k] * scale));
+  }
+  let s2 = sumWidthsForKeys(result, visibleKeys);
+  const order = [...visibleKeys].reverse();
+  while (s2 > maxVisible) {
     let shrank = false;
-    for (const k of keys) {
+    for (const k of order) {
       if (result[k] > MIN_COL) {
         result[k] -= 1;
         s2 -= 1;
@@ -155,9 +163,56 @@ function clampAllColumnsToTable(
         break;
       }
     }
-    if (!shrank) break;
+    if (!shrank) {
+      break;
+    }
   }
   return result;
+}
+
+function applyResizeSession(d: SessionState, dx: number): Widths {
+  const visibleKeys = d.visibleKeys;
+  if (visibleKeys.length === 0) {
+    return { ...d.start };
+  }
+  const tw = d.tableW;
+  const reserved = ACTION_COL_PX + d.minTail + d.fixedExtra;
+  const maxBudget = tw - reserved;
+  const s = d.start;
+  const grip = d.grip;
+
+  const finishPair = (a: keyof Widths, b: keyof Widths, aVal: number, bVal: number): Widths => {
+    let x = aVal;
+    let y = bVal;
+    if (x < MIN_COL) {
+      y -= MIN_COL - x;
+      x = MIN_COL;
+    }
+    if (y < MIN_COL) {
+      x -= MIN_COL - y;
+      y = MIN_COL;
+    }
+    const others = visibleKeys.filter((k) => k !== a && k !== b).reduce((acc, k) => acc + s[k], 0);
+    const maxPair = maxBudget - others;
+    if (x + y > maxPair) {
+      const excess = x + y - maxPair;
+      x -= excess / 2;
+      y -= excess / 2;
+    }
+    const next = { ...s, [a]: clampCol(x), [b]: clampCol(y) };
+    return next;
+  };
+
+  if (grip < visibleKeys.length - 1) {
+    const a = visibleKeys[grip]!;
+    const b = visibleKeys[grip + 1]!;
+    return finishPair(a, b, s[a] + dx, s[b] - dx);
+  }
+  const last = visibleKeys[visibleKeys.length - 1]!;
+  const rest = visibleKeys.slice(0, -1).reduce((acc, k) => acc + s[k], 0);
+  const maxLast = Math.max(MIN_COL, maxBudget - rest);
+  const size = Math.min(Math.max(MIN_COL, s[last] + dx), maxLast);
+  return { ...s, [last]: clampCol(size) };
 }
 
 export function resolveFontFromTableWrap(wrap: HTMLDivElement | null): string {
@@ -181,9 +236,16 @@ function readWrapContentWidth(wrap: HTMLDivElement | null): number {
 
 export type FilePaneTailColWidths = { modified: number; actions: number };
 
+export type FilePaneTableResizeLayout = {
+  /** Left-to-right resizable keys currently shown (subset of name, perm, user, group, size). */
+  visibleResizableKeys: (keyof Widths)[];
+  /** Width of fixed optional columns (e.g. Octal + Kind). */
+  fixedOptionalWidthPx: number;
+};
+
 /**
- * All 5 columns (Name, Permissions, User, Group, Size) are resizable and persisted.
- * Column order: Name | Permissions | User | Group | Size | Modified | Actions.
+ * Resizable columns are persisted. Layout depends on which of the five logical columns are visible.
+ * Data column order: Name | Permissions | … | Modified | Actions (see file-pane-table-columns).
  */
 export function useFilePaneTableResize(
   storageKey: string,
@@ -191,6 +253,7 @@ export function useFilePaneTableResize(
   autoFitSamples: FilePaneTableAutoFitSamples,
   userColumnSamples: string[],
   groupColumnSamples: string[],
+  layout: FilePaneTableResizeLayout,
 ) {
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const userSizedRef = useRef(false);
@@ -209,6 +272,8 @@ export function useFilePaneTableResize(
   userColSamplesRef.current = userColumnSamples;
   const groupColSamplesRef = useRef(groupColumnSamples);
   groupColSamplesRef.current = groupColumnSamples;
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   const persist = useCallback(() => {
     try {
@@ -218,13 +283,58 @@ export function useFilePaneTableResize(
     }
   }, [storageKey]);
 
+  /** Recompute Modified column width and clamp resizable columns when the sum would squeeze Modified below minimum. */
+  const finalizeTailLayoutForInner = useCallback(
+    (inner: number) => {
+      const wv = widthsRef.current;
+      const visKeys = layoutRef.current.visibleResizableKeys;
+      const keysForSum = visKeys.length > 0 ? visKeys : [...COL_KEYS];
+      const fixedEx = layoutRef.current.fixedOptionalWidthPx;
+      const resizableSum = sumWidthsForKeys(wv, keysForSum);
+      let modCol = inner - resizableSum - fixedEx - ACTION_COL_PX;
+
+      if (modCol < MIN_MOD_COL_PX) {
+        if (!preShrinkWidthsRef.current) {
+          preShrinkWidthsRef.current = { ...wv };
+        }
+        const clamped = clampVisibleColumnsToTable(inner, MIN_MOD_COL_PX, fixedEx, wv, keysForSum);
+        if (clamped && !widthsEqual(wv, clamped)) {
+          widthsRef.current = clamped;
+          setWidths(clamped);
+        }
+        const cv = widthsRef.current;
+        modCol = inner - sumWidthsForKeys(cv, keysForSum) - fixedEx - ACTION_COL_PX;
+      } else if (preShrinkWidthsRef.current) {
+        const pre = preShrinkWidthsRef.current;
+        const preSum = sumWidthsForKeys(pre, keysForSum);
+        const preMod = inner - preSum - fixedEx - ACTION_COL_PX;
+        if (preMod >= MIN_MOD_COL_PX) {
+          preShrinkWidthsRef.current = null;
+          widthsRef.current = pre;
+          setWidths(pre);
+          persist();
+          modCol = preMod;
+        }
+      }
+      modCol = Math.max(0, modCol);
+
+      const modFloored = Math.floor(modCol);
+      setTailCols((prev) =>
+        prev.modified === modFloored && prev.actions === ACTION_COL_PX
+          ? prev
+          : { modified: modFloored, actions: ACTION_COL_PX },
+      );
+    },
+    [persist],
+  );
+
   const measureIdealResizableWidths = useCallback(
     (tableWidth: number): Widths => {
       const font = resolveFontFromTableWrap(tableWrapRef.current);
       const headerMins = { name: MIN_COL, perm: MIN_COL, user: MIN_COL, group: MIN_COL, size: MIN_COL } as Widths;
       const measured = COL_KEYS.reduce(
-        (acc, key, index) => {
-          const header = FILE_PANE_RESIZABLE_HEADERS[index];
+        (acc, key) => {
+          const header = resizableHeaderLabel(key);
           const textWidth = measureTextColumnWidth(header, samplesRef.current[key], font);
           const hMin = headerMinColumnWidth(header, font);
           headerMins[key] = hMin;
@@ -233,82 +343,45 @@ export function useFilePaneTableResize(
         },
         { name: MIN_COL, perm: MIN_COL, user: MIN_COL, group: MIN_COL, size: MIN_COL } as Widths,
       );
-      return resolveOptimalResizableWidths({
+      const vk = layoutRef.current.visibleResizableKeys;
+      const keys = vk.length > 0 ? vk : [...COL_KEYS];
+      const fixedEx = layoutRef.current.fixedOptionalWidthPx;
+      return resolveOptimalResizableWidthsForKeys({
+        keys,
         tableWidth,
-        fixedExtra: 0,
+        fixedExtra: fixedEx,
         minTailRestPx,
         measured,
         headerMins,
+        preserve: widthsRef.current,
       });
     },
     [minTailRestPx],
   );
 
   const applyResize = useCallback((d: SessionState, dx: number) => {
-    const tw = d.tableW;
-    const maxFive = tw - ACTION_COL_PX - d.minTail;
-    const s = d.start;
-
-    const finishPair = (
-      a: keyof Widths,
-      b: keyof Widths,
-      aVal: number,
-      bVal: number,
-    ): Widths => {
-      let x = aVal;
-      let y = bVal;
-      if (x < MIN_COL) {
-        y -= MIN_COL - x;
-        x = MIN_COL;
-      }
-      if (y < MIN_COL) {
-        x -= MIN_COL - y;
-        y = MIN_COL;
-      }
-      const others = COL_KEYS.filter((k) => k !== a && k !== b).reduce((acc, k) => acc + s[k], 0);
-      const maxPair = maxFive - others;
-      if (x + y > maxPair) {
-        const excess = x + y - maxPair;
-        x -= excess / 2;
-        y -= excess / 2;
-      }
-      return {
-        ...s,
-        [a]: clampCol(x),
-        [b]: clampCol(y),
-      };
-    };
-
-    if (d.grip === 0) {
-      widthsRef.current = finishPair("name", "perm", s.name + dx, s.perm - dx);
-    } else if (d.grip === 1) {
-      widthsRef.current = finishPair("perm", "user", s.perm + dx, s.user - dx);
-    } else if (d.grip === 2) {
-      widthsRef.current = finishPair("user", "group", s.user + dx, s.group - dx);
-    } else if (d.grip === 3) {
-      widthsRef.current = finishPair("group", "size", s.group + dx, s.size - dx);
-    } else {
-      const rest = s.name + s.perm + s.user + s.group;
-      const maxSize = Math.max(MIN_COL, maxFive - rest);
-      const size = Math.min(Math.max(MIN_COL, s.size + dx), maxSize);
-      widthsRef.current = { ...s, size: clampCol(size) };
-    }
+    widthsRef.current = applyResizeSession(d, dx);
     setWidths({ ...widthsRef.current });
   }, []);
 
   const fitOneColumn = useCallback(
-    (grip: 0 | 1 | 2 | 3 | 4) => {
-      const key = COL_KEYS[grip];
-      const header = FILE_PANE_RESIZABLE_HEADERS[grip] ?? "Size";
+    (gripIndex: number) => {
+      const visibleKeys = layoutRef.current.visibleResizableKeys;
+      if (visibleKeys.length === 0) {
+        return widthsRef.current;
+      }
       const tw = readWrapContentWidth(tableWrapRef.current);
       const font = resolveFontFromTableWrap(tableWrapRef.current);
-      const measured = measureTextColumnWidth(header, samplesRef.current[key] ?? [], font);
-      const hMin = headerMinColumnWidth(header, font);
-      const maxFive = tw - ACTION_COL_PX - minTailRestPx;
+      const fixedEx = layoutRef.current.fixedOptionalWidthPx;
+      const maxBudget = tw - ACTION_COL_PX - minTailRestPx - fixedEx;
       const cur = widthsRef.current;
-      const targetKey = COL_KEYS[Math.min(grip, COL_KEYS.length - 1)]!;
-      const otherSum = COL_KEYS.filter((k) => k !== targetKey).reduce((acc, k) => acc + cur[k], 0);
-      const cap = Math.max(MIN_COL, maxFive - otherSum);
+      const targetKey =
+        gripIndex < visibleKeys.length - 1 ? visibleKeys[gripIndex]! : visibleKeys[visibleKeys.length - 1]!;
+      const header = resizableHeaderLabel(targetKey);
+      const measured = measureTextColumnWidth(header, samplesRef.current[targetKey] ?? [], font);
+      const hMin = headerMinColumnWidth(header, font);
+      const otherSum = visibleKeys.filter((k) => k !== targetKey).reduce((acc, k) => acc + cur[k], 0);
+      const cap = Math.max(MIN_COL, maxBudget - otherSum);
       const nextVal = clampCol(Math.max(hMin, Math.min(measured, cap)));
       return { ...cur, [targetKey]: nextVal } as Widths;
     },
@@ -316,10 +389,10 @@ export function useFilePaneTableResize(
   );
 
   const onGripDoubleClick = useCallback(
-    (grip: 0 | 1 | 2 | 3 | 4) => (event: ReactMouseEvent<HTMLSpanElement>) => {
+    (gripIndex: number) => (event: ReactMouseEvent<HTMLSpanElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      const next = fitOneColumn(grip);
+      const next = fitOneColumn(gripIndex);
       userSizedRef.current = true;
       preShrinkWidthsRef.current = null;
       widthsRef.current = next;
@@ -330,27 +403,47 @@ export function useFilePaneTableResize(
   );
 
   const applyOptimalColumnWidths = useCallback(() => {
-    const tw = readWrapContentWidth(tableWrapRef.current);
+    const wrap = tableWrapRef.current;
+    const tw = readWrapContentWidth(wrap);
     const cur = measureIdealResizableWidths(tw);
     userSizedRef.current = true;
     preShrinkWidthsRef.current = null;
     widthsRef.current = cur;
     setWidths(cur);
     persist();
-  }, [measureIdealResizableWidths, persist]);
+    requestAnimationFrame(() => {
+      const el = tableWrapRef.current;
+      if (!el) {
+        return;
+      }
+      const st0 = getComputedStyle(el);
+      const pl0 = Number.parseFloat(st0.paddingLeft) || 0;
+      const pr0 = Number.parseFloat(st0.paddingRight) || 0;
+      const inner = Math.max(0, el.clientWidth - pl0 - pr0);
+      const table = el.querySelector("table");
+      if (table instanceof HTMLTableElement) {
+        table.style.width = `${inner}px`;
+        table.style.maxWidth = `${inner}px`;
+      }
+      finalizeTailLayoutForInner(inner);
+    });
+  }, [measureIdealResizableWidths, persist, finalizeTailLayoutForInner]);
 
   const onGripPointerDown = useCallback(
-    (grip: 0 | 1 | 2 | 3 | 4) => (event: ReactPointerEvent<HTMLSpanElement>) => {
+    (gripIndex: number) => (event: ReactPointerEvent<HTMLSpanElement>) => {
       event.preventDefault();
       event.stopPropagation();
       const tw = readWrapContentWidth(tableWrapRef.current);
+      const vis = layoutRef.current.visibleResizableKeys;
       sessionRef.current = {
-        grip,
+        grip: Math.min(gripIndex, Math.max(0, vis.length - 1)),
         startX: event.clientX,
         startY: event.clientY,
         start: { ...widthsRef.current },
         tableW: tw,
         minTail: minTailRestPx,
+        fixedExtra: layoutRef.current.fixedOptionalWidthPx,
+        visibleKeys: vis,
         moved: false,
       };
 
@@ -431,49 +524,21 @@ export function useFilePaneTableResize(
           }
         }
 
-        const wv = widthsRef.current;
-        const fiveSum = wv.name + wv.perm + wv.user + wv.group + wv.size;
-        let modCol = inner - fiveSum - ACTION_COL_PX;
-
-        if (modCol < MIN_MOD_COL_PX) {
-          if (!preShrinkWidthsRef.current) {
-            preShrinkWidthsRef.current = { ...wv };
-          }
-          const clamped = clampAllColumnsToTable(inner, MIN_MOD_COL_PX, wv);
-          if (clamped && !widthsEqual(wv, clamped)) {
-            widthsRef.current = clamped;
-            setWidths(clamped);
-          }
-          const cv = widthsRef.current;
-          modCol = inner - cv.name - cv.perm - cv.user - cv.group - cv.size - ACTION_COL_PX;
-        } else if (preShrinkWidthsRef.current) {
-          const pre = preShrinkWidthsRef.current;
-          const preSum = pre.name + pre.perm + pre.user + pre.group + pre.size;
-          const preMod = inner - preSum - ACTION_COL_PX;
-          if (preMod >= MIN_MOD_COL_PX) {
-            preShrinkWidthsRef.current = null;
-            widthsRef.current = pre;
-            setWidths(pre);
-            persist();
-            modCol = preMod;
-          }
-        }
-        modCol = Math.max(0, modCol);
-
-        const modFloored = Math.floor(modCol);
-        setTailCols((prev) =>
-          prev.modified === modFloored && prev.actions === ACTION_COL_PX
-            ? prev
-            : { modified: modFloored, actions: ACTION_COL_PX },
-        );
-
+        finalizeTailLayoutForInner(inner);
       }
     };
     const ro = new ResizeObserver(run);
     ro.observe(el);
     run();
     return () => ro.disconnect();
-  }, [persist, isDragging, measureIdealResizableWidths]);
+  }, [
+    persist,
+    isDragging,
+    measureIdealResizableWidths,
+    layout.visibleResizableKeys,
+    layout.fixedOptionalWidthPx,
+    finalizeTailLayoutForInner,
+  ]);
 
   useEffect(() => {
     if (userSizedRef.current) {

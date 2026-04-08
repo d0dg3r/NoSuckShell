@@ -4610,9 +4610,9 @@ input.input[type="checkbox"] {
   font-variant-numeric: tabular-nums;
 }
 
-/* Modified column (6th: Name, Permissions, User, Group, Size, Modified, …) */
-.file-pane-table th:nth-child(6),
-.file-pane-table td:nth-child(6) {
+/* Modified column (position varies when optional columns are shown) */
+.file-pane-table th.file-pane-col-modified,
+.file-pane-table td.file-pane-col-modified {
   /* Override table-cell min-width:auto so long dates do not force horizontal overflow */
   min-width: 0;
   overflow: hidden;
@@ -4620,6 +4620,8 @@ input.input[type="checkbox"] {
   white-space: nowrap;
   max-width: 0;
   vertical-align: middle;
+  font-family: var(--file-pane-terminal-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
 }
 
 .file-pane-table th {
@@ -4699,6 +4701,152 @@ input.input[type="checkbox"] {
 
 .file-pane-optimal-widths-btn:disabled {
   opacity: 0.4;
+}
+
+.file-pane-columns-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin: 0;
+  line-height: var(--leading-none);
+  color: rgba(232, 238, 234, 0.7);
+}
+
+.file-pane-columns-btn:hover {
+  color: rgba(232, 238, 234, 0.95);
+}
+
+.file-pane-th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.file-pane-th-sort-btn:hover {
+  color: rgba(232, 238, 234, 0.95);
+}
+
+.file-pane-th-sort-btn:focus-visible {
+  outline: 2px solid rgba(255, 212, 59, 0.45);
+  outline-offset: 1px;
+}
+
+.file-pane-sort-chevron {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.file-pane-columns-popover {
+  min-width: 280px;
+  max-width: min(360px, 100vw - 16px);
+  padding: 10px 12px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(232, 238, 234, 0.12);
+  background: rgba(14, 18, 22, 0.98);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: rgba(232, 238, 234, 0.92);
+}
+
+.file-pane-columns-popover-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.file-pane-columns-popover-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(232, 238, 234, 0.55);
+}
+
+.file-pane-columns-popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-pane-columns-popover-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.file-pane-columns-popover-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-pane-columns-order-btn {
+  min-width: 26px;
+  width: 26px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  margin: 0;
+  line-height: var(--leading-none);
+  font-size: 12px;
+}
+
+.file-pane-columns-popover-label {
+  min-width: 0;
+}
+
+.file-pane-columns-popover-check {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+}
+
+.file-pane-columns-popover-check input {
+  flex-shrink: 0;
+}
+
+.file-pane-columns-popover-fixed {
+  width: 22px;
+  text-align: center;
+  color: rgba(232, 238, 234, 0.35);
+  font-size: 11px;
+}
+
+.file-pane-table td.file-pane-td-octal,
+.file-pane-table td.file-pane-td-kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+body.nss-commander-workspace .file-pane-sort-chevron {
+  color: rgba(120, 255, 180, 0.75);
+}
+
+body.nss-commander-workspace .file-pane-columns-popover {
+  border-color: rgba(120, 255, 180, 0.2);
+  background: rgba(0, 12, 8, 0.98);
 }
 
 .file-pane-table td.file-pane-td-actions {

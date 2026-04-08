@@ -833,6 +833,9 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
 pub struct SftpDirEntry {
     pub name: String,
     pub is_dir: bool,
+    /// True for directories and for symlinks whose target is a directory (listing / sort group).
+    #[serde(rename = "sortWithDirectories")]
+    pub sort_with_directories: bool,
     pub size: u64,
     pub mtime: Option<i64>,
     /// e.g. `drwxr-xr-x`
@@ -911,12 +914,21 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
             continue;
         }
         let is_dir = stat.is_dir();
+        let sort_with_directories = if stat.file_type().is_symlink() {
+            sftp
+                .stat(Path::new(&full_path))
+                .map(|st| st.is_dir())
+                .unwrap_or(false)
+        } else {
+            is_dir
+        };
         let size = stat.size.unwrap_or(0);
         let mtime = stat.mtime.map(|t| t as i64);
         let (mode_display, user_display, group_display, mode_octal) = remote_mode_and_owners(&stat, is_dir);
         out.push(SftpDirEntry {
             name,
             is_dir,
+            sort_with_directories,
             size,
             mtime,
             mode_display,
@@ -926,7 +938,7 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
         });
     }
     out.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
+        match (a.sort_with_directories, b.sort_with_directories) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
@@ -2051,6 +2063,9 @@ pub fn sftp_write_text_file(
 pub struct LocalDirEntry {
     pub name: String,
     pub is_dir: bool,
+    /// True for directories and for symlinks whose target is a directory (listing / sort group).
+    #[serde(rename = "sortWithDirectories")]
+    pub sort_with_directories: bool,
     pub size: u64,
     pub mtime: Option<i64>,
     /// e.g. `drwxr-xr-x`; empty on non-Unix.
@@ -2123,9 +2138,18 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs() as i64));
         let (mode_display, user_display, group_display, mode_octal) = local_mode_and_owners(&meta);
+        let child_path = joined.join(&name);
+        let sort_with_directories = if meta.file_type().is_symlink() {
+            fs::metadata(&child_path)
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
+        } else {
+            meta.is_dir()
+        };
         out.push(LocalDirEntry {
             name,
             is_dir: meta.is_dir(),
+            sort_with_directories,
             size: if meta.is_file() { meta.len() } else { 0 },
             mtime,
             mode_display,
@@ -2134,7 +2158,7 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
             group_display,
         });
     }
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+    out.sort_by(|a, b| match (a.sort_with_directories, b.sort_with_directories) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),

@@ -205,6 +205,12 @@ const interactionSections: HelpSection[] = [
         mouse: "Move focus between local and remote file panes in the workspace.",
         keys: "-",
       },
+      {
+        action: "Sort and columns",
+        mouse:
+          "Click a column header to sort (toggle ascending and descending). Folders stay above files. Use the Columns button in the header row to reorder columns (↑/↓) and show or hide optional columns (for example Octal and Kind). Sort order, visibility, and column order persist separately for local and remote panes.",
+        keys: "-",
+      },
     ],
   },
   {
