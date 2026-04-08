@@ -4,17 +4,21 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-04-08
+
 ### Added
 
-- **File pane** — Sortable column headers (ascending/descending; folders stay above files), optional columns (including **Octal** and **Kind**), a **Columns** menu to show or hide fields and **column reorder** (↑/↓), and separate **localStorage** persistence for sort order, visibility, and column order on local vs remote panes. **Defaults** for new installs: visible columns **Name**, **Size**, **Kind**, **Octal**, **Modified** in that order; **Permissions**, **User**, and **Group** are off until enabled.
-
-### Fixed
-
-- **File pane** — **Optimal widths** keeps the sum of resizable columns within the table budget (and no longer subtracts width for hidden resizable columns), avoiding spurious horizontal scrolling when minimums are tight.
+- **File pane** — Sortable column headers (ascending/descending; directory-like entries stay above plain files), optional columns (including **Octal** and **Kind**), a **Columns** menu to show or hide fields and **column reorder** (↑/↓), and separate **localStorage** persistence for sort order, visibility, and column order on local vs remote panes. **Defaults** for new installs: visible columns **Name**, **Size**, **Kind**, **Octal**, **Modified** in that order; **Permissions**, **User**, and **Group** are off until enabled.
+- **File pane** — Listings expose **`sortWithDirectories`** (local + SFTP): symlinks whose target is a directory sort with folders. **Kind** derives labels from the Unix mode character (folder, file, symlink, block/character device, pipe, socket). **Modified** uses a compact `en-US` date and 12-hour time (`M/d/yy h:mm AM/PM`) with monospace-friendly alignment.
 
 ### Changed
 
 - **NSS-Commander** — Copy/move flow uses a terminal-style dialog (green title bar, monospace) with an **editable destination path**, listing validation, and synced pane paths. Transfer progress is shown in a detailed popup (segmented bar, ETA/speed from live byte progress, scrollable message log). **F5** confirms the path dialog and pauses or resumes the active transfer; **F4** cancels the transfer; **F10** toggles details. Single-file SFTP downloads/uploads and local file copies emit progress events and honor **pause** and **cancel** from the backend.
+- **File pane** — Symlinks to directories use the same **directory-like** UI as real folders (name link with trailing `/`, size shown as **—**, semantic **folder** name coloring, context menu hides file-only actions). **Delete** still follows the stored entry type (symlink vs directory). **Drag/copy** into another pane recurses through symlink targets like directories.
+
+### Fixed
+
+- **File pane** — **Optimal widths** keeps the sum of resizable columns within the table budget (and no longer subtracts width for hidden resizable columns), avoiding spurious horizontal scrolling when minimums are tight.
 
 ## [0.3.4] - 2026-04-07
 
@@ -297,4 +301,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.2
 [v0.3.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.3
 [v0.3.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.4
+[v0.3.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.5
 
