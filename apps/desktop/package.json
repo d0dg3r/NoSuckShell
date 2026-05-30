@@ -47,7 +47,7 @@
     "jsdom": "^29.0.2",
     "patch-package": "^8.0.1",
     "typescript": "^6.0.2",
-    "vite": "^8.0.5",
+    "vite": "^8.0.8",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vitest": "^4.1.2"
   }
