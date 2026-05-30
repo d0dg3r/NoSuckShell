@@ -4,6 +4,37 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-30
+
+**Stable release.** First store-ready cut of the `0.3.x` line: privacy fix in SFTP, expanded CI gates, restrictive CSP, and signing/notarization plumbing. Binaries are published after you push tag [`v0.3.6`][v0.3.6] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Added
+
+- **Security / CSP** — Restrictive Content Security Policy in [`tauri.conf.json`](../apps/desktop/src-tauri/tauri.conf.json) (`default-src 'self'`, IPC + `ws:`/`wss:` allowed for terminals and the Proxmox WebSocket proxy; inline styles still allowed for the xterm canvas). Documented in [SECURITY.md](../SECURITY.md).
+- **CI gates** — [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) now runs **`tsc`** + **Vitest**, **`cargo check`** + **`cargo test`**, and the existing **Playwright** E2E job on every PR. **`cargo fmt --check`** and **`cargo clippy`** run as advisory jobs.
+- **Release signing plumbing** — Opt-in **macOS code signing + notarization** and **Windows code signing** wired into [`.github/workflows/release.yml`](../.github/workflows/release.yml); details and required secrets in [`docs/releases.md`](releases.md).
+- **Performance docs** — New [`docs/performance.md`](performance.md) describes hot paths (terminal output/input, split-pane renderer, SFTP), the current blocking-SFTP characteristics, and the measurement methodology to be used before further optimization.
+- **Store packaging docs** — New [`docs/store-packaging.md`](store-packaging.md) maps current and planned distribution channels (GitHub Releases, AUR, local Flatpak, Flathub, Microsoft Store, Snap), explains the refreshed AppStream metainfo, and lists the canonical marketing copy.
+- **Tests** — New unit-test coverage for `sftp.rs` (host-key candidates, path normalization, error classification), `sftp_transfer_ops.rs` (handle registration / release), `session.rs` (SSH path / known-hosts helpers), `license.rs` (server-token round-trip + tamper detection), and the `license-server` crate (token signing + entitlement parsing).
+- **Settings modal drag hook** — `useSettingsModalDrag` extracted from `App.tsx` so the modal centering / drag interaction is testable in isolation.
+
+### Changed
+
+- **AppStream metainfo** — [`flatpak/dev.nosuckshell.desktop.metainfo.xml`](../flatpak/dev.nosuckshell.desktop.metainfo.xml) refreshed for Flathub: full `<description>`, seven screenshots, `<categories>`, `<keywords>`, `<provides>`, `<content_rating>`, and a release history.
+- **Performance** — `TerminalPane` is wrapped in `React.memo`, reducing re-renders triggered by unrelated `App.tsx` state changes.
+- **Robustness** — Mutex locks in production code paths (`sftp_transfer_ops.rs`, `proxmux_ws_proxy.rs`) recover from poisoning via `unwrap_or_else(|e| e.into_inner())` instead of panicking; the static `http::Response` builders no longer use `expect()`.
+
+### Fixed
+
+- **Privacy / data leakage** — Removed `agent_debug_log` and its hardcoded host-side path from [`apps/desktop/src-tauri/src/sftp.rs`](../apps/desktop/src-tauri/src/sftp.rs); host names, IPs, and SSH key fingerprints are no longer written to disk during SFTP debugging. **Release blocker.**
+
+### Notes
+
+- Users on prior `0.3.x` builds upgrade in place — host store, identities, and saved layouts are read directly from previous versions; no migration is required.
+- This release ships **unsigned** binaries on platforms where signing secrets have not yet been configured (the workflow steps are opt-in). See [`docs/releases.md`](releases.md).
+
+## [0.3.6-beta.1] - 2026-04-15
+
 ### Added
 
 - **Local Arch build** — `scripts/build-local-arch.sh` repacks a locally built Tauri `.deb` as `nosuckshell-local` for `sudo pacman -U` (mirrors `nosuckshell-bin`; outputs under gitignored `arch/build/`).
@@ -316,4 +347,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.4
 [v0.3.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.5
 [v0.3.6-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1
+[v0.3.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6
 

@@ -98,8 +98,8 @@ git push origin v0.2.1
 
 ## Current release (0.3.x)
 
-- **Latest stable:** `v0.3.5` — see [CHANGELOG.md](CHANGELOG.md) for `0.3.5`.
-- **Current pre-release:** `v0.3.6-beta.1` — Linux terminal input latency fixes; install from [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue). See [CHANGELOG.md](CHANGELOG.md) for `0.3.6-beta.1`.
+- **Latest stable:** `v0.3.6` — first store-ready cut of the `0.3.x` line (privacy + signing + CSP + CI gates). See [CHANGELOG.md](CHANGELOG.md) for `0.3.6`.
+- **Previous pre-release:** `v0.3.6-beta.1` — Linux terminal input latency fixes; archived on [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue).
 
 Before tagging, keep the same version string in:
 
@@ -121,19 +121,52 @@ The release workflow still **overwrites** those files from the tag at build time
 - Keep asset names/platform artifacts separated by matrix job.
 - Keep workflow `concurrency` enabled to prevent duplicate runs for the same tag.
 
-## Follow-up: code signing and notarization
+## Code signing and notarization
 
-Current workflow builds and publishes unsigned artifacts. For production distribution, add platform signing:
+The release workflow has **plumbing** for both macOS notarization and Windows code signing. Both are **opt-in**: the workflow keeps producing usable binaries when the matching secrets are unset (the macOS step warns and exits 0; Tauri's build step skips signing automatically). Configure the secrets below for **official** binaries before public rollout.
 
-- Windows:
-  - Sign `.exe`/`.msi` with a trusted code-signing certificate.
-  - Store certificate material and passwords in GitHub Secrets.
-- macOS:
-  - Sign app with Apple Developer ID certificate.
-  - Notarize with Apple notary service.
-  - Staple notarization ticket to distributables (`.app`/`.dmg`).
-- Linux:
-  - AppImage generally works unsigned, but optional signature/provenance can be added in a hardened pipeline.
+### macOS (Developer ID + notarization)
+
+Required GitHub repository secrets:
+
+| Secret | Description |
+| --- | --- |
+| `APPLE_CERTIFICATE` | Base64-encoded `.p12` of the **Developer ID Application** certificate (full chain). |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12`. |
+| `APPLE_SIGNING_IDENTITY` | Identity string Tauri passes to `codesign`, e.g. `Developer ID Application: NoSuckShell (TEAMID)`. |
+| `APPLE_TEAM_ID` | Apple Developer team ID (e.g. `ABCDE12345`). |
+| `APPLE_ID` + `APPLE_PASSWORD` | App-Store-Connect account email and **app-specific password** for `notarytool`. |
+| *or* `APPLE_API_KEY` + `APPLE_API_KEY_PATH` + `APPLE_API_ISSUER` | App-Store-Connect API key alternative to ID/password. |
+
+The `Import Apple signing certificate` step creates a temporary keychain on the macOS runner, imports the `.p12`, and unlocks it for `codesign`. The next `Build Tauri app bundles` step picks up `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` etc. so Tauri signs and notarizes automatically.
+
+To export the certificate locally:
+
+```bash
+# After your Developer ID Application cert is in Keychain Access:
+security export -k login.keychain -t identities -f pkcs12 -o cert.p12
+base64 cert.p12 | pbcopy   # paste as the APPLE_CERTIFICATE secret
+```
+
+### Windows (Authenticode signing)
+
+Required GitHub repository secrets:
+
+| Secret | Description |
+| --- | --- |
+| `TAURI_WINDOWS_SIGN_COMMAND` | Full sign command Tauri runs over each binary, e.g. `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 <thumbprint> %1` or an `AzureSignTool.exe` invocation. |
+
+Tauri reads `TAURI_WINDOWS_SIGN_COMMAND` and runs it for each generated artifact. Modern recommendation is **Azure Trusted Signing** or a remote HSM-based signing service so no certificate material lives in the runner image. The certificate must chain to a Microsoft-trusted root and have an EKU compatible with code signing.
+
+### Linux
+
+AppImage generally works unsigned. Optional signature/provenance (e.g. `appimagetool --sign`, sigstore/cosign) can be added later in a hardened pipeline.
+
+### Verifying a signed build
+
+1. **macOS:** `spctl --assess --type execute --verbose=4 NoSuckShell.app` should report `accepted`.
+2. **macOS notarization:** `xcrun stapler validate NoSuckShell.dmg` should succeed.
+3. **Windows:** `Get-AuthenticodeSignature NoSuckShell.exe` (PowerShell) should show `Status: Valid`.
 
 ### AppImage and host shared libraries (`libpcre2` / `libgit2`)
 

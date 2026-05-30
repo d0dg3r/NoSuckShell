@@ -391,7 +391,10 @@ impl SessionState {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_local_shell_command, build_ssh_command};
+    use super::{
+        build_local_shell_command, build_ssh_command, expand_ssh_user_path, resolve_ssh_program,
+        ssh_user_known_hosts_option,
+    };
     use crate::ssh_config::HostConfig;
 
     #[test]
@@ -469,5 +472,51 @@ mod tests {
         );
         // Login flag must not be passed to Windows shells.
         assert!(!rendered.contains("-l"));
+    }
+
+    #[test]
+    fn expand_ssh_user_path_handles_blank_and_passthrough() {
+        assert_eq!(expand_ssh_user_path(""), "");
+        assert_eq!(expand_ssh_user_path("   "), "");
+        // Absolute / non-tilde paths pass through unchanged.
+        let p = "/etc/ssh/key";
+        assert_eq!(expand_ssh_user_path(p), p);
+        let q = "C:\\ssh\\key";
+        assert_eq!(expand_ssh_user_path(q), q);
+    }
+
+    #[test]
+    fn expand_ssh_user_path_expands_tilde_when_home_known() {
+        if let Some(home) = home::home_dir() {
+            let expanded = expand_ssh_user_path("~/.ssh/id_rsa");
+            let expected = home.join(".ssh/id_rsa").to_string_lossy().into_owned();
+            assert_eq!(expanded, expected);
+        }
+    }
+
+    #[test]
+    fn ssh_user_known_hosts_option_uses_user_known_hosts_file_form() {
+        let opt = ssh_user_known_hosts_option();
+        assert!(
+            opt.starts_with("UserKnownHostsFile="),
+            "unexpected option: {opt}"
+        );
+        assert!(
+            opt.to_lowercase().ends_with("known_hosts"),
+            "unexpected option suffix: {opt}"
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn resolve_ssh_program_returns_unix_default() {
+        assert_eq!(resolve_ssh_program(), "ssh");
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn resolve_ssh_program_returns_a_visible_program_on_windows() {
+        let p = resolve_ssh_program().to_lowercase();
+        assert!(p.contains("ssh"), "unexpected ssh program path: {p}");
     }
 }

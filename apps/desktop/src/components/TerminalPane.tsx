@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -28,7 +28,7 @@ const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
 /** Debounce wl-copy/xclip while the user is still dragging a selection. */
 const SELECTION_CLIPBOARD_DEBOUNCE_MS = 120;
 
-export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectoryChange, fontSize, fontFamily }: Props) {
+function TerminalPaneInner({ sessionId, onUserInput, onSessionWorkingDirectoryChange, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -364,3 +364,10 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     </div>
   );
 }
+
+/**
+ * Wraps the xterm pane in `React.memo` so unrelated parent renders (sidebar, settings, drag, …)
+ * do not re-render the terminal subtree. All callback props are `useCallback`-stable in `App.tsx`,
+ * so the default shallow comparison is correct.
+ */
+export const TerminalPane = memo(TerminalPaneInner);

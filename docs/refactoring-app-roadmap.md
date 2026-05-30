@@ -54,11 +54,37 @@ Each step should be **one PR**, with `npm test` (and `npm run build` in `apps/de
 
 **Status:** Done — sidebar chrome, filters, and host list call back into `App` via props; rows render inside the sidebar via `hostListRowBridge` + [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx).
 
+### D) Settings modal positioning + drag → `hooks/`
+
+**Target:** [`apps/desktop/src/hooks/useSettingsModalDrag.ts`](../apps/desktop/src/hooks/useSettingsModalDrag.ts).
+
+**Status:** Done — encapsulates the auto-center effect, the pointer-move/up listener loop, the close-while-dragging cleanup, and the header pointer-down handler. `App.tsx` now reads `settingsModalRef`, `settingsModalPosition`, `isSettingsDragging`, and `handleSettingsHeaderPointerDown` from a single hook call (~70 lines removed from `App`).
+
+### F) Modularize `styles.css` (deferred, planned)
+
+**Target:** [`apps/desktop/src/styles.css`](../apps/desktop/src/styles.css) (~9k lines).
+
+**Status:** Planned — not yet executed because per-section splits would touch every component import. **Suggested order** for incremental extraction (one section per PR):
+
+1. **Tokens** (`:root` custom properties + font-faces) → `styles/tokens.css`.
+2. **App shell + sidebar** (sidebar, host rows, host slide, add-host modal) → `styles/sidebar.css`.
+3. **Workspace** (split panes, drop overlays, terminal chrome, NSS-Commander dock) → `styles/workspace.css`.
+4. **Settings + modals** (settings shell, tabs, dialogs, popovers) → `styles/settings.css`.
+5. **File panes** (file table, breadcrumbs, semantic colors, transfer progress) → `styles/file-pane.css`.
+
+Each split should stay zero-diff visually and pass the existing Playwright screenshot suite (`npm run screenshots`) before merging.
+
+### E) `React.memo` on terminal leaf → reduce typing-time re-renders
+
+**Target:** [`apps/desktop/src/components/TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx).
+
+**Status:** Done — `TerminalPane` is wrapped in `React.memo` so unrelated parent re-renders (sidebar, settings, drag, host list refresh) do not cascade into the xterm subtree. Both callback props (`onUserInput`, `onSessionWorkingDirectoryChange`) are already `useCallback`-stable in `App.tsx`, so the default shallow comparison is correct. **Not yet memoized:** [`RemoteFilePane`](../apps/desktop/src/components/RemoteFilePane.tsx) and [`LocalFilePane`](../apps/desktop/src/components/LocalFilePane.tsx) — they receive a `spec`/handler bag that today is reconstructed each render inside [`SplitWorkspace.createSplitPaneRenderer`](../apps/desktop/src/components/SplitWorkspace.tsx); stabilizing those references is the prerequisite. Memoizing `createSplitPaneRenderer` directly is **not** useful: its bridge captures ~80 closure fields that change on most re-renders, so memoization would either be a no-op or risk stale-closure bugs.
+
 ## 4. Optional next steps (not required)
 
 - **Component smoke tests:** shared bridge fixtures in [`host-list-row-fixtures.ts`](../apps/desktop/src/test/host-list-row-fixtures.ts); [`HostListRow.test.tsx`](../apps/desktop/src/components/HostListRow.test.tsx) (row UI), [`HostSidebar.test.tsx`](../apps/desktop/src/components/HostSidebar.test.tsx) (empty list, one row, settings click via `minimalHostSidebarProps()`).
 - **`useReducer` / context** for workspace or split state: defer until interaction bugs or review pain justify a single owner for that subgraph; current hooks + props remain easier to follow for most changes.
-- **Further shrink `App`:** [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) renders [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) via a typed `hostListRowBridge` (no `renderHostRow` callback in `App`). Right-dock workspace UI lives in [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx).
+- **Further shrink `App`:** [`HostSidebar`](../apps/desktop/src/components/HostSidebar.tsx) renders [`HostListRow`](../apps/desktop/src/components/HostListRow.tsx) via a typed `hostListRowBridge` (no `renderHostRow` callback in `App`). Right-dock workspace UI lives in [`TerminalWorkspaceDock`](../apps/desktop/src/components/TerminalWorkspaceDock.tsx). Remaining cohesive slices for follow-up extractions include the **settings sub-tab routing** (6 sub-tab `useState`s + cross-tab navigation calls) and the **Identity-Store form drafts** (8 user / key form fields in `App`).
 
 ## 5. TypeScript output (`noEmit`)
 

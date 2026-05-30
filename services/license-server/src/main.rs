@@ -202,3 +202,113 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Verifier, VerifyingKey};
+
+    /// Mirrors `DEV_LICENSE_SEED` in `apps/desktop/src-tauri/src/license.rs`. Keep in sync.
+    const DEV_LICENSE_SEED: [u8; 32] = *b"nosuckshell-dev-1-license-seed!!";
+
+    fn dev_signing_key() -> SigningKey {
+        SigningKey::from_bytes(&DEV_LICENSE_SEED)
+    }
+
+    #[test]
+    fn sign_license_token_produces_two_base64url_parts() {
+        let sk = dev_signing_key();
+        let payload = LicensePayload {
+            v: 1,
+            license_id: "test-1".into(),
+            entitlements: vec!["dev.nosuckshell.tier.demo".into()],
+            iat: now_unix(),
+            exp: None,
+        };
+        let token = sign_license_token(&sk, &payload).expect("signs");
+
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 2, "token must have exactly one '.' separator");
+        let payload_bytes = URL_SAFE_NO_PAD
+            .decode(parts[0].as_bytes())
+            .expect("payload decodes");
+        let sig_bytes = URL_SAFE_NO_PAD
+            .decode(parts[1].as_bytes())
+            .expect("signature decodes");
+        assert_eq!(sig_bytes.len(), 64, "Ed25519 sig is exactly 64 bytes");
+
+        // The encoded payload must round-trip back to the same struct.
+        let parsed: LicensePayload =
+            serde_json::from_slice(&payload_bytes).expect("payload JSON parses");
+        assert_eq!(parsed.license_id, payload.license_id);
+        assert_eq!(parsed.entitlements, payload.entitlements);
+        assert_eq!(parsed.v, payload.v);
+    }
+
+    #[test]
+    fn issued_token_signature_verifies_with_corresponding_verifying_key() {
+        let sk = dev_signing_key();
+        let vk: VerifyingKey = sk.verifying_key();
+        let payload = LicensePayload {
+            v: 1,
+            license_id: "verify-1".into(),
+            entitlements: vec![],
+            iat: now_unix(),
+            exp: Some(now_unix() + 3_600),
+        };
+        let token = sign_license_token(&sk, &payload).expect("signs");
+        let (p64, s64) = token.split_once('.').expect("two parts");
+
+        let payload_bytes = URL_SAFE_NO_PAD
+            .decode(p64.as_bytes())
+            .expect("payload decodes");
+        let sig_bytes = URL_SAFE_NO_PAD
+            .decode(s64.as_bytes())
+            .expect("signature decodes");
+        let sig_arr: [u8; 64] = sig_bytes.try_into().expect("64-byte signature");
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
+
+        // The signature is over the UTF-8 JSON, not over the base64url-encoded form.
+        vk.verify(&payload_bytes, &sig)
+            .expect("issued token must verify with the matching verifying key");
+    }
+
+    #[test]
+    fn parse_entitlements_list_handles_missing_or_invalid_json() {
+        // Snapshot env state, mutate, restore. Each test owns its env scope.
+        let prev = env::var("DEFAULT_LICENSE_ENTITLEMENTS").ok();
+
+        // Safety: tests in this module are run sequentially via `cargo test --test-threads=1` in CI;
+        // here we accept the standard library warning because the surface is tiny.
+        unsafe {
+            env::remove_var("DEFAULT_LICENSE_ENTITLEMENTS");
+        }
+        assert!(parse_entitlements_list().is_empty());
+
+        unsafe {
+            env::set_var("DEFAULT_LICENSE_ENTITLEMENTS", "not-json");
+        }
+        assert!(parse_entitlements_list().is_empty());
+
+        unsafe {
+            env::set_var(
+                "DEFAULT_LICENSE_ENTITLEMENTS",
+                r#"["dev.tier.demo","dev.plugin.proxmux"]"#,
+            );
+        }
+        assert_eq!(
+            parse_entitlements_list(),
+            vec![
+                "dev.tier.demo".to_string(),
+                "dev.plugin.proxmux".to_string()
+            ]
+        );
+
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("DEFAULT_LICENSE_ENTITLEMENTS", v),
+                None => env::remove_var("DEFAULT_LICENSE_ENTITLEMENTS"),
+            }
+        }
+    }
+}

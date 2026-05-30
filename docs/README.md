@@ -23,6 +23,8 @@ Index of maintained documentation for NoSuckShell.
 | [backup-security.md](backup-security.md) | Encrypted backup format and security notes. |
 | [plans/2026-03-17-ssh-manager-design.md](plans/2026-03-17-ssh-manager-design.md) | Historical MVP / design notes (SSH manager). |
 | [refactoring-app-roadmap.md](refactoring-app-roadmap.md) | Notes on splitting or hardening `App.tsx`. |
+| [performance.md](performance.md) | Hot paths, SFTP characteristics, and the measurement methodology to use before perf changes. |
+| [store-packaging.md](store-packaging.md) | Distribution channels (Flathub, MS Store, Snap), AppStream metainfo, marketing copy. |
 | [media/screenshots/README.md](media/screenshots/README.md) | Store screenshots, sizes, captions, and `npm run screenshots`. |
 | [superpowers/specs/2026-03-23-proxmox-console-integration-analysis.md](superpowers/specs/2026-03-23-proxmox-console-integration-analysis.md) | Technical spec: PROXMUX consoles, TLS, WebSocket bridge, QA matrix (keep aligned with `proxmux.rs` / `proxmux_ws_proxy.rs`). |
 

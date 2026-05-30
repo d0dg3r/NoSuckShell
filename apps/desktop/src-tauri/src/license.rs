@@ -290,4 +290,75 @@ mod tests {
         assert_eq!(mode, "fused_first_last");
         assert_eq!(n, "aaaa.dddd");
     }
+
+    /// End-to-end: build the same `base64url(payload).base64url(sig)` token format the
+    /// `services/license-server` emits and confirm the desktop's verifier accepts it. Catches
+    /// drift between the server and desktop `LicensePayload` serialization (field order,
+    /// `serde(rename_all)`, `skip_serializing_if`).
+    #[test]
+    fn end_to_end_server_token_format_verifies_on_desktop() {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+
+        let sk = SigningKey::from_bytes(&DEV_LICENSE_SEED);
+        let payload = LicensePayload {
+            v: 1,
+            license_id: "e2e-1".into(),
+            entitlements: vec![
+                "dev.nosuckshell.tier.demo".into(),
+                "dev.nosuckshell.plugin.proxmux".into(),
+            ],
+            iat: now_unix(),
+            exp: None,
+        };
+
+        // Server side: sign UTF-8 JSON of the payload, encode payload + signature as base64url.
+        let json = serde_json::to_string(&payload).expect("serialize payload");
+        let sig = sk.sign(json.as_bytes());
+        let token = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(json.as_bytes()),
+            URL_SAFE_NO_PAD.encode(sig.to_bytes()),
+        );
+
+        // Desktop side: split, decode, parse, hex-encode signature, and verify.
+        let (payload_b64, sig_b64) = token.split_once('.').expect("token has two parts");
+        let decoded_payload = URL_SAFE_NO_PAD
+            .decode(payload_b64.as_bytes())
+            .expect("payload base64url decodes");
+        let decoded_sig = URL_SAFE_NO_PAD
+            .decode(sig_b64.as_bytes())
+            .expect("signature base64url decodes");
+        assert_eq!(
+            decoded_sig.len(),
+            64,
+            "Ed25519 signature must be exactly 64 bytes"
+        );
+        let parsed: LicensePayload =
+            serde_json::from_slice(&decoded_payload).expect("payload JSON parses");
+        assert_eq!(parsed, payload, "round-trip payload must equal source");
+
+        verify_payload(&parsed, &hex::encode(&decoded_sig)).expect("signature must verify");
+    }
+
+    #[test]
+    fn rejects_tampered_payload_with_valid_signature() {
+        let sk = SigningKey::from_bytes(&DEV_LICENSE_SEED);
+        let original = LicensePayload {
+            v: 1,
+            license_id: "tamper-1".into(),
+            entitlements: vec!["dev.nosuckshell.tier.demo".into()],
+            iat: now_unix(),
+            exp: None,
+        };
+        let msg = license_message(&original).unwrap();
+        let sig_hex = hex::encode(sk.sign(msg.as_bytes()).to_bytes());
+
+        // Adding an extra entitlement after signing must fail verification.
+        let mut tampered = original;
+        tampered
+            .entitlements
+            .push("dev.nosuckshell.plugin.proxmux".into());
+        assert!(verify_payload(&tampered, &sig_hex).is_err());
+    }
 }

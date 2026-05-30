@@ -74,6 +74,7 @@ import { useAppKeyboardShortcutEngine, type KeyboardShortcutEngineActions } from
 import { useAppRefSync } from "./hooks/useAppRefSync";
 import { listen } from "@tauri-apps/api/event";
 import { useSessionOutputTrustListener } from "./hooks/useSessionOutputTrustListener";
+import { useSettingsModalDrag } from "./hooks/useSettingsModalDrag";
 import { useWorkspaceBootstrapFromStorage, useWorkspacePersistToStorage } from "./hooks/useWorkspaceLocalStorage";
 import { TerminalWorkspaceDock } from "./components/TerminalWorkspaceDock";
 import type {
@@ -469,8 +470,12 @@ export function App() {
     const persisted = window.localStorage.getItem(SETTINGS_OPEN_MODE_STORAGE_KEY);
     return persisted === "docked" || persisted === "modal" ? persisted : "modal";
   });
-  const [isSettingsDragging, setIsSettingsDragging] = useState<boolean>(false);
-  const [settingsModalPosition, setSettingsModalPosition] = useState<{ x: number; y: number } | null>(null);
+  const {
+    settingsModalRef,
+    settingsModalPosition,
+    isSettingsDragging,
+    onSettingsHeaderPointerDown: handleSettingsHeaderPointerDown,
+  } = useSettingsModalDrag({ isAppSettingsOpen, settingsOpenMode });
   const [activeAppSettingsTab, setActiveAppSettingsTab] = useState<AppSettingsTab>("ssh");
   const [workspaceSubTab, setWorkspaceSubTab] = useState<WorkspaceSubTab>("views");
   const [interfaceSubTab, setInterfaceSubTab] = useState<InterfaceSubTab>("appearance");
@@ -744,8 +749,6 @@ export function App() {
   const sidebarDragStartWidthRef = useRef<number>(SIDEBAR_DEFAULT_WIDTH);
   const splitNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const paneScrollAnchorsRef = useRef<Record<number, HTMLElement | null>>({});
-  const settingsModalRef = useRef<HTMLElement | null>(null);
-  const settingsDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const mobilePagerRef = useRef<HTMLDivElement | null>(null);
   const skipMobilePagerScrollRef = useRef(false);
   const nextSplitIdRef = useRef<number>(1);
@@ -2515,57 +2518,6 @@ export function App() {
   }, [proxmuxOpenWebConsolesInPane]);
   useWorkspacePersistToStorage(workspaceOrder, activeWorkspaceId, workspaceSnapshots);
   useEffect(() => {
-    if (!isAppSettingsOpen || settingsOpenMode !== "modal" || settingsModalPosition) {
-      return;
-    }
-    const modal = settingsModalRef.current;
-    const width = modal?.offsetWidth ?? 860;
-    const topMargin = 20;
-    const x = Math.max(8, Math.round((window.innerWidth - width) / 2));
-    const y = Math.max(topMargin, Math.round((window.innerHeight - Math.min(820, window.innerHeight - 40)) / 2));
-    setSettingsModalPosition({ x, y });
-  }, [isAppSettingsOpen, settingsModalPosition, settingsOpenMode]);
-  useEffect(() => {
-    if (!isSettingsDragging) {
-      return;
-    }
-    const onPointerMove = (event: PointerEvent) => {
-      const dragOffset = settingsDragOffsetRef.current;
-      const modal = settingsModalRef.current;
-      if (!dragOffset || !modal) {
-        return;
-      }
-      const modalWidth = modal.offsetWidth;
-      const modalHeight = modal.offsetHeight;
-      const nextX = Math.min(
-        Math.max(8, event.clientX - dragOffset.x),
-        Math.max(8, window.innerWidth - modalWidth - 8),
-      );
-      const nextY = Math.min(
-        Math.max(8, event.clientY - dragOffset.y),
-        Math.max(8, window.innerHeight - modalHeight - 8),
-      );
-      setSettingsModalPosition({ x: Math.round(nextX), y: Math.round(nextY) });
-    };
-    const onPointerUp = () => {
-      setIsSettingsDragging(false);
-      settingsDragOffsetRef.current = null;
-    };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-  }, [isSettingsDragging]);
-  useEffect(() => {
-    if (isAppSettingsOpen) {
-      return;
-    }
-    setIsSettingsDragging(false);
-    settingsDragOffsetRef.current = null;
-  }, [isAppSettingsOpen]);
-  useEffect(() => {
     const mq = window.matchMedia(MOBILE_STACKED_MEDIA);
     const apply = () => {
       setViewportStacked(mq.matches);
@@ -3127,29 +3079,6 @@ export function App() {
     };
     window.localStorage.setItem(KEYBOARD_SHORTCUTS_STORAGE_KEY, JSON.stringify(payload));
   }, [keyboardShortcutChords, keyboardLeaderChord]);
-
-  const handleSettingsHeaderPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      if (!isAppSettingsOpen || settingsOpenMode !== "modal") {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("button")) {
-        return;
-      }
-      const modal = settingsModalRef.current;
-      if (!modal) {
-        return;
-      }
-      const modalRect = modal.getBoundingClientRect();
-      settingsDragOffsetRef.current = {
-        x: event.clientX - modalRect.left,
-        y: event.clientY - modalRect.top,
-      };
-      setIsSettingsDragging(true);
-    },
-    [isAppSettingsOpen, settingsOpenMode],
-  );
 
   const createHost = async () => {
     setError("");

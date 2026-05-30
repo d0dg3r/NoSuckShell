@@ -263,13 +263,62 @@ jobs:
         working-directory: apps/desktop
         run: npx @tauri-apps/cli icon src-tauri/icons/icon-source-square.png --output src-tauri/icons
 
+      # Import Apple Developer ID certificate into a temporary keychain (macOS only).
+      # Requires repository secrets:
+      #   - APPLE_CERTIFICATE          base64-encoded `.p12` of the Developer ID Application cert
+      #   - APPLE_CERTIFICATE_PASSWORD password used when exporting the .p12
+      #   - APPLE_SIGNING_IDENTITY     full identity string, e.g. "Developer ID Application: Name (TEAMID)"
+      # Skipped (warns only) when secrets are missing so non-official forks can still build.
+      - name: Import Apple signing certificate
+        if: matrix.artifact_name == 'macos'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
+            echo "::warning::APPLE_CERTIFICATE secret is unset — skipping macOS code signing."
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
       # Embeds production Ed25519 verify key at compile time (see license.rs `option_env!`).
       # Repository secret: 64 hex chars (32-byte public key), same as desktop `NOSUCKSHELL_LICENSE_PUBKEY_HEX`.
       # If unset, binaries fall back to the public dev key (fine for forks; official releases should set the secret).
+      #
+      # Code signing / notarization secrets that Tauri reads automatically when present:
+      #   macOS    APPLE_SIGNING_IDENTITY              Developer ID Application identity string
+      #   macOS    APPLE_ID + APPLE_PASSWORD           App-Store-Connect account + app-specific password
+      #   macOS    APPLE_TEAM_ID                       Apple Developer team ID (e.g. ABCDE12345)
+      #   macOS    APPLE_API_KEY/...PATH/...ISSUER     Alternative to APPLE_ID for App-Store-Connect API
+      #   Windows  TAURI_WINDOWS_SIGN_COMMAND          Full sign command (e.g. AzureSignTool / signtool)
+      #
+      # All are optional. Tauri skips signing/notarization cleanly when the matching variables are unset
+      # (warns in the build log) so this workflow keeps producing usable binaries before certs land.
       - name: Build Tauri app bundles
         working-directory: apps/desktop
         env:
           NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_WINDOWS_SIGN_COMMAND: ${{ secrets.TAURI_WINDOWS_SIGN_COMMAND }}
         run: npm run tauri:build
 
       - name: Post-process Linux AppImage (strip bundled libpcre2-8)

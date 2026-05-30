@@ -188,10 +188,10 @@ Details: [docs/backup-security.md](docs/backup-security.md)
 
 GitHub releases are created by pushing a SemVer tag. Full checklist: [docs/releases.md](docs/releases.md). User-facing history: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-- Final: `vMAJOR.MINOR.PATCH` (example: `v0.2.1`, `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v0.3.6-beta.1`, `v1.2.4-rc.1`)
+- Final: `vMAJOR.MINOR.PATCH` (example: `v0.3.6`, `v1.2.3`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v0.3.7-beta.1`, `v1.2.4-rc.1`)
 
-**Current pre-release:** [`v0.3.6-beta.1`](https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1) — Linux terminal input latency improvements (see [CHANGELOG](docs/CHANGELOG.md)).
+**Current stable:** [`v0.3.6`](https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6) — first store-ready cut of the `0.3.x` line (see [CHANGELOG](docs/CHANGELOG.md)).
 
 **Before tagging**, use the same version string in:
 
@@ -202,8 +202,8 @@ GitHub releases are created by pushing a SemVer tag. Full checklist: [docs/relea
 The [release workflow](.github/workflows/release.yml) still overwrites those files from the tag at build time; keeping them aligned locally avoids drift while developing.
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.6
+git push origin v0.3.6
 ```
 
 If the workflow rejects the tag, use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-prerelease` (example: `v2.0.0` or `v2.0.0-rc.1`).
