@@ -1,9 +1,9 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { sendInput } from "../tauri-api";
 import { hasTauriTransformCallback } from "../features/tauri-runtime";
 import type { SessionTab, TrustPromptRequest } from "../features/session-model";
 import type { HostMetadataStore, SessionOutputEvent } from "../types";
+import { subscribeSessionHostKeyPrompt } from "../session-output-bridge";
 
 export function useSessionOutputTrustListener(params: {
   sessionsRef: MutableRefObject<SessionTab[]>;
@@ -18,12 +18,11 @@ export function useSessionOutputTrustListener(params: {
     if (!hasTauriTransformCallback()) {
       return;
     }
-    let unlisten: UnlistenFn | null = null;
-    void listen<SessionOutputEvent>("session-output", (event) => {
-      if (!event.payload.host_key_prompt) {
+    const handleHostKeyPrompt = (payload: SessionOutputEvent) => {
+      if (!payload.host_key_prompt) {
         return;
       }
-      const sessionId = event.payload.session_id;
+      const sessionId = payload.session_id;
       const session = sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
       if (session?.kind === "sshQuick" && quickConnectAutoTrustRef.current) {
         void sendInput(sessionId, "yes\n").catch((sendError: unknown) => setError(String(sendError)));
@@ -53,18 +52,8 @@ export function useSessionOutputTrustListener(params: {
         }
         return [...prev, { sessionId, hostLabel: promptHostLabel }];
       });
-    })
-      .then((fn) => {
-        unlisten = fn;
-      })
-      .catch(() => {
-        // Tauri event bridge can be temporarily unavailable during dev reload.
-      });
-
-    return () => {
-      if (unlisten) {
-        void unlisten();
-      }
     };
+
+    return subscribeSessionHostKeyPrompt(handleHostKeyPrompt);
   }, [metadataStoreRef, quickConnectAutoTrustRef, sessionsRef, setError, setTrustPromptQueue]);
 }

@@ -4,6 +4,9 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linux / Terminal** — Improved terminal input responsiveness: Backspace/Delete key repeat is no longer throttled; PTY output is batched per animation frame with cheaper scrollback updates; single-character input is coalesced before IPC; Rust `send_input`/`resize` no longer hold the global session map lock during blocking PTY I/O; duplicate `session-output` listeners consolidated into one bridge.
 ## [0.3.5] - 2026-04-08
 
 ### Added
