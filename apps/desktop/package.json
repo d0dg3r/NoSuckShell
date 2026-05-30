@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.3.5",
+  "version": "0.3.6-beta.1",
   "description": "Cross-platform SSH manager desktop app",
   "scripts": {
     "postinstall": "patch-package",
@@ -29,7 +29,7 @@
     "dompurify": "^3.3.3",
     "monaco-editor": "^0.55.1",
     "react": "^19.2.5",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.5"
   },
   "overrides": {
     "dompurify": "^3.3.3"
@@ -39,15 +39,15 @@
     "@tauri-apps/cli": "^2.10.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^25.5.2",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "esbuild": "^0.28.0",
-    "jsdom": "^29.0.1",
+    "jsdom": "^29.0.2",
     "patch-package": "^8.0.1",
     "typescript": "^6.0.2",
-    "vite": "^8.0.5",
+    "vite": "^8.0.8",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vitest": "^4.1.2"
   }

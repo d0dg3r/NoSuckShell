@@ -24,64 +24,48 @@ import type {
 } from "./types";
 import type { ProxmoxStandalonePayload } from "./features/proxmox-standalone-payload";
 
-const sendInputQueueBySession = new Map<string, Array<{ data: string; resolves: Array<() => void>; rejects: Array<(reason?: unknown) => void> }>>();
-const sendInputDrainingSessions = new Set<string>();
+import {
+  createSessionInputQueueState,
+  drainSessionInputQueueOnce,
+  enqueueSessionInputEntry,
+  scheduleSessionInputDrain,
+} from "./features/session-input-queue";
 
-const isSingleChar = (data: string): boolean => data.length === 1;
-const enqueueSessionInput = (
+const sessionInputQueueState = createSessionInputQueueState();
+
+function drainSessionInputQueue(sessionId: string): void {
+  if (sessionInputQueueState.drainingSessions.has(sessionId)) {
+    return;
+  }
+  sessionInputQueueState.drainingSessions.add(sessionId);
+  void (async () => {
+    try {
+      while (
+        await drainSessionInputQueueOnce(sessionInputQueueState, sessionId, (targetSessionId, data) =>
+          invoke("send_input", { sessionId: targetSessionId, data }),
+        )
+      ) {
+        // drain until empty
+      }
+    } finally {
+      sessionInputQueueState.drainingSessions.delete(sessionId);
+    }
+  })();
+}
+
+function enqueueSessionInput(
   sessionId: string,
   data: string,
   resolve: () => void,
   reject: (reason?: unknown) => void,
-) => {
-  const queue = sendInputQueueBySession.get(sessionId) ?? [];
-  const lastEntry = queue[queue.length - 1];
-  const canCoalesce =
-    Boolean(lastEntry) &&
-    isSingleChar(data) &&
-    isSingleChar(lastEntry.data) &&
-    lastEntry.data[lastEntry.data.length - 1] === data;
-  if (canCoalesce) {
-    lastEntry.data += data;
-    lastEntry.resolves.push(resolve);
-    lastEntry.rejects.push(reject);
-  } else {
-    queue.push({ data, resolves: [resolve], rejects: [reject] });
-  }
-  sendInputQueueBySession.set(sessionId, queue);
-};
-
-const drainSessionInputQueue = (sessionId: string) => {
-  if (sendInputDrainingSessions.has(sessionId)) {
-    return;
-  }
-  sendInputDrainingSessions.add(sessionId);
-  void (async () => {
-    try {
-      while (true) {
-        const queue = sendInputQueueBySession.get(sessionId) ?? [];
-        const entry = queue.shift();
-        if (!entry) {
-          sendInputQueueBySession.set(sessionId, queue);
-          break;
-        }
-        sendInputQueueBySession.set(sessionId, queue);
-        try {
-          await invoke("send_input", { sessionId, data: entry.data });
-          for (const resolver of entry.resolves) {
-            resolver();
-          }
-        } catch (error) {
-          for (const rejecter of entry.rejects) {
-            rejecter(error);
-          }
-        }
-      }
-    } finally {
-      sendInputDrainingSessions.delete(sessionId);
-    }
-  })();
-};
+): void {
+  const queue = sessionInputQueueState.queuesBySession.get(sessionId) ?? [];
+  sessionInputQueueState.queuesBySession.set(
+    sessionId,
+    enqueueSessionInputEntry(queue, data, resolve, reject),
+  );
+  scheduleSessionInputDrain(sessionInputQueueState, sessionId, drainSessionInputQueue);
+}
 
 export const listHosts = (): Promise<HostConfig[]> => invoke("list_hosts");
 

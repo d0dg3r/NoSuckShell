@@ -4,6 +4,13 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { parseOsc7WorkingDirectoryPayload } from "../features/terminal-osc7-path";
 import { sanitizeTerminalPaste } from "../features/terminal-paste-sanitize";
+import {
+  ENTER_REPEAT_MIN_INTERVAL_MS,
+  shouldThrottleEnterRepeat,
+  shouldThrottleGenericKeyRepeat,
+} from "../features/terminal-key-repeat";
+import { createTerminalOutputBatcher } from "../features/terminal-output-batch";
+import { appendSessionScrollback, getSessionScrollback } from "../features/terminal-scrollback-buffer";
 import { readTerminalMiddleClickPasteText, resizeSession, writeTerminalSelectionClipboard } from "../tauri-api";
 import { subscribeSessionOutput } from "../session-output-bridge";
 import type { SessionOutputEvent } from "../types";
@@ -17,12 +24,10 @@ type Props = {
   fontFamily: string;
 };
 
-const sessionBuffers = new Map<string, string>();
-const MAX_BUFFER_CHARS = 250_000;
-const ENTER_REPEAT_MIN_INTERVAL_MS = 45;
 const GENERIC_REPEAT_MIN_INTERVAL_MS = 45;
 /** Debounce wl-copy/xclip while the user is still dragging a selection. */
 const SELECTION_CLIPBOARD_DEBOUNCE_MS = 120;
+
 export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectoryChange, fontSize, fontFamily }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +92,13 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     if (terminalHostRef.current) {
       terminal.open(terminalHostRef.current);
       fitAddon.fit();
+      // Sync pty to xterm as soon as the pane has real dimensions. Without this, the
+      // backend keeps the Rust default (e.g. 120×30) until the debounced
+      // scheduleFitAndResize() runs, which can be hundreds of ms late on first
+      // paint; that mismatch plus slow first-shell startup feels like "keys appear
+      // in one burst" after the first prompt.
+      lastResizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+      void resizeSession(sessionId, terminal.cols, terminal.rows);
     }
 
     const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
@@ -101,7 +113,7 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
       return true;
     });
 
-    const buffered = sessionBuffers.get(sessionId) ?? "";
+    const buffered = getSessionScrollback(sessionId);
     if (buffered.length > 0) {
       terminal.write(buffered);
     } else {
@@ -162,22 +174,26 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
         pasteTerminalFromClipboard();
         return false;
       }
-      if (event.type === "keydown" && event.repeat && event.key !== "Enter") {
-        const keyId = `${event.code}:${event.key}`;
-        const now = Date.now();
-        const lastAt = lastRepeatKeydownAtByKeyRef.current.get(keyId) ?? null;
-        if (lastAt !== null && now - lastAt < GENERIC_REPEAT_MIN_INTERVAL_MS) {
-          return false;
-        }
-        lastRepeatKeydownAtByKeyRef.current.set(keyId, now);
+      if (
+        shouldThrottleGenericKeyRepeat(
+          event,
+          lastRepeatKeydownAtByKeyRef.current,
+          Date.now(),
+          GENERIC_REPEAT_MIN_INTERVAL_MS,
+        )
+      ) {
+        return false;
       }
       if (event.key === "Enter" && event.type === "keydown") {
         const now = Date.now();
-        const previousManualSendAt = lastManualEnterSendAtRef.current;
-        const sincePreviousManualSend = previousManualSendAt === null ? null : now - previousManualSendAt;
-        const isThrottledRepeat =
-          event.repeat && sincePreviousManualSend !== null && sincePreviousManualSend < ENTER_REPEAT_MIN_INTERVAL_MS;
-        if (isThrottledRepeat) {
+        if (
+          shouldThrottleEnterRepeat(
+            event,
+            lastManualEnterSendAtRef.current,
+            now,
+            ENTER_REPEAT_MIN_INTERVAL_MS,
+          )
+        ) {
           return false;
         }
         enterKeyIsDownRef.current = true;
@@ -208,13 +224,20 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
       }, SELECTION_CLIPBOARD_DEBOUNCE_MS);
     });
 
-    const unsubscribeOutput = subscribeSessionOutput(sessionId, (payload: SessionOutputEvent) => {
-      const existing = sessionBuffers.get(sessionId) ?? "";
-      const next = (existing + payload.chunk).slice(-MAX_BUFFER_CHARS);
-      sessionBuffers.set(sessionId, next);
-      terminal.write(payload.chunk);
-      if (payload.host_key_prompt) {
+    const outputBatcher = createTerminalOutputBatcher(
+      (combined) => {
+        terminal.write(combined);
+        appendSessionScrollback(sessionId, combined);
+      },
+      () => {
         terminal.writeln("\r\n[Known host prompt detected. Press 'Trust host'.]");
+      },
+    );
+
+    const unsubscribeOutput = subscribeSessionOutput(sessionId, (payload: SessionOutputEvent) => {
+      outputBatcher.enqueue(payload.chunk);
+      if (payload.host_key_prompt) {
+        outputBatcher.enqueueHostKeyNotice();
       }
     });
 
@@ -282,17 +305,32 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     window.addEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
     window.addEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
     scheduleFitAndResize();
+    // Auto-focus on mount so the first keystroke after a session is attached lands in xterm
+    // (avoids the perceived "delay" where the user has to click into the pane first).
+    window.requestAnimationFrame(() => {
+      if (!disposed) {
+        terminal.focus();
+      }
+    });
     const fontFaceSet = typeof document !== "undefined" ? document.fonts : null;
     if (fontFaceSet) {
       void fontFaceSet.ready.then(() => {
-        if (!disposed) {
-          scheduleFitAndResize();
+        if (disposed) {
+          return;
         }
+        // Defer a frame so font swap + layout are settled without blocking
+        // immediately after the ready callback (improves first-typing feel).
+        requestAnimationFrame(() => {
+          if (!disposed) {
+            scheduleFitAndResize();
+          }
+        });
       });
     }
 
     return () => {
       disposed = true;
+      outputBatcher.dispose();
       if (resizeObserver) {
         resizeObserver.disconnect();
       }

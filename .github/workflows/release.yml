@@ -360,7 +360,7 @@ jobs:
           path: marketing-screenshots-artifact
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate-tag.outputs.tag }}
           name: NoSuckShell ${{ needs.validate-tag.outputs.tag }}

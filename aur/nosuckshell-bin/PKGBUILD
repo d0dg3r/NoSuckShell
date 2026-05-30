@@ -20,9 +20,12 @@ package() {
   ar x "${pkgname}-${pkgver}.deb"
   tar xf data.tar.* -C "${pkgdir}"
 
-  # Match CI / Arch repackage: lowercase binary name
+  # Match CI / Arch: `nosuckshell` on PATH. The .deb may use NoSuckShell (older) or
+  # src-tauri (Tauri’s default from Cargo).
   if [[ -f "${pkgdir}/usr/bin/NoSuckShell" && ! -f "${pkgdir}/usr/bin/nosuckshell" ]]; then
     mv "${pkgdir}/usr/bin/NoSuckShell" "${pkgdir}/usr/bin/nosuckshell"
+  elif [[ -f "${pkgdir}/usr/bin/src-tauri" && ! -f "${pkgdir}/usr/bin/nosuckshell" ]]; then
+    mv "${pkgdir}/usr/bin/src-tauri" "${pkgdir}/usr/bin/nosuckshell"
   fi
 
   # Align .desktop launcher with /usr/bin/nosuckshell

@@ -4,6 +4,19 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+### Added
+
+- **Local Arch build** — `scripts/build-local-arch.sh` repacks a locally built Tauri `.deb` as `nosuckshell-local` for `sudo pacman -U` (mirrors `nosuckshell-bin`; outputs under gitignored `arch/build/`).
+
+### Changed
+
+- **Local packaging** — `build-local-flatpak.sh` and the Arch script request `tauri build --bundles deb` only (skips AppImage/linuxdeploy on rolling distros). **AUR** `nosuckshell-bin` PKGBUILD also renames a `src-tauri` binary when the `.deb` ships Tauri’s default Cargo name.
+- **Workspace** — Slightly tighter split-pane chrome and dock padding so terminal panes gain usable area.
+
+### Fixed
+
+- **Terminal** — Terminal pane auto-focuses on mount and syncs PTY size immediately after the first fit so the first keystroke after connect (or after switching to the **1 Pane** layout preset) reaches the shell without an extra click or a burst of delayed input.
+
 ## [0.3.5] - 2026-04-08
 
 ### Added
@@ -302,4 +315,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.3
 [v0.3.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.4
 [v0.3.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.5
+[v0.3.6-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1
 

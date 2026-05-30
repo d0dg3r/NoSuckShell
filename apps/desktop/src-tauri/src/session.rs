@@ -328,15 +328,17 @@ impl SessionState {
     }
 
     pub fn send_input(&self, session_id: &str, data: &str) -> anyhow::Result<()> {
-        let sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| anyhow::anyhow!("session lock poisoned"))?;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
-        let mut writer = session
-            .writer
+        let writer = {
+            let sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| anyhow::anyhow!("session lock poisoned"))?;
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
+            session.writer.clone()
+        };
+        let mut writer = writer
             .lock()
             .map_err(|_| anyhow::anyhow!("writer lock poisoned"))?;
         writer.write_all(data.as_bytes())?;
@@ -345,15 +347,17 @@ impl SessionState {
     }
 
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
-        let sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| anyhow::anyhow!("session lock poisoned"))?;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
-        let master = session
-            .master
+        let master = {
+            let sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| anyhow::anyhow!("session lock poisoned"))?;
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown session"))?;
+            session.master.clone()
+        };
+        let master = master
             .lock()
             .map_err(|_| anyhow::anyhow!("master lock poisoned"))?;
         master
