@@ -18,3 +18,6 @@ flatpak/stage/
 flatpak/build-dir/
 flatpak/repo-local/
 flatpak/*.flatpak
+
+# Local Arch repack (scripts/build-local-arch.sh)
+arch/

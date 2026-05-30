@@ -1,6 +1,6 @@
 # Local Flatpak (developer)
 
-This folder holds a **Flatpak manifest** that repackages the **Tauri `.deb`** from a normal `npm run tauri:build`. It is intended for **local installs** (for example `flatpak --user install --bundle …`) and is **not** the same pipeline as a future [Flathub](https://flathub.org/) submission.
+This folder holds a **Flatpak manifest** that repackages the **Tauri `.deb`** produced by `scripts/build-local-flatpak.sh` (which runs `tauri build --bundles deb`). It is intended for **local installs** (for example `flatpak --user install --bundle …`) and is **not** the same pipeline as a future [Flathub](https://flathub.org/) submission.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ bash scripts/build-local-flatpak.sh
 
 Options:
 
-- `NO_BUILD=1` — skip `npm run tauri:build` if a `.deb` already exists under `target/release/bundle/deb/`.
+- `NO_BUILD=1` — skip the build step if a `.deb` already exists under `target/release/bundle/deb/`.
 - `COPY_TO="$HOME/Applications"` — copy the generated `.flatpak` bundle to that directory after `build-bundle` (directory is created if missing). Same for `~/applications` if you prefer a lowercase folder.
 
 Install the bundle for your user:
