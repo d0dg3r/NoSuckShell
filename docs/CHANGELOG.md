@@ -4,6 +4,19 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.7-beta.1] - 2026-05-30
+
+**Pre-release.** Re-cuts the `0.3.6` market-readiness pass after the macOS bundler failed to publish that tag. Binaries are published after you push tag [`v0.3.7-beta.1`][v0.3.7-beta.1] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Fixed
+
+- **Release / macOS** — Tauri's bundler treated an *empty* `APPLE_SIGNING_IDENTITY` env var as "sign with the empty identity" and aborted with `error: The specified item could not be found in the keychain` whenever the corresponding GitHub Secret was unset. The release workflow now exports Apple/Windows signing env vars to `$GITHUB_ENV` only when their secrets are non-empty, so the bundler skips signing cleanly on forks and releases that have not configured certificates yet (matching prior `0.3.x` behavior).
+
+### Notes
+
+- This pre-release ships unsigned binaries on macOS and Windows because no signing secrets are configured yet.
+- The full `v0.3.6` content is included as well; see the `[0.3.6]` section below for the underlying changes (privacy fix, CSP, expanded CI gates, Flathub-quality AppStream metadata, etc.).
+
 ## [0.3.6] - 2026-05-30
 
 **Stable release.** First store-ready cut of the `0.3.x` line: privacy fix in SFTP, expanded CI gates, restrictive CSP, and signing/notarization plumbing. Binaries are published after you push tag [`v0.3.6`][v0.3.6] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -348,4 +361,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.5
 [v0.3.6-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1
 [v0.3.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6
+[v0.3.7-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.1
 

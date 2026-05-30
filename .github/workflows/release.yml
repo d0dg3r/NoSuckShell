@@ -294,31 +294,57 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
           security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
-      # Embeds production Ed25519 verify key at compile time (see license.rs `option_env!`).
-      # Repository secret: 64 hex chars (32-byte public key), same as desktop `NOSUCKSHELL_LICENSE_PUBKEY_HEX`.
-      # If unset, binaries fall back to the public dev key (fine for forks; official releases should set the secret).
-      #
-      # Code signing / notarization secrets that Tauri reads automatically when present:
+      # Code signing / notarization env vars that Tauri reads automatically when present:
       #   macOS    APPLE_SIGNING_IDENTITY              Developer ID Application identity string
       #   macOS    APPLE_ID + APPLE_PASSWORD           App-Store-Connect account + app-specific password
       #   macOS    APPLE_TEAM_ID                       Apple Developer team ID (e.g. ABCDE12345)
       #   macOS    APPLE_API_KEY/...PATH/...ISSUER     Alternative to APPLE_ID for App-Store-Connect API
       #   Windows  TAURI_WINDOWS_SIGN_COMMAND          Full sign command (e.g. AzureSignTool / signtool)
       #
-      # All are optional. Tauri skips signing/notarization cleanly when the matching variables are unset
-      # (warns in the build log) so this workflow keeps producing usable binaries before certs land.
+      # Tauri's bundler treats an *empty* APPLE_SIGNING_IDENTITY as "sign with the empty identity"
+      # rather than "skip signing", so we must not export those variables at all when the secret is
+      # unset. This step writes them to $GITHUB_ENV only when their secrets are non-empty so the
+      # bundler skips signing cleanly on forks / releases without certificates configured.
+      - name: Configure code-signing env (only when secrets are present)
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_SECRET: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH_SECRET: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_API_ISSUER_SECRET: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_WINDOWS_SIGN_COMMAND_SECRET: ${{ secrets.TAURI_WINDOWS_SIGN_COMMAND }}
+          ARTIFACT_NAME: ${{ matrix.artifact_name }}
+        run: |
+          set -euo pipefail
+          propagate() {
+            local name="$1" value="${2:-}"
+            if [[ -n "$value" ]]; then
+              echo "$name=$value" >> "$GITHUB_ENV"
+            fi
+          }
+          if [[ "$ARTIFACT_NAME" == "macos" ]]; then
+            propagate APPLE_SIGNING_IDENTITY "${APPLE_SIGNING_IDENTITY_SECRET:-}"
+            propagate APPLE_ID                "${APPLE_ID_SECRET:-}"
+            propagate APPLE_PASSWORD          "${APPLE_PASSWORD_SECRET:-}"
+            propagate APPLE_TEAM_ID           "${APPLE_TEAM_ID_SECRET:-}"
+            propagate APPLE_API_KEY           "${APPLE_API_KEY_SECRET:-}"
+            propagate APPLE_API_KEY_PATH      "${APPLE_API_KEY_PATH_SECRET:-}"
+            propagate APPLE_API_ISSUER        "${APPLE_API_ISSUER_SECRET:-}"
+          fi
+          if [[ "$ARTIFACT_NAME" == "windows" ]]; then
+            propagate TAURI_WINDOWS_SIGN_COMMAND "${TAURI_WINDOWS_SIGN_COMMAND_SECRET:-}"
+          fi
+
+      # Embeds production Ed25519 verify key at compile time (see license.rs `option_env!`).
+      # Repository secret: 64 hex chars (32-byte public key), same as desktop `NOSUCKSHELL_LICENSE_PUBKEY_HEX`.
+      # If unset, binaries fall back to the public dev key (fine for forks; official releases should set the secret).
       - name: Build Tauri app bundles
         working-directory: apps/desktop
         env:
           NOSUCKSHELL_LICENSE_PUBKEY_HEX: ${{ secrets.NOSUCKSHELL_LICENSE_PUBKEY_HEX }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          TAURI_WINDOWS_SIGN_COMMAND: ${{ secrets.TAURI_WINDOWS_SIGN_COMMAND }}
         run: npm run tauri:build
 
       - name: Post-process Linux AppImage (strip bundled libpcre2-8)
