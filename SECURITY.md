@@ -84,7 +84,7 @@ The app may process **highly sensitive** data. You should:
 
 ## Technical notes (transparency)
 
-- Tauri config currently sets **`csp: null`** for the webview — this affects **Content Security Policy** for the embedded frontend. Consult the [Tauri documentation](https://v2.tauri.app/) and the source when assessing impact.
+- The Tauri webview enforces a **Content Security Policy** (see `app.security.csp` in [`apps/desktop/src-tauri/tauri.conf.json`](apps/desktop/src-tauri/tauri.conf.json)). It blocks inline scripts, restricts `object-src` to `'none'`, and limits `base-uri`/`form-action` to `'self'`. It still allows arbitrary `https:`/`http:` for `frame-src`/`img-src`/`connect-src` because the app embeds Proxmox Web UIs and connects to user-configured Proxmox WebSocket consoles (often via self-signed TLS). React's inline `style={{...}}` props require `style-src 'unsafe-inline'`. Tightening these to the minimum set per session is tracked as a follow-up.
 - **Dependencies** (Rust, npm) have their own security posture; staying current and running `cargo audit` / `npm audit` is part of responsible use.
 
 ---

@@ -50,6 +50,11 @@ cargo check
 There is **no ESLint/Prettier** in the repo today; **`tsc` (via `npm run build`) and `cargo check`** are the baseline. If formatters are added later, follow the repo configuration.
 A validation script is available at `.agents/skills/nosuckshell_ops/scripts/validate_project.sh` to run these checks in one go.
 
+**CI gates** (`.github/workflows/ci.yml`) on every PR and push:
+
+- **Hard gates (must pass):** `npm run build` (tsc + vite), `npm test` (Vitest), `cargo check --all-targets`, `cargo test`, Playwright e2e (`npm run test:e2e`).
+- **Advisory (does not block merge yet):** `cargo fmt --all --check` and `cargo clippy --all-targets`. These are scheduled to become hard gates after a dedicated formatting/clippy cleanup pass; new code should still pass them.
+
 **Releases:** Before tagging, follow the **Release preparation** checklist in [`.agents/skills/nosuckshell_ops/SKILL.md`](../.agents/skills/nosuckshell_ops/SKILL.md) (aligned versions, changelog, lockfiles, docs).
 
 ## AI-assisted editors and agents

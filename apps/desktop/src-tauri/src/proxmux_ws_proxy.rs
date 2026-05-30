@@ -111,7 +111,12 @@ async fn proxy_one_browser_connection(
             let err = http::Response::builder()
                 .status(http::StatusCode::FORBIDDEN)
                 .body(Some("Forbidden: invalid proxy token".to_string()))
-                .expect("response");
+                .unwrap_or_else(|_| {
+                    // The body above is a static String; this branch is unreachable in practice.
+                    let mut fallback = http::Response::new(None);
+                    *fallback.status_mut() = http::StatusCode::FORBIDDEN;
+                    fallback
+                });
             return Err(err);
         }
         Ok(response)
@@ -232,7 +237,9 @@ pub async fn proxmux_ws_proxy_start(
                         auth,
                         cookie,
                     ));
-                    let mut guard = conn_handles_for_loop.lock().expect("conn handles lock");
+                    let mut guard = conn_handles_for_loop
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     guard.retain(|h| !h.is_finished());
                     guard.push(conn_handle);
                 }
@@ -246,7 +253,7 @@ pub async fn proxmux_ws_proxy_start(
 
     proxy_tasks()
         .lock()
-        .expect("proxy map lock")
+        .unwrap_or_else(|e| e.into_inner())
         .insert(proxy_id.clone(), ProxyEntry { accept_loop, conn_handles });
 
     Ok(ProxmuxWsProxyStartResult {
@@ -261,9 +268,18 @@ pub fn proxmux_ws_proxy_stop(proxy_id: String) -> Result<(), String> {
     if id.is_empty() {
         return Err("proxyId is required".to_string());
     }
-    if let Some(entry) = proxy_tasks().lock().expect("proxy map lock").remove(&id) {
+    let removed = proxy_tasks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
+    if let Some(entry) = removed {
         entry.accept_loop.abort();
-        for h in entry.conn_handles.lock().expect("conn handles lock").drain(..) {
+        for h in entry
+            .conn_handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+        {
             h.abort();
         }
     }

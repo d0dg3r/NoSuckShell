@@ -1,19 +1,105 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>dev.nosuckshell.desktop</id>
-  <metadata_license>MIT</metadata_license>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
   <name>NoSuckShell</name>
-  <summary>Cross-platform SSH manager</summary>
+  <summary>Cross-platform SSH manager with split workspaces and file panes</summary>
   <description>
-    <p>NoSuckShell is a desktop SSH manager built with Tauri. This Flatpak is produced locally from a release-style .deb produced by Tauri; it is not the same artifact as a future Flathub build.</p>
+    <p>
+      NoSuckShell is a desktop SSH manager for engineers who maintain a lot of servers.
+      It works with your existing OpenSSH configuration (~/.ssh/config, identity files,
+      known_hosts) and adds a split workspace, layout profiles, encrypted backups, and
+      a file browser that speaks SFTP.
+    </p>
+    <p>Highlights:</p>
+    <ul>
+      <li>Tabbed and split terminal sessions with broadcast input and per-pane focus.</li>
+      <li>Layout profiles map a saved split geometry to specific hosts and sessions.</li>
+      <li>Local + remote file panes with copy/move, archive, edit, and progress dialogs.</li>
+      <li>Encrypted backup format (Argon2id + ChaCha20-Poly1305) for the host store.</li>
+      <li>Optional Proxmox VE plugin (PROXMUX) for cluster overview and consoles.</li>
+      <li>Offline license verification (Ed25519) for paid plugins; the core app is free.</li>
+    </ul>
+    <p>
+      Sessions and key material live locally on your device — there is no project-operated
+      cloud. See the bundled Help and the in-app Settings for data locations and security
+      details.
+    </p>
   </description>
   <url type="homepage">https://github.com/d0dg3r/NoSuckShell</url>
   <url type="bugtracker">https://github.com/d0dg3r/NoSuckShell/issues</url>
+  <url type="vcs-browser">https://github.com/d0dg3r/NoSuckShell</url>
+  <url type="help">https://github.com/d0dg3r/NoSuckShell/blob/main/README.md</url>
+  <url type="contact">https://github.com/d0dg3r/NoSuckShell/issues/new</url>
   <developer_name>NoSuckShell contributors</developer_name>
-  <content_rating type="oars-1.1"/>
+  <developer id="dev.nosuckshell">
+    <name>NoSuckShell contributors</name>
+  </developer>
   <launchable type="desktop-id">dev.nosuckshell.desktop.desktop</launchable>
+  <categories>
+    <category>Network</category>
+    <category>Utility</category>
+    <category>RemoteAccess</category>
+    <category>System</category>
+  </categories>
+  <keywords>
+    <keyword>ssh</keyword>
+    <keyword>sftp</keyword>
+    <keyword>terminal</keyword>
+    <keyword>remote</keyword>
+    <keyword>proxmox</keyword>
+    <keyword>devops</keyword>
+  </keywords>
+  <provides>
+    <binary>nosuckshell</binary>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Split workspace with multiple SSH sessions</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/01-main.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Side-by-side terminals share keystrokes via broadcast mode</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/02-split.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Layout profiles apply saved geometries to specific hosts</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/03-layout-profiles.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Quick-connect launches an ad-hoc SSH session without a persisted host</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/04-quick-connect.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Encrypted backup of the host store, exportable to a file</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/05-backup.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Tag and group hosts; pin favorites in the sidebar</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/06-organization.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Broadcast mode mirrors input to selected sessions</caption>
+      <image>https://raw.githubusercontent.com/d0dg3r/NoSuckShell/main/docs/media/screenshots/flathub/07-broadcast.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
   <releases>
+    <release version="0.3.6" date="2026-05-30"/>
+    <release version="0.3.6-beta.1" date="2026-04-15"/>
+    <release version="0.3.5" date="2026-04-08"/>
+    <release version="0.3.4" date="2026-04-07"/>
     <release version="0.3.3" date="2026-04-07"/>
     <release version="0.3.2" date="2026-03-27"/>
+    <release version="0.3.1" date="2026-03-26"/>
+    <release version="0.3.0" date="2026-03-26"/>
   </releases>
 </component>

@@ -222,6 +222,9 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
     >
       <section
         ref={settingsSectionRef}
+        role="dialog"
+        aria-modal={settingsOpenMode === "modal" ? "true" : undefined}
+        aria-labelledby="app-settings-title"
         className={`app-settings-modal panel ${settingsOpenMode === "docked" ? "app-settings-modal-docked" : ""}${
           isSettingsDragging ? " is-dragging" : ""
         }`}
@@ -236,7 +239,7 @@ export function AppSettingsPanel(props: AppSettingsPanelProps) {
           className={`panel-header app-settings-header ${settingsOpenMode === "modal" ? "is-draggable" : ""}`}
           onPointerDown={onSettingsHeaderPointerDown}
         >
-          <h2>App settings</h2>
+          <h2 id="app-settings-title">App settings</h2>
           <div className="app-settings-header-actions">
             <div className="app-settings-mode-switch" role="group" aria-label="Settings display mode">
               <button

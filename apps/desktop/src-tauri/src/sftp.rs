@@ -1,12 +1,11 @@
 //! SFTP directory listing over direct TCP (libssh2). ProxyJump / ProxyCommand are not supported yet.
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use crate::quick_ssh::{normalize_quick_ssh_request, QuickSshSessionRequest};
+use crate::quick_ssh::{QuickSshSessionRequest, normalize_quick_ssh_request};
 use crate::secure_store::resolve_host_config_for_session;
+use crate::sftp_transfer_ops::ensure_registered;
 use crate::ssh_config::HostConfig;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
-use crate::sftp_transfer_ops::ensure_registered;
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -17,26 +16,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Emitter};
-
-// #region agent log
-fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
-    const LOG_PATH: &str = "/home/joe/Development/devops-geek/NoSuckShell/.cursor/debug-3b7030.log";
-    let line = serde_json::json!({
-        "sessionId": "3b7030",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-    });
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(LOG_PATH) {
-        let _ = writeln!(f, "{}", line);
-    }
-}
-// #endregion
+use uuid::Uuid;
 
 /// Cap in-memory upload size (remote file browser transfer).
 const MAX_UPLOAD_BYTES: u64 = 50 * 1024 * 1024;
@@ -124,7 +104,13 @@ fn uid_to_name(uid: u32) -> String {
     let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
     let mut result: *mut libc::passwd = std::ptr::null_mut();
     let rc = unsafe {
-        libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), &mut result)
+        libc::getpwuid_r(
+            uid,
+            &mut pwd,
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
     };
     if rc == 0 && !result.is_null() {
         if let Ok(name) = unsafe { CStr::from_ptr(pwd.pw_name) }.to_str() {
@@ -141,7 +127,13 @@ fn gid_to_name(gid: u32) -> String {
     let mut grp: libc::group = unsafe { std::mem::zeroed() };
     let mut result: *mut libc::group = std::ptr::null_mut();
     let rc = unsafe {
-        libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr() as *mut libc::c_char, buf.len(), &mut result)
+        libc::getgrgid_r(
+            gid,
+            &mut grp,
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
     };
     if rc == 0 && !result.is_null() {
         if let Ok(name) = unsafe { CStr::from_ptr(grp.gr_name) }.to_str() {
@@ -284,7 +276,11 @@ pub(crate) fn normalize_remote_path(raw: &str) -> Result<String, String> {
 }
 
 /// Host name variants to try against OpenSSH `known_hosts` (order matters).
-fn known_hosts_check_candidates(host_name: &str, host_alias: &str, connected_ip: &str) -> Vec<String> {
+fn known_hosts_check_candidates(
+    host_name: &str,
+    host_alias: &str,
+    connected_ip: &str,
+) -> Vec<String> {
     let hn = host_name.trim().to_string();
     let al = host_alias.trim().to_string();
     let ip = connected_ip.trim().to_string();
@@ -420,7 +416,11 @@ fn known_host_pattern_matches_candidate(pattern: &str, candidate: &str, port: u1
     false
 }
 
-fn known_hosts_entry_applies_to_candidates(host_field: &str, candidates: &[String], port: u16) -> bool {
+fn known_hosts_entry_applies_to_candidates(
+    host_field: &str,
+    candidates: &[String],
+    port: u16,
+) -> bool {
     for part in host_field.split(',') {
         let part = part.trim();
         if part.is_empty() {
@@ -514,7 +514,12 @@ fn openssh_known_hosts_line_raw_key(line: &str) -> Option<Vec<u8>> {
 }
 
 /// Resolves hashed host lines the same way OpenSSH does (`ssh-keygen -F`), then compares raw keys.
-fn try_ssh_keygen_user_known_hosts_match(kh_path: &Path, candidates: &[String], port: u16, session_key: &[u8]) -> bool {
+fn try_ssh_keygen_user_known_hosts_match(
+    kh_path: &Path,
+    candidates: &[String],
+    port: u16,
+    session_key: &[u8],
+) -> bool {
     if !kh_path.is_file() {
         return false;
     }
@@ -555,70 +560,23 @@ fn verify_known_host(
     let Some((key_data, key_type)) = sess.host_key() else {
         return Err("Server sent no host key.".to_string());
     };
-    let mut known_hosts = sess.known_hosts().map_err(|e| format!("known_hosts: {e}"))?;
+    let mut known_hosts = sess
+        .known_hosts()
+        .map_err(|e| format!("known_hosts: {e}"))?;
     load_known_hosts_for_verify(&mut known_hosts);
     let host_to_check = host_name.trim();
     let candidates = known_hosts_check_candidates(host_name, host_alias, connected_peer_ip);
     let mut mismatch_labels: Vec<String> = Vec::new();
-    let kh_path_str = effective_known_hosts_path().to_string_lossy().into_owned();
-    let fp = sha256_fingerprint_raw(key_data);
-
-    // #region agent log
-    let mut check_rows: Vec<serde_json::Value> = Vec::new();
-    // #endregion
-
     for name in &candidates {
         let res = known_hosts.check_port(name.as_str(), port, key_data);
-        // #region agent log
-        check_rows.push(serde_json::json!({
-            "candidate": name,
-            "result": match res {
-                ssh2::CheckResult::Match => "Match",
-                ssh2::CheckResult::Mismatch => "Mismatch",
-                ssh2::CheckResult::Failure => "Failure",
-                ssh2::CheckResult::NotFound => "NotFound",
-            },
-        }));
-        // #endregion
         match res {
             ssh2::CheckResult::Match => {
-                // #region agent log
-                agent_debug_log(
-                    "H1",
-                    "sftp.rs:verify_known_host",
-                    "host key check outcome",
-                    serde_json::json!({
-                        "outcome": "ok_match",
-                        "matchedCandidate": name,
-                        "hostName": host_name,
-                        "hostAlias": host_alias,
-                        "port": port,
-                        "connectedPeerIp": connected_peer_ip,
-                        "knownHostsPath": kh_path_str,
-                        "serverKeySha256": fp,
-                        "allChecks": check_rows,
-                    }),
-                );
-                // #endregion
                 return Ok(());
             }
             ssh2::CheckResult::Mismatch => {
                 mismatch_labels.push(name.clone());
             }
             ssh2::CheckResult::Failure => {
-                // #region agent log
-                agent_debug_log(
-                    "H5",
-                    "sftp.rs:verify_known_host",
-                    "host key check failure",
-                    serde_json::json!({
-                        "hostName": host_name,
-                        "hostAlias": host_alias,
-                        "port": port,
-                        "allChecks": check_rows,
-                    }),
-                );
-                // #endregion
                 return Err("Host key verification failed.".to_string());
             }
             ssh2::CheckResult::NotFound => {}
@@ -627,72 +585,17 @@ fn verify_known_host(
 
     if !mismatch_labels.is_empty() {
         if try_multi_type_known_hosts_match(&known_hosts, &candidates, port, key_data)? {
-            // #region agent log
-            agent_debug_log(
-                "H1",
-                "sftp.rs:verify_known_host",
-                "host key check outcome",
-                serde_json::json!({
-                    "runId": "post-fix",
-                    "outcome": "ok_match_multi_type_fallback",
-                    "priorMismatchLabels": mismatch_labels,
-                    "hostName": host_name,
-                    "hostAlias": host_alias,
-                    "port": port,
-                    "connectedPeerIp": connected_peer_ip,
-                    "knownHostsPath": kh_path_str,
-                    "serverKeySha256": fp,
-                    "candidates": candidates,
-                    "allChecks": check_rows,
-                }),
-            );
-            // #endregion
             return Ok(());
         }
-        if try_ssh_keygen_user_known_hosts_match(&effective_known_hosts_path(), &candidates, port, key_data) {
-            // #region agent log
-            agent_debug_log(
-                "H1",
-                "sftp.rs:verify_known_host",
-                "host key check outcome",
-                serde_json::json!({
-                    "runId": "post-fix",
-                    "outcome": "ok_match_ssh_keygen_fallback",
-                    "priorMismatchLabels": mismatch_labels,
-                    "hostName": host_name,
-                    "hostAlias": host_alias,
-                    "port": port,
-                    "connectedPeerIp": connected_peer_ip,
-                    "knownHostsPath": kh_path_str,
-                    "serverKeySha256": fp,
-                    "candidates": candidates,
-                    "allChecks": check_rows,
-                }),
-            );
-            // #endregion
+        if try_ssh_keygen_user_known_hosts_match(
+            &effective_known_hosts_path(),
+            &candidates,
+            port,
+            key_data,
+        ) {
             return Ok(());
         }
-        // #region agent log
-        agent_debug_log(
-            "H1",
-            "sftp.rs:verify_known_host",
-            "host key mismatch aggregate",
-            serde_json::json!({
-                "mismatchLabels": mismatch_labels,
-                "hostName": host_name,
-                "hostAlias": host_alias,
-                "port": port,
-                "connectedPeerIp": connected_peer_ip,
-                "knownHostsPath": kh_path_str,
-                "serverKeySha256": fp,
-                "candidates": candidates,
-                "allChecks": check_rows,
-            }),
-        );
-        // #endregion
-        let kh_path = effective_known_hosts_path()
-            .to_string_lossy()
-            .into_owned();
+        let kh_path = effective_known_hosts_path().to_string_lossy().into_owned();
         let conflicting_lines = find_conflicting_known_host_lines(&mismatch_labels);
         let payload = KnownHostMismatchPayload {
             mismatched_hosts: mismatch_labels,
@@ -704,24 +607,6 @@ fn verify_known_host(
         }
         return Err("Host key mismatch. Remove stale entries from known_hosts.".to_string());
     }
-
-    // #region agent log
-    agent_debug_log(
-        "H1",
-        "sftp.rs:verify_known_host",
-        "host key unknown (no match, no mismatch line)",
-        serde_json::json!({
-            "hostName": host_name,
-            "hostAlias": host_alias,
-            "port": port,
-            "connectedPeerIp": connected_peer_ip,
-            "knownHostsPath": kh_path_str,
-            "serverKeySha256": fp,
-            "candidates": candidates,
-            "allChecks": check_rows,
-        }),
-    );
-    // #endregion
 
     let key_type_label = ssh2_key_type_label(key_type);
     let key_base64 = BASE64.encode(key_data);
@@ -756,7 +641,9 @@ fn authenticate(sess: &Session, username: &str, host: &HostConfig) -> Result<(),
         return Err("Public key authentication failed.".to_string());
     }
     sess.userauth_agent(username).map_err(|e| {
-        format!("ssh-agent auth failed ({e}). Set an identity file on the host or enable ssh-agent.")
+        format!(
+            "ssh-agent auth failed ({e}). Set an identity file on the host or enable ssh-agent."
+        )
     })?;
     if sess.authenticated() {
         return Ok(());
@@ -780,40 +667,6 @@ pub(crate) fn connect_session(host: &HostConfig) -> Result<Session, String> {
     let peer_ip = addr.ip().to_string();
     let tcp = TcpStream::connect_timeout(&addr, crate::app_prefs::connect_timeout_duration())
         .map_err(|e| format!("TCP connect to {addr_label}: {e}"))?;
-    // #region agent log
-    let tcp_peer_ip = tcp
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|_| String::new());
-    let ssh_effective_dir = crate::ssh_home::effective_ssh_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|e| format!("(effective_ssh_dir error: {e})"));
-    let ssh_default_dir = crate::ssh_home::default_ssh_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|e| format!("(default_ssh_dir error: {e})"));
-    agent_debug_log(
-        "H2",
-        "sftp.rs:connect_session",
-        "dns first vs tcp peer",
-        serde_json::json!({
-            "resolvedDnsFirstIp": peer_ip.clone(),
-            "tcpPeerIp": tcp_peer_ip,
-            "hostName": host_name,
-            "hostAlias": host.host,
-            "port": host.port,
-        }),
-    );
-    agent_debug_log(
-        "H3",
-        "sftp.rs:connect_session",
-        "ssh dir resolution",
-        serde_json::json!({
-            "effectiveSshDir": ssh_effective_dir,
-            "defaultSshDir": ssh_default_dir,
-            "knownHostsPath": effective_known_hosts_path().display().to_string(),
-        }),
-    );
-    // #endregion
     let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(60)));
     let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(60)));
 
@@ -881,7 +734,9 @@ pub struct DeleteTreeResult {
 
 pub(crate) fn resolve_remote_spec(spec: RemoteSshSpec) -> Result<HostConfig, String> {
     match spec {
-        RemoteSshSpec::Saved { host } => resolve_host_config_for_session(&host).map_err(|e| e.to_string()),
+        RemoteSshSpec::Saved { host } => {
+            resolve_host_config_for_session(&host).map_err(|e| e.to_string())
+        }
         RemoteSshSpec::Quick { request } => {
             normalize_quick_ssh_request(request).map(|(host, _policy)| host)
         }
@@ -915,8 +770,7 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
         }
         let is_dir = stat.is_dir();
         let sort_with_directories = if stat.file_type().is_symlink() {
-            sftp
-                .stat(Path::new(&full_path))
+            sftp.stat(Path::new(&full_path))
                 .map(|st| st.is_dir())
                 .unwrap_or(false)
         } else {
@@ -924,7 +778,8 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
         };
         let size = stat.size.unwrap_or(0);
         let mtime = stat.mtime.map(|t| t as i64);
-        let (mode_display, user_display, group_display, mode_octal) = remote_mode_and_owners(&stat, is_dir);
+        let (mode_display, user_display, group_display, mode_octal) =
+            remote_mode_and_owners(&stat, is_dir);
         out.push(SftpDirEntry {
             name,
             is_dir,
@@ -937,13 +792,13 @@ pub fn list_remote_dir(spec: RemoteSshSpec, path: String) -> Result<Vec<SftpDirE
             group_display,
         });
     }
-    out.sort_by(|a, b| {
-        match (a.sort_with_directories, b.sort_with_directories) {
+    out.sort_by(
+        |a, b| match (a.sort_with_directories, b.sort_with_directories) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
-    });
+        },
+    );
     Ok(out)
 }
 
@@ -1038,7 +893,8 @@ pub fn download_remote_file(
     let monitored = transfer_id.is_some();
 
     let outcome = (|| -> Result<String, String> {
-        let mut out = fs::File::create(&local_path).map_err(|e| format!("Create local file: {e}"))?;
+        let mut out =
+            fs::File::create(&local_path).map_err(|e| format!("Create local file: {e}"))?;
         let mut buf = [0u8; 256 * 1024];
         let mut total_read: u64 = 0;
 
@@ -1060,14 +916,7 @@ pub fn download_remote_file(
                 .map_err(|e| format!("Write local file: {e}"))?;
             total_read += n as u64;
             if let Some(tid) = transfer_id.as_deref() {
-                xfer_emit_progress(
-                    app,
-                    tid,
-                    "download",
-                    total_read,
-                    bytes_total,
-                    &file_label,
-                );
+                xfer_emit_progress(app, tid, "download", total_read, bytes_total, &file_label);
             }
         }
         Ok(local_path.to_string_lossy().into_owned())
@@ -1102,11 +951,7 @@ pub fn open_path_in_os(path_str: &str) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Open: {e}"))?;
     }
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         return Err("Opening files is not supported on this platform.".to_string());
     }
@@ -1114,7 +959,11 @@ pub fn open_path_in_os(path_str: &str) -> Result<(), String> {
 }
 
 /// Downloads a remote file to a temp path and opens it in the system default application (NSS-Commander “View”).
-pub fn open_remote_file_in_os(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+pub fn open_remote_file_in_os(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+) -> Result<(), String> {
     validate_entry_name(&name)?;
     let remote_norm = remote_child_path(&parent_path, &name)?;
     if remote_norm.is_empty() || remote_norm == "." {
@@ -1132,20 +981,29 @@ pub fn open_remote_file_in_os(spec: RemoteSshSpec, parent_path: String, name: St
         .stat()
         .map_err(|e| format!("Stat remote file: {e}"))?;
     if stat.is_dir() {
-        return Err("Opening remote folders in the system file manager is not supported.".to_string());
+        return Err(
+            "Opening remote folders in the system file manager is not supported.".to_string(),
+        );
     }
 
     let safe_base: String = name
         .trim()
         .chars()
-        .map(|c| if matches!(c, '/' | '\\' | '\0') { '_' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | '\\' | '\0') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let safe_base = if safe_base.is_empty() {
         "file".to_string()
     } else {
         safe_base
     };
-    let local_path = std::env::temp_dir().join(format!("nosuckshell-view-{}-{safe_base}", Uuid::new_v4()));
+    let local_path =
+        std::env::temp_dir().join(format!("nosuckshell-view-{}-{safe_base}", Uuid::new_v4()));
     let mut out = fs::File::create(&local_path).map_err(|e| format!("Create temp file: {e}"))?;
     let mut buf = [0u8; 256 * 1024];
     loop {
@@ -1240,14 +1098,7 @@ pub fn upload_remote_file(
             .map_err(|e| format!("Write remote file: {e}"))?;
         total_written += n as u64;
         if let Some(tid) = transfer_id.as_deref() {
-            xfer_emit_progress(
-                app,
-                tid,
-                "upload",
-                total_written,
-                bytes_total,
-                &file_label,
-            );
+            xfer_emit_progress(app, tid, "upload", total_written, bytes_total, &file_label);
         }
     }
     Ok(())
@@ -1374,9 +1225,7 @@ fn resolve_local_delete_target(parent_path_key: &str, name: &str) -> Result<Path
     validate_entry_name(name)?;
     let dir = resolve_local_browser_path(parent_path_key.to_string())?;
     let target = dir.join(name.trim());
-    let target = target
-        .canonicalize()
-        .map_err(|e| format!("Path: {e}"))?;
+    let target = target.canonicalize().map_err(|e| format!("Path: {e}"))?;
     if !target.starts_with(&dir) {
         return Err("Invalid path.".to_string());
     }
@@ -1397,11 +1246,9 @@ fn local_io_delete_err(e: io::Error, target: &Path) -> String {
 fn delete_local_at_path_strict(target: &Path) -> Result<(), String> {
     let meta = fs::symlink_metadata(target).map_err(|e| format!("Metadata: {e}"))?;
     if meta.is_dir() {
-        fs::remove_dir_all(target)
-            .map_err(|e| local_io_delete_err(e, target))?;
+        fs::remove_dir_all(target).map_err(|e| local_io_delete_err(e, target))?;
     } else {
-        fs::remove_file(target)
-            .map_err(|e| local_io_delete_err(e, target))?;
+        fs::remove_file(target).map_err(|e| local_io_delete_err(e, target))?;
     }
     Ok(())
 }
@@ -1448,7 +1295,11 @@ fn delete_local_tree_best_effort(target: &Path) -> DeleteTreeResult {
     }
 }
 
-fn remove_local_best_effort(path: &Path, failures: &mut Vec<DeletePathFailure>, had_perm: &mut bool) {
+fn remove_local_best_effort(
+    path: &Path,
+    failures: &mut Vec<DeletePathFailure>,
+    had_perm: &mut bool,
+) {
     let path_str = path.to_string_lossy().into_owned();
     let meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
@@ -1542,7 +1393,8 @@ pub fn delete_local_entry_with_mode(
         DeleteEntryMode::ChmodOwnerWritableThenStrict => {
             #[cfg(unix)]
             {
-                local_chmod_tree_owner_rw(&target).map_err(|e| format!("Could not adjust permissions: {e}"))?;
+                local_chmod_tree_owner_rw(&target)
+                    .map_err(|e| format!("Could not adjust permissions: {e}"))?;
                 delete_local_at_path_strict(&target)?;
                 Ok(DeleteTreeResult {
                     completed_fully: true,
@@ -1562,14 +1414,16 @@ pub fn delete_local_entry(parent_path_key: String, name: String) -> Result<(), S
     delete_local_entry_with_mode(parent_path_key, name, DeleteEntryMode::Strict).map(|_| ())
 }
 
-pub fn rename_local_entry(parent_path_key: String, old_name: String, new_name: String) -> Result<(), String> {
+pub fn rename_local_entry(
+    parent_path_key: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
     validate_entry_name(&old_name)?;
     validate_entry_name(&new_name)?;
     let dir = resolve_local_browser_path(parent_path_key)?;
     let from = dir.join(old_name.trim());
-    let from = from
-        .canonicalize()
-        .map_err(|e| format!("Source: {e}"))?;
+    let from = from.canonicalize().map_err(|e| format!("Source: {e}"))?;
     if !from.starts_with(&dir) {
         return Err("Invalid source path.".to_string());
     }
@@ -1585,9 +1439,7 @@ pub fn open_local_entry_in_os(parent_path_key: String, name: String) -> Result<(
     validate_entry_name(&name)?;
     let dir = resolve_local_browser_path(parent_path_key)?;
     let target = dir.join(name.trim());
-    let target = target
-        .canonicalize()
-        .map_err(|e| format!("Path: {e}"))?;
+    let target = target.canonicalize().map_err(|e| format!("Path: {e}"))?;
     if !target.starts_with(&dir) {
         return Err("Invalid path.".to_string());
     }
@@ -1613,9 +1465,7 @@ fn resolve_local_file_under_parent(parent_path_key: &str, name: &str) -> Result<
         return Err("Parent is not a directory.".to_string());
     }
     let target = dir.join(name.trim());
-    let target = target
-        .canonicalize()
-        .map_err(|e| format!("Path: {e}"))?;
+    let target = target.canonicalize().map_err(|e| format!("Path: {e}"))?;
     if !target.starts_with(&dir) {
         return Err("Invalid path.".to_string());
     }
@@ -1639,7 +1489,8 @@ pub fn read_local_text_file(parent_path_key: String, name: String) -> Result<Str
     let cap = len as usize;
     let mut buf = Vec::with_capacity(cap.max(4096));
     let mut f = fs::File::open(&target).map_err(|e| format!("Open file: {e}"))?;
-    f.read_to_end(&mut buf).map_err(|e| format!("Read file: {e}"))?;
+    f.read_to_end(&mut buf)
+        .map_err(|e| format!("Read file: {e}"))?;
     if buf.len() as u64 > MAX_EDITOR_TEXT_BYTES {
         return Err(format!(
             "File is larger than {} MiB; open it in an external editor.",
@@ -1650,7 +1501,11 @@ pub fn read_local_text_file(parent_path_key: String, name: String) -> Result<Str
 }
 
 /// Overwrites an existing regular file with UTF-8 text.
-pub fn write_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+pub fn write_local_text_file(
+    parent_path_key: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
     check_editor_text_content(&content)?;
     let target = resolve_local_file_under_parent(&parent_path_key, &name)?;
     let meta = fs::metadata(&target).map_err(|e| format!("Metadata: {e}"))?;
@@ -1662,7 +1517,11 @@ pub fn write_local_text_file(parent_path_key: String, name: String, content: Str
 }
 
 /// Creates a new regular file with UTF-8 text (fails if the name already exists).
-pub fn create_local_text_file(parent_path_key: String, name: String, content: String) -> Result<(), String> {
+pub fn create_local_text_file(
+    parent_path_key: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
     validate_entry_name(&name)?;
     check_editor_text_content(&content)?;
     let dir = resolve_local_browser_path(parent_path_key)?;
@@ -1679,9 +1538,7 @@ pub fn create_local_text_file(parent_path_key: String, name: String, content: St
 
 fn sftp_error_suggests_permission_denied(msg: &str) -> bool {
     let m = msg.to_lowercase();
-    m.contains("permission denied")
-        || m.contains("permission_denied")
-        || m.contains("eacces")
+    m.contains("permission denied") || m.contains("permission_denied") || m.contains("eacces")
 }
 
 /// Deletes a remote file, symlink, or directory tree (`path` is absolute on the server).
@@ -1692,8 +1549,7 @@ fn sftp_remove_remote_tree_strict(sftp: &ssh2::Sftp, path: &Path) -> Result<(), 
         .map_err(|e| format!("Stat remote path '{path_str}': {e}"))?;
 
     if stat.file_type().is_symlink() {
-        sftp
-            .unlink(path)
+        sftp.unlink(path)
             .map_err(|e| format!("Remove remote symlink '{path_str}': {e}"))?;
         return Ok(());
     }
@@ -1711,14 +1567,12 @@ fn sftp_remove_remote_tree_strict(sftp: &ssh2::Sftp, path: &Path) -> Result<(), 
             }
             sftp_remove_remote_tree_strict(sftp, &full_path)?;
         }
-        sftp
-            .rmdir(path)
+        sftp.rmdir(path)
             .map_err(|e| format!("Remove remote directory '{path_str}': {e}"))?;
         return Ok(());
     }
 
-    sftp
-        .unlink(path)
+    sftp.unlink(path)
         .map_err(|e| format!("Remove remote file '{path_str}': {e}"))?;
     Ok(())
 }
@@ -1863,13 +1717,16 @@ fn sftp_chmod_remote_tree(sftp: &ssh2::Sftp, path: &Path) -> Result<(), String> 
         mtime: None,
         atime: None,
     };
-    sftp
-        .setstat(path, st)
+    sftp.setstat(path, st)
         .map_err(|e| format!("chmod remote '{path_str}': {e}"))?;
     Ok(())
 }
 
-pub fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: String) -> Result<(), String> {
+pub fn sftp_create_dir(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    dir_name: String,
+) -> Result<(), String> {
     let remote_path = remote_child_path(&parent_path, &dir_name)?;
     let host = resolve_remote_spec(spec)?;
     let sess = connect_session(&host)?;
@@ -1884,8 +1741,7 @@ pub fn sftp_create_dir(spec: RemoteSshSpec, parent_path: String, dir_name: Strin
         }
         Err(_) => {}
     }
-    sftp
-        .mkdir(path_ref, 0o755)
+    sftp.mkdir(path_ref, 0o755)
         .map_err(|e| format!("Create remote directory: {e}"))?;
     Ok(())
 }
@@ -1915,7 +1771,9 @@ pub fn sftp_delete_entry_with_mode(
         DeleteEntryMode::ChmodOwnerWritableThenStrict => {
             sftp_chmod_remote_tree(&sftp, path_ref)?;
             sftp_remove_remote_tree_strict(&sftp, path_ref).map_err(|e| {
-                format!("{e} Remote chmod (owner read/write) was applied first; delete still failed.")
+                format!(
+                    "{e} Remote chmod (owner read/write) was applied first; delete still failed."
+                )
             })?;
             Ok(DeleteTreeResult {
                 completed_fully: true,
@@ -1926,7 +1784,11 @@ pub fn sftp_delete_entry_with_mode(
     }
 }
 
-pub fn sftp_delete_entry(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<(), String> {
+pub fn sftp_delete_entry(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+) -> Result<(), String> {
     sftp_delete_entry_with_mode(spec, parent_path, name, DeleteEntryMode::Strict).map(|_| ())
 }
 
@@ -1941,18 +1803,21 @@ pub fn sftp_rename_entry(
     let host = resolve_remote_spec(spec)?;
     let sess = connect_session(&host)?;
     let sftp = sess.sftp().map_err(|e| format!("SFTP subsystem: {e}"))?;
-    sftp
-        .rename(
-            Path::new(&old_path),
-            Path::new(&new_path),
-            Some(RenameFlags::empty()),
-        )
-        .map_err(|e| format!("Rename on server: {e}"))?;
+    sftp.rename(
+        Path::new(&old_path),
+        Path::new(&new_path),
+        Some(RenameFlags::empty()),
+    )
+    .map_err(|e| format!("Rename on server: {e}"))?;
     Ok(())
 }
 
 /// Reads a remote regular file as UTF-8 text for the in-app editor.
-pub fn sftp_read_text_file(spec: RemoteSshSpec, parent_path: String, name: String) -> Result<String, String> {
+pub fn sftp_read_text_file(
+    spec: RemoteSshSpec,
+    parent_path: String,
+    name: String,
+) -> Result<String, String> {
     let remote_path = remote_child_path(&parent_path, &name)?;
     let host = resolve_remote_spec(spec)?;
     let sess = connect_session(&host)?;
@@ -2104,7 +1969,9 @@ pub(crate) fn resolve_local_browser_path(path: String) -> Result<PathBuf, String
         } else {
             home.join(trimmed)
         };
-        combined.canonicalize().map_err(|e| format!("Invalid path: {e}"))?
+        combined
+            .canonicalize()
+            .map_err(|e| format!("Invalid path: {e}"))?
     };
     let restrict_to_home = trimmed.is_empty() || !Path::new(trimmed).is_absolute();
     if restrict_to_home && !joined.starts_with(&home_canon) {
@@ -2133,10 +2000,11 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
         if name == "." || name == ".." {
             continue;
         }
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs() as i64));
+        let mtime = meta.modified().ok().and_then(|t| {
+            t.duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
+        });
         let (mode_display, user_display, group_display, mode_octal) = local_mode_and_owners(&meta);
         let child_path = joined.join(&name);
         let sort_with_directories = if meta.file_type().is_symlink() {
@@ -2158,10 +2026,149 @@ pub fn list_local_dir(path: String) -> Result<Vec<LocalDirEntry>, String> {
             group_display,
         });
     }
-    out.sort_by(|a, b| match (a.sort_with_directories, b.sort_with_directories) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
+    out.sort_by(
+        |a, b| match (a.sort_with_directories, b.sort_with_directories) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        },
+    );
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_perm_rwx_renders_full_modes() {
+        assert_eq!(unix_perm_rwx(0o755), "rwxr-xr-x");
+        assert_eq!(unix_perm_rwx(0o644), "rw-r--r--");
+        assert_eq!(unix_perm_rwx(0o000), "---------");
+        assert_eq!(unix_perm_rwx(0o777), "rwxrwxrwx");
+        // High bits (setuid/setgid/sticky) are masked away by the formatter.
+        assert_eq!(unix_perm_rwx(0o4755), "rwxr-xr-x");
+    }
+
+    #[test]
+    fn mode_octal_low_strips_high_bits() {
+        assert_eq!(mode_octal_low(0o755), "755");
+        assert_eq!(mode_octal_low(0o644), "644");
+        assert_eq!(mode_octal_low(0o4755), "755");
+    }
+
+    #[test]
+    fn type_char_from_mode_picks_unix_type() {
+        assert_eq!(type_char_from_mode(S_IFDIR | 0o755, true, false), 'd');
+        assert_eq!(type_char_from_mode(S_IFREG | 0o644, false, false), '-');
+        assert_eq!(type_char_from_mode(S_IFLNK, false, true), 'l');
+        assert_eq!(type_char_from_mode(S_IFCHR, false, false), 'c');
+        assert_eq!(type_char_from_mode(S_IFBLK, false, false), 'b');
+        assert_eq!(type_char_from_mode(S_IFIFO, false, false), 'p');
+        assert_eq!(type_char_from_mode(S_IFSOCK, false, false), 's');
+        // Falls back to is_dir when mode bits are missing.
+        assert_eq!(type_char_from_mode(0, true, false), 'd');
+        assert_eq!(type_char_from_mode(0, false, false), '-');
+    }
+
+    #[test]
+    fn normalize_remote_path_collapses_dot_and_dotdot() {
+        assert_eq!(normalize_remote_path("").unwrap(), ".");
+        assert_eq!(normalize_remote_path("   ").unwrap(), ".");
+        assert_eq!(normalize_remote_path("/var/log/").unwrap(), "/var/log");
+        assert_eq!(normalize_remote_path("/var/./log").unwrap(), "/var/log");
+        assert_eq!(normalize_remote_path("/var/log/../tmp").unwrap(), "/var/tmp");
+        assert_eq!(normalize_remote_path("/a/b/../../c").unwrap(), "/c");
+        assert_eq!(normalize_remote_path("a/b/../c").unwrap(), "a/c");
+    }
+
+    #[test]
+    fn normalize_remote_path_rejects_null_byte() {
+        assert!(normalize_remote_path("/etc/pas\0swd").is_err());
+    }
+
+    #[test]
+    fn known_hosts_check_candidates_ordering_and_dedup() {
+        // host_name first, then alias when distinct, then IP, then bracketed v6.
+        let c = known_hosts_check_candidates("example.com", "prod", "203.0.113.5");
+        assert_eq!(c, vec!["example.com", "prod", "203.0.113.5"]);
+
+        // Empty alias / IP are skipped.
+        let c = known_hosts_check_candidates("example.com", "", "");
+        assert_eq!(c, vec!["example.com"]);
+
+        // Equal alias is not duplicated.
+        let c = known_hosts_check_candidates("example.com", "example.com", "");
+        assert_eq!(c, vec!["example.com"]);
+
+        // IPv6 gets a bracketed twin appended.
+        let c = known_hosts_check_candidates("h", "", "2001:db8::1");
+        assert_eq!(c, vec!["h", "2001:db8::1", "[2001:db8::1]"]);
+    }
+
+    #[test]
+    fn ensure_no_proxy_rejects_proxy_jump_and_command() {
+        let mut host = HostConfig {
+            host: "h".into(),
+            host_name: "example.com".into(),
+            user: "u".into(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            proxy_command: String::new(),
+        };
+        assert!(ensure_no_proxy(&host).is_ok());
+
+        host.proxy_jump = "bastion".into();
+        assert!(ensure_no_proxy(&host).is_err());
+
+        host.proxy_jump = String::new();
+        host.proxy_command = "nc -X 5 -x 127.0.0.1:1080 %h %p".into();
+        assert!(ensure_no_proxy(&host).is_err());
+    }
+
+    #[test]
+    fn validate_entry_name_blocks_dangerous_inputs() {
+        assert!(validate_entry_name("hello.txt").is_ok());
+        assert!(validate_entry_name(" ok ").is_ok());
+        assert!(validate_entry_name("").is_err());
+        assert!(validate_entry_name(".").is_err());
+        assert!(validate_entry_name("..").is_err());
+        assert!(validate_entry_name("a/b").is_err());
+        assert!(validate_entry_name("nul\0byte").is_err());
+    }
+
+    #[test]
+    fn remote_child_path_joins_under_normalized_parent() {
+        assert_eq!(remote_child_path("/var/log", "syslog").unwrap(), "/var/log/syslog");
+        // Trailing slashes on the parent are preserved post-normalization.
+        assert_eq!(remote_child_path("/var/log/", "syslog").unwrap(), "/var/log/syslog");
+        // Empty / "." parent yields a relative single segment.
+        assert_eq!(remote_child_path("", "file").unwrap(), "file");
+        assert_eq!(remote_child_path(".", "file").unwrap(), "file");
+        // ".." in parent gets collapsed before joining.
+        assert_eq!(remote_child_path("/a/b/..", "c").unwrap(), "/a/c");
+        // Invalid name propagates.
+        assert!(remote_child_path("/a", "..").is_err());
+        assert!(remote_child_path("/a", "b/c").is_err());
+    }
+
+    #[test]
+    fn check_editor_text_content_enforces_size_cap() {
+        let small = "a".repeat(1024);
+        assert!(check_editor_text_content(&small).is_ok());
+
+        let too_big_len = (MAX_EDITOR_TEXT_BYTES as usize) + 1;
+        let big = "x".repeat(too_big_len);
+        let err = check_editor_text_content(&big).expect_err("must reject");
+        assert!(err.contains("MiB"));
+    }
+
+    #[test]
+    fn sftp_error_suggests_permission_denied_matches_common_phrases() {
+        assert!(sftp_error_suggests_permission_denied("Permission denied"));
+        assert!(sftp_error_suggests_permission_denied("permission_denied"));
+        assert!(sftp_error_suggests_permission_denied("EACCES while removing"));
+        assert!(!sftp_error_suggests_permission_denied("No such file"));
+    }
 }
