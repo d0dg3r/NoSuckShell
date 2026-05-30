@@ -29,7 +29,7 @@
     "dompurify": "^3.3.3",
     "monaco-editor": "^0.55.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.5"
   },
   "overrides": {
     "dompurify": "^3.3.3"
