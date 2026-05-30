@@ -92,6 +92,13 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     if (terminalHostRef.current) {
       terminal.open(terminalHostRef.current);
       fitAddon.fit();
+      // Sync pty to xterm as soon as the pane has real dimensions. Without this, the
+      // backend keeps the Rust default (e.g. 120×30) until the debounced
+      // scheduleFitAndResize() runs, which can be hundreds of ms late on first
+      // paint; that mismatch plus slow first-shell startup feels like "keys appear
+      // in one burst" after the first prompt.
+      lastResizeRef.current = { cols: terminal.cols, rows: terminal.rows };
+      void resizeSession(sessionId, terminal.cols, terminal.rows);
     }
 
     const osc7Disposable = terminal.parser.registerOscHandler(7, (data) => {
@@ -298,12 +305,26 @@ export function TerminalPane({ sessionId, onUserInput, onSessionWorkingDirectory
     window.addEventListener("nosuckshell:terminal-fit-request", onExternalFitRequest);
     window.addEventListener("nosuckshell:terminal-focus-request", onExternalFocusRequest);
     scheduleFitAndResize();
+    // Auto-focus on mount so the first keystroke after a session is attached lands in xterm
+    // (avoids the perceived "delay" where the user has to click into the pane first).
+    window.requestAnimationFrame(() => {
+      if (!disposed) {
+        terminal.focus();
+      }
+    });
     const fontFaceSet = typeof document !== "undefined" ? document.fonts : null;
     if (fontFaceSet) {
       void fontFaceSet.ready.then(() => {
-        if (!disposed) {
-          scheduleFitAndResize();
+        if (disposed) {
+          return;
         }
+        // Defer a frame so font swap + layout are settled without blocking
+        // immediately after the ready callback (improves first-typing feel).
+        requestAnimationFrame(() => {
+          if (!disposed) {
+            scheduleFitAndResize();
+          }
+        });
       });
     }
 

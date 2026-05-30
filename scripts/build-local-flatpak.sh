@@ -44,8 +44,8 @@ if [[ "${NO_BUILD:-}" == "1" ]]; then
   fi
   echo "Using existing deb (NO_BUILD=1): ${DEB}"
 else
-  echo "Running npm run tauri:build… (set NO_BUILD=1 to skip if a fresh .deb already exists)"
-  (cd "${ROOT}/apps/desktop" && npm run tauri:build)
+  echo "Running npm run tauri:build -- --bundles deb (only the .deb is needed; skips AppImage)…"
+  (cd "${ROOT}/apps/desktop" && npm run tauri:build -- --bundles deb)
   DEB="$(find_deb || true)"
   if [[ -z "${DEB}" ]]; then
     echo "No .deb found after build. Expected under target/release/bundle/deb (workspace) or apps/desktop/src-tauri/target/release/bundle/deb." >&2

@@ -25,3 +25,16 @@ From `aur/nosuckshell-bin/`, set `pkgver` and a real `sha256sums` for the matchi
 ```bash
 makepkg -f
 ```
+
+## Local build & install on this Arch machine
+
+For development on Arch/CachyOS, [`scripts/build-local-arch.sh`](../scripts/build-local-arch.sh) builds the project with `tauri build --bundles deb` (no AppImage step), repacks the resulting `.deb` into a `.pkg.tar.zst` (same layout as `nosuckshell-bin`), and installs it via `sudo pacman -U`:
+
+```bash
+scripts/build-local-arch.sh                 # full build + install
+NO_BUILD=1 scripts/build-local-arch.sh      # reuse existing .deb under target/ (or --skip-build)
+NO_INSTALL=1 scripts/build-local-arch.sh    # only produce the .pkg.tar.zst (or --no-install)
+scripts/build-local-arch.sh --install-z13  # also install the built .pkg on Z13_HOST (see script header)
+```
+
+Outputs land in `arch/build/` (gitignored). The generated package is named `nosuckshell-local`, defaults to **`pkgrel` 2** (same upstream `pkgver`, higher than typical `nosuckshell` / `nosuckshell-bin` `-1`), and declares `replaces`/`conflicts` so `pacman -U` can supersede an existing install. Override with `PKGREL=…` if needed. Requires `base-devel`, `dpkg`, `binutils` plus the runtime deps listed in [`nosuckshell-bin/PKGBUILD`](nosuckshell-bin/PKGBUILD).
