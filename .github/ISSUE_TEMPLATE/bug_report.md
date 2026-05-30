@@ -6,7 +6,7 @@ labels: bug
 
 ## Environment
 
-- NoSuckShell version (or commit), e.g. `0.2.1` or `git rev-parse HEAD`:
+- NoSuckShell version (or commit), e.g. `0.3.6-beta.1` or `git rev-parse HEAD`:
 - OS / distro (e.g. CachyOS, macOS 14, Windows 11):
 - If Linux WebKit issues: Wayland sessions set `WEBKIT_DISABLE_DMABUF_RENDERER` by default when unset; did you try setting or unsetting it explicitly? (yes/no / N/A)
 

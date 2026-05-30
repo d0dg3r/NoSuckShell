@@ -302,4 +302,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.3
 [v0.3.4]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.4
 [v0.3.5]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.5
+[v0.3.6-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1
 

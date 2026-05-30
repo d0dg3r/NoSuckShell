@@ -156,7 +156,8 @@ Authoritative list: `generate_handler![...]` in `main.rs` and matching names in 
 ## Events
 
 - Primary: **`session-output`** — terminal stream + `host_key_prompt` hint for trust UI.
-- Frontend listeners: [`TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx), [`useSessionOutputTrustListener.ts`](../apps/desktop/src/hooks/useSessionOutputTrustListener.ts), and related refs in `App.tsx`.
+- Frontend: one global listener in [`session-output-bridge.ts`](../apps/desktop/src/session-output-bridge.ts) dispatches to per-session handlers in [`TerminalPane.tsx`](../apps/desktop/src/components/TerminalPane.tsx) and host-key trust callbacks in [`useSessionOutputTrustListener.ts`](../apps/desktop/src/hooks/useSessionOutputTrustListener.ts).
+- Terminal input: [`tauri-api.ts`](../apps/desktop/src/tauri-api.ts) coalesces single-character keystrokes and drains via `send_input`; PTY output is batched per animation frame before `terminal.write`.
 
 ## On-disk artifacts (typical)
 

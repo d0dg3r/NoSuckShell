@@ -1,6 +1,6 @@
 # AUR package (`nosuckshell-bin`)
 
-The [AUR](https://wiki.archlinux.org/title/Arch_User_Repository) package **nosuckshell-bin** repackages the official `.deb` from [GitHub Releases](https://github.com/d0dg3r/NoSuckShell/releases). The canonical `PKGBUILD` for that package lives in this directory.
+The [AUR](https://wiki.archlinux.org/title/Arch_User_Repository) package **nosuckshell-bin** repackages the official **stable** `.deb` from [GitHub Releases](https://github.com/d0dg3r/NoSuckShell/releases). Pre-releases (for example `v0.3.6-beta.1`) are published separately on GitHub; install those from the pre-release assets, not from AUR, until a matching stable tag ships.
 
 ## Install (users)
 

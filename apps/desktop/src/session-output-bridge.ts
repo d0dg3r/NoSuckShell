@@ -3,8 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import type { SessionOutputEvent } from "./types";
 
 type Handler = (payload: SessionOutputEvent) => void;
+type HostKeyPromptHandler = (payload: SessionOutputEvent) => void;
 
 const handlersBySession = new Map<string, Set<Handler>>();
+const hostKeyPromptHandlers = new Set<HostKeyPromptHandler>();
 let globalListenerStarted = false;
 let globalUnlisten: (() => void) | null = null;
 
@@ -32,21 +34,29 @@ function recordStats(ipcEventsDelta: number, handlerCallsDelta: number): void {
   w.__NOSUCKSHELL_SESSION_OUTPUT_STATS__.handlerCalls += handlerCallsDelta;
 }
 
+function dispatchSessionOutput(payload: SessionOutputEvent): void {
+  if (payload.host_key_prompt && hostKeyPromptHandlers.size > 0) {
+    for (const handler of hostKeyPromptHandlers) {
+      handler(payload);
+    }
+  }
+  const set = handlersBySession.get(payload.session_id);
+  if (!set || set.size === 0) {
+    return;
+  }
+  recordStats(1, set.size);
+  for (const handler of set) {
+    handler(payload);
+  }
+}
+
 function ensureGlobalListener(): void {
   if (!hasTauriTransformCallback() || globalListenerStarted) {
     return;
   }
   globalListenerStarted = true;
   void listen<SessionOutputEvent>("session-output", (event) => {
-    const payload = event.payload;
-    const set = handlersBySession.get(payload.session_id);
-    if (!set || set.size === 0) {
-      return;
-    }
-    recordStats(1, set.size);
-    for (const handler of set) {
-      handler(payload);
-    }
+    dispatchSessionOutput(event.payload);
   }).then((unlisten) => {
     globalUnlisten = unlisten;
   }).catch(() => {
@@ -64,6 +74,7 @@ if (import.meta.hot) {
       globalUnlisten = null;
     }
     handlersBySession.clear();
+    hostKeyPromptHandlers.clear();
   });
 }
 
@@ -91,4 +102,21 @@ export function subscribeSessionOutput(sessionId: string, handler: Handler): () 
       handlersBySession.delete(sessionId);
     }
   };
+}
+
+/** Subscribe to SSH host-key prompts via the shared session-output listener. */
+export function subscribeSessionHostKeyPrompt(handler: HostKeyPromptHandler): () => void {
+  if (!hasTauriTransformCallback()) {
+    return () => {};
+  }
+  ensureGlobalListener();
+  hostKeyPromptHandlers.add(handler);
+  return () => {
+    hostKeyPromptHandlers.delete(handler);
+  };
+}
+
+/** @internal Test-only dispatch for E2E and unit tests without Tauri IPC. */
+export function dispatchSessionOutputForTest(payload: SessionOutputEvent): void {
+  dispatchSessionOutput(payload);
 }

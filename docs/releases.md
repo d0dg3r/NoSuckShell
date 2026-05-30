@@ -98,10 +98,18 @@ git push origin v0.2.1
 
 ## Current release (0.3.x)
 
-- **Target tag:** `v0.3.5` — push when you are ready; in-repo versions in `apps/desktop/package.json`, `apps/desktop/package-lock.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `apps/desktop/src-tauri/Cargo.toml` must match **before** you tag (see [CHANGELOG.md](CHANGELOG.md)).
-- **What ships:** see [CHANGELOG.md](CHANGELOG.md) for `0.3.5`.
+- **Latest stable:** `v0.3.5` — see [CHANGELOG.md](CHANGELOG.md) for `0.3.5`.
+- **Current pre-release:** `v0.3.6-beta.1` — Linux terminal input latency fixes; install from [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue). See [CHANGELOG.md](CHANGELOG.md) for `0.3.6-beta.1`.
 
-- The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
+Before tagging, keep the same version string in:
+
+- `apps/desktop/package.json`
+- `apps/desktop/package-lock.json`
+- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/desktop/src-tauri/tauri.conf.json`
+
+The release workflow still **overwrites** those files from the tag at build time; keeping them in sync avoids drift before the tag lands.
+
 - **Working-tree drift:** if `package.json` is bumped ahead of `Cargo.toml` / `tauri.conf.json` (or the reverse), realign before you cut a release so local `tauri dev` and CI agree on the product version.
 
 ## Common pitfalls checklist
