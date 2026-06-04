@@ -5288,6 +5288,21 @@ body.nss-commander-workspace .file-pane-columns-popover {
   overflow: hidden;
 }
 
+/* Lightweight first-paint shell while the heavy App chunk loads.
+   Matches the dark UI background so the reveal of the full app is seamless. */
+.app-boot-shell {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-main, #06080a);
+  color: var(--text-muted, #9cb0a3);
+  padding: var(--space-3);
+}
+
 .proxmox-standalone-console-chrome {
   flex-shrink: 0;
   margin-bottom: var(--space-2);

@@ -98,8 +98,8 @@ git push origin v0.2.1
 
 ## Current release (0.3.x)
 
-- **Latest stable:** `v0.3.6` — first store-ready cut of the `0.3.x` line (privacy + signing + CSP + CI gates). The `v0.3.6` tag was pushed but its macOS bundler step failed before the GitHub Release was created; users should install `v0.3.7-beta.1` until a re-cut stable is published. See [CHANGELOG.md](CHANGELOG.md) for `0.3.6`.
-- **Current pre-release:** `v0.3.7-beta.1` — re-cut of the market-readiness pass with the macOS signing-env regression fixed; install from [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue). See [CHANGELOG.md](CHANGELOG.md) for `0.3.7-beta.1`.
+- **Latest stable:** `v0.3.6` — first store-ready cut of the `0.3.x` line (privacy + signing + CSP + CI gates). The `v0.3.6` tag was pushed but its macOS bundler step failed before the GitHub Release was created; users should install `v0.3.7-beta.2` until a re-cut stable is published. See [CHANGELOG.md](CHANGELOG.md) for `0.3.6`.
+- **Current pre-release:** `v0.3.7-beta.2` — cold-start latency pass on top of `0.3.7-beta.1`: the main window stays hidden until first paint, `App.tsx` is lazy-loaded behind a small boot shell, and the startup IPC round-trips are deferred to idle. Install from [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue). See [CHANGELOG.md](CHANGELOG.md) for `0.3.7-beta.2`.
 - **Earlier pre-release:** `v0.3.6-beta.1` — Linux terminal input latency fixes; archived on [GitHub Releases (pre-releases)](https://github.com/d0dg3r/NoSuckShell/releases?q=prerelease%3Atrue).
 
 Before tagging, keep the same version string in:
