@@ -210,6 +210,7 @@ import {
   createDefaultMetadataStore,
   emptyHost,
   normalizeEntityStore,
+  scheduleAfterFirstPaint,
 } from "./features/app-bootstrap";
 import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
 import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
@@ -1024,7 +1025,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void refreshLicensedPlugins();
+    // Plugins/license probe is not on the critical path for the first frame:
+    // defer to idle so the WebView can become responsive before the IPC roundtrip.
+    return scheduleAfterFirstPaint(() => {
+      void refreshLicensedPlugins();
+    });
   }, [refreshLicensedPlugins]);
 
   useEffect(() => {
@@ -1548,7 +1553,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
+    // Yield to the browser so the boot shell paints and pointer events flow
+    // before we trigger six parallel Tauri invokes (hosts, metadata, profiles, store, prefs).
+    return scheduleAfterFirstPaint(() => {
+      void load().catch((e: unknown) => setError(String(e)));
+    });
   }, []);
 
   useEffect(() => {

@@ -4,6 +4,25 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.7-beta.2] - 2026-06-04
+
+**Pre-release.** Cold-start latency pass: the desktop window no longer feels frozen for several seconds after launch. Binaries are published after you push tag [`v0.3.7-beta.2`][v0.3.7-beta.2] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Added
+
+- **Startup diagnostics** — `performance.mark("nss:js-start")` and `performance.mark("nss:react-render-scheduled")` plus a `nss:js-to-render-scheduled` measure, so user-reported cold-start timings can be captured from the WebView Performance panel without a custom build.
+
+### Changed
+
+- **Cold start (perceived freeze)** — The main window now stays hidden until the WebView has committed its first paint, so users no longer see a visible-but-unresponsive frame during the WebKit2GTK warmup. A Rust-side safety thread force-shows the window after eight seconds in case the renderer never emits a paint.
+- **Cold start (App chunk split)** — `App.tsx` is now lazy-loaded behind a tiny boot shell in [`ProxmoxStandaloneRoot.tsx`](../apps/desktop/src/components/ProxmoxStandaloneRoot.tsx); the main `App` chunk (~50 kB gzip) is no longer in the initial entry. The Proxmox standalone window also detects its label synchronously instead of going through an async IPC gate before mounting.
+- **Cold start (deferred IPC)** — The startup `load()` (six parallel host / metadata / profile / store / preferences invokes) and `refreshLicensedPlugins()` are now scheduled via `requestIdleCallback` so the WebView can process pointer events before those round-trips complete.
+
+### Notes
+
+- Permission `core:window:allow-show` is now requested in [`apps/desktop/src-tauri/capabilities/default.json`](../apps/desktop/src-tauri/capabilities/default.json) because the frontend reveals the window after first paint.
+- Installers remain **unsigned**; see [releases.md](releases.md) for signing / notarization follow-up.
+
 ## [0.3.7-beta.1] - 2026-05-30
 
 **Pre-release.** Re-cuts the `0.3.6` market-readiness pass after the macOS bundler failed to publish that tag. Binaries are published after you push tag [`v0.3.7-beta.1`][v0.3.7-beta.1] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -362,4 +381,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.6-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6-beta.1
 [v0.3.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6
 [v0.3.7-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.1
+[v0.3.7-beta.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.2
 

@@ -1334,6 +1334,21 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionState::default())
+        .setup(|app| {
+            // Main window is `visible: false` in tauri.conf.json; the frontend reveals it
+            // after first paint (see ProxmoxStandaloneRoot.revealCurrentWindowAfterFirstPaint).
+            // This thread is a safety net: if the JS bundle fails to load or the renderer
+            // hangs for a long time, force the window to appear so the user is never stuck
+            // with a hidden process.
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(8));
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    let _ = win.show();
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_hosts,
             save_host,
