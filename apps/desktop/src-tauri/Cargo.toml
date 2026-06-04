@@ -6,7 +6,7 @@ license = "MIT"
 build = "build.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.5.1", features = [] }
+tauri-build = { version = "2.6.2", features = [] }
 
 [dependencies]
 anyhow = "1.0.102"
@@ -33,7 +33,7 @@ futures-util = "0.3"
 url = "2.5"
 http = "1"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
-tauri = { version = "2.10.3", features = [] }
+tauri = { version = "2.11.2", features = [] }
 tauri-plugin-dialog = "2"
 thiserror = "2.0.18"
 uuid = { version = "1.22.0", features = ["v4", "serde"] }

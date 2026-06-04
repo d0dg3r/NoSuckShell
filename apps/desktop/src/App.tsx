@@ -4369,7 +4369,11 @@ export function App() {
     if (typeof window === "undefined") {
       return;
     }
-    const timerId = window.setTimeout(() => {
+    // Defer CLI launch layouts until after first paint — same rationale as `load()`.
+    // `--local-terminal` used to spawn `zsh -l` via setTimeout(0) while the WebView
+    // was still cold-starting, racing shell init (e.g. ssh-agent in .zshrc) against
+    // parallel bootstrap IPC and terminal resize.
+    return scheduleAfterFirstPaint(() => {
       void (async () => {
         if (launchCliLayoutAppliedRef.current) {
           return;
@@ -4409,8 +4413,7 @@ export function App() {
         d.clearSidebarHideTimeout();
         d.setIsSidebarVisible(false);
       })();
-    }, 0);
-    return () => window.clearTimeout(timerId);
+    });
   }, []);
   const removeWorkspace = useCallback(
     (workspaceId: string) => {
