@@ -165,7 +165,7 @@ export function ProxmoxQemuVncPane({
         }
         setStatusMessage("Establishing VNC session…");
 
-        const mod = await import("@novnc/novnc/lib/rfb.js");
+        const mod = await import("@novnc/novnc");
         const RfbCtor = resolveNovncRfbConstructor(mod);
         if (cancelled || !screenRef.current) {
           await teardown();
