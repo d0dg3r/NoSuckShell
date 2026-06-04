@@ -1,4 +1,4 @@
-declare module "@novnc/novnc/lib/rfb.js" {
+declare module "@novnc/novnc" {
   /** noVNC RFB client (minimal typing for pane embed). */
   export default class RFB {
     constructor(
