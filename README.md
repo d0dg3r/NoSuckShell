@@ -189,7 +189,7 @@ Details: [docs/backup-security.md](docs/backup-security.md)
 GitHub releases are created by pushing a SemVer tag. Full checklist: [docs/releases.md](docs/releases.md). User-facing history: [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 - Final: `vMAJOR.MINOR.PATCH` (example: `v0.3.6`, `v1.2.3`)
-- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v0.3.7-beta.2`, `v1.2.4-rc.1`)
+- Pre-release: `vMAJOR.MINOR.PATCH-<suffix>` (example: `v0.3.7-beta.3`, `v1.2.4-rc.1`)
 
 **Current stable:** [`v0.3.6`](https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6) — first store-ready cut of the `0.3.x` line (see [CHANGELOG](docs/CHANGELOG.md)).
 
