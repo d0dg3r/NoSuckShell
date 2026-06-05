@@ -4,6 +4,27 @@ All notable changes to **NoSuckShell** are documented here. Version numbers foll
 
 ## [Unreleased]
 
+## [0.3.7-beta.3] - 2026-06-05
+
+**Pre-release.** Builds on the `0.3.7-beta.2` cold-start pass: fixes single-mode shell startup races, decouples CLI launches from host/plugin bootstrap, and ships dependency/security updates. Binaries are published after you push tag [`v0.3.7-beta.3`][v0.3.7-beta.3] and the [release workflow](../.github/workflows/release.yml) completes.
+
+### Fixed
+
+- **Single-mode local terminal** — `--local-terminal` / `-t` no longer races `zsh` login init (e.g. ssh-agent in `.zshrc`) against parallel bootstrap IPC and PTY resize; fixes glibc heap errors such as `corrupted size vs. prev_size` and `realloc(): invalid next size` on cold start.
+- **Security / DOMPurify** — Bumped `dompurify` to 3.4.x (direct + npm override) for four medium-severity XSS bypass advisories; Monaco’s transitive copy dedupes to the same version.
+- **noVNC 1.7.0** — Dynamic import now uses the package export (`@novnc/novnc`) so Vite production builds succeed after the upstream path change.
+
+### Changed
+
+- **CLI launch bootstrap** — `--local-terminal` and `--local-commander` spawn the local shell after first paint and layout only; host lists and plugin discovery load in the background afterward (instant terminal in single mode without waiting on Proxmox/Hetzner side work).
+- **Proxmox prefetch** — Background `fetchResources` warmup runs only when the sidebar is open on the **PROXMUX** view, not on every startup when the plugin is licensed.
+- **Tauri 2.11** — Aligned Rust `tauri` / `tauri-build` and npm `@tauri-apps/api` / `@tauri-apps/cli` to 2.11.x after `@tauri-apps/plugin-dialog` pulled API 2.11.0 while Rust stayed on 2.10.3.
+
+### Notes
+
+- Includes Dependabot bumps: `@novnc/novnc` 1.7.0, React 19.2.7, `@vitejs/plugin-react` 6.0.2, `@tauri-apps/plugin-dialog` 2.7.1, `jsdom` 29.1.1, and `actions/cache` 5.
+- Installers remain **unsigned**; see [releases.md](releases.md) for signing / notarization follow-up.
+
 ## [0.3.7-beta.2] - 2026-06-04
 
 **Pre-release.** Cold-start latency pass: the desktop window no longer feels frozen for several seconds after launch. Binaries are published after you push tag [`v0.3.7-beta.2`][v0.3.7-beta.2] and the [release workflow](../.github/workflows/release.yml) completes.
@@ -382,4 +403,5 @@ Pre-release [`v0.1.0-beta.1`][v0.1.0-beta.1].
 [v0.3.6]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.6
 [v0.3.7-beta.1]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.1
 [v0.3.7-beta.2]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.2
+[v0.3.7-beta.3]: https://github.com/d0dg3r/NoSuckShell/releases/tag/v0.3.7-beta.3
 
