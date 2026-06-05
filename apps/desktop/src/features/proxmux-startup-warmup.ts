@@ -22,3 +22,22 @@ export function selectProxmuxWarmupClusterId(
 export function shouldRunProxmuxStartupWarmup(pluginEnabled: boolean, warmupDone: boolean): boolean {
   return pluginEnabled && !warmupDone;
 }
+
+/** Only prefetch Proxmox resources when the user can see the PROXMUX sidebar view. */
+export function shouldPrefetchProxmuxSidebarResources(
+  pluginEnabled: boolean,
+  sidebarOpen: boolean,
+  selectedSidebarViewId: string,
+): boolean {
+  return pluginEnabled && sidebarOpen && selectedSidebarViewId === "builtin:proxmux";
+}
+
+export type LaunchCliProfileLike = {
+  singleLocalShell?: boolean;
+  localCommander?: boolean;
+};
+
+/** CLI launch modes spawn a local shell first; host/plugin bootstrap can follow. */
+export function shouldDeferHostBootstrapForCliLaunch(profile: LaunchCliProfileLike): boolean {
+  return Boolean(profile.singleLocalShell || profile.localCommander);
+}

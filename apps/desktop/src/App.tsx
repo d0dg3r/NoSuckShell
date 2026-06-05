@@ -226,6 +226,8 @@ import { buildProxmoxConsoleUrl, isProxmoxConsoleDeepLinkUrl } from "./features/
 import {
   computeProxmuxWarmupDelayMs,
   selectProxmuxWarmupClusterId,
+  shouldDeferHostBootstrapForCliLaunch,
+  shouldPrefetchProxmuxSidebarResources,
   shouldRunProxmuxStartupWarmup,
 } from "./features/proxmux-startup-warmup";
 import { openProxmoxInAppWebviewWindow } from "./features/proxmox-webview-window";
@@ -1030,7 +1032,17 @@ export function App() {
     // Plugins/license probe is not on the critical path for the first frame:
     // defer to idle so the WebView can become responsive before the IPC roundtrip.
     return scheduleAfterFirstPaint(() => {
-      void refreshLicensedPlugins();
+      void (async () => {
+        try {
+          const profile = await getLaunchCliProfile();
+          if (shouldDeferHostBootstrapForCliLaunch(profile)) {
+            return;
+          }
+        } catch {
+          // Browser preview / E2E — probe plugins normally.
+        }
+        void refreshLicensedPlugins();
+      })();
     });
   }, [refreshLicensedPlugins]);
 
@@ -1048,6 +1060,15 @@ export function App() {
         window.clearTimeout(proxmuxWarmupTimerRef.current);
         proxmuxWarmupTimerRef.current = null;
       }
+      return;
+    }
+    if (
+      !shouldPrefetchProxmuxSidebarResources(
+        proxmuxSidebarAvailable,
+        isSidebarOpen,
+        selectedSidebarViewId,
+      )
+    ) {
       return;
     }
     if (proxmuxWarmupDoneRef.current) {
@@ -1082,7 +1103,7 @@ export function App() {
         proxmuxWarmupTimerRef.current = null;
       }
     };
-  }, [proxmuxSidebarAvailable]);
+  }, [proxmuxSidebarAvailable, isSidebarOpen, selectedSidebarViewId]);
 
   useEffect(() => {
     if (!proxmuxSidebarAvailable) {
@@ -1091,6 +1112,15 @@ export function App() {
         proxmuxStartupWarmupTimerRef.current = null;
       }
       proxmuxStartupWarmupDoneRef.current = false;
+      return;
+    }
+    if (
+      !shouldPrefetchProxmuxSidebarResources(
+        proxmuxSidebarAvailable,
+        isSidebarOpen,
+        selectedSidebarViewId,
+      )
+    ) {
       return;
     }
     if (!shouldRunProxmuxStartupWarmup(proxmuxSidebarAvailable, proxmuxStartupWarmupDoneRef.current)) {
@@ -1128,7 +1158,7 @@ export function App() {
         proxmuxStartupWarmupTimerRef.current = null;
       }
     };
-  }, [proxmuxSidebarAvailable]);
+  }, [proxmuxSidebarAvailable, isSidebarOpen, selectedSidebarViewId]);
 
   useEffect(() => {
     if (!fileWorkspacePluginEnabled) {
@@ -1539,6 +1569,13 @@ export function App() {
     });
   };
 
+  const ensureBootstrapLoad = (): Promise<void> => {
+    if (!bootstrapLoadPromiseRef.current) {
+      bootstrapLoadPromiseRef.current = load().catch((e: unknown) => setError(String(e)));
+    }
+    return bootstrapLoadPromiseRef.current;
+  };
+
   const handleSaveSshConfig = useCallback(async () => {
     setError("");
     try {
@@ -1558,9 +1595,17 @@ export function App() {
     // Yield to the browser so the boot shell paints and pointer events flow
     // before we trigger six parallel Tauri invokes (hosts, metadata, profiles, store, prefs).
     return scheduleAfterFirstPaint(() => {
-      if (!bootstrapLoadPromiseRef.current) {
-        bootstrapLoadPromiseRef.current = load().catch((e: unknown) => setError(String(e)));
-      }
+      void (async () => {
+        try {
+          const profile = await getLaunchCliProfile();
+          if (shouldDeferHostBootstrapForCliLaunch(profile)) {
+            return;
+          }
+        } catch {
+          // Browser preview / E2E — load normally.
+        }
+        void ensureBootstrapLoad();
+      })();
     });
   }, []);
 
@@ -4401,12 +4446,13 @@ export function App() {
           return;
         }
         launchCliLayoutAppliedRef.current = true;
-        await (bootstrapLoadPromiseRef.current ?? Promise.resolve());
         await waitForNextPaint();
         if (profile.localCommander) {
           await d.createNssCommanderWorkspace();
           d.clearSidebarHideTimeout();
           d.setIsSidebarVisible(false);
+          void ensureBootstrapLoad();
+          void refreshLicensedPlugins();
           return;
         }
         await d.closeAllSessions(true);
@@ -4419,6 +4465,8 @@ export function App() {
         await d.connectLocalShellInPane(0);
         d.clearSidebarHideTimeout();
         d.setIsSidebarVisible(false);
+        void ensureBootstrapLoad();
+        void refreshLicensedPlugins();
       })();
     });
   }, []);
