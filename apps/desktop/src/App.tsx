@@ -211,6 +211,7 @@ import {
   emptyHost,
   normalizeEntityStore,
   scheduleAfterFirstPaint,
+  waitForNextPaint,
 } from "./features/app-bootstrap";
 import { normalizeHostIdentityWithBinding } from "./features/host-form-identity";
 import { jumpHostCandidates, normalizeHostProxyJumpWithBinding, normalizeHostUserWithBinding } from "./features/host-form-store-links";
@@ -762,6 +763,7 @@ export function App() {
   const closeAllConfirmResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideSidebarTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const launchCliLayoutAppliedRef = useRef(false);
+  const bootstrapLoadPromiseRef = useRef<Promise<void> | null>(null);
   const launchCliDepsRef = useRef<{
     closeAllSessions: (withLayoutReset: boolean) => Promise<void>;
     connectLocalShellInPane: (paneIndex: number) => Promise<void>;
@@ -1556,7 +1558,9 @@ export function App() {
     // Yield to the browser so the boot shell paints and pointer events flow
     // before we trigger six parallel Tauri invokes (hosts, metadata, profiles, store, prefs).
     return scheduleAfterFirstPaint(() => {
-      void load().catch((e: unknown) => setError(String(e)));
+      if (!bootstrapLoadPromiseRef.current) {
+        bootstrapLoadPromiseRef.current = load().catch((e: unknown) => setError(String(e)));
+      }
     });
   }, []);
 
@@ -4397,6 +4401,8 @@ export function App() {
           return;
         }
         launchCliLayoutAppliedRef.current = true;
+        await (bootstrapLoadPromiseRef.current ?? Promise.resolve());
+        await waitForNextPaint();
         if (profile.localCommander) {
           await d.createNssCommanderWorkspace();
           d.clearSidebarHideTimeout();
@@ -4409,6 +4415,7 @@ export function App() {
         d.setWorkspaceSnapshots({ [DEFAULT_WORKSPACE_ID]: mainSnapshot });
         d.setActiveWorkspaceId(DEFAULT_WORKSPACE_ID);
         d.applyWorkspaceSnapshot(mainSnapshot);
+        await waitForNextPaint();
         await d.connectLocalShellInPane(0);
         d.clearSidebarHideTimeout();
         d.setIsSidebarVisible(false);

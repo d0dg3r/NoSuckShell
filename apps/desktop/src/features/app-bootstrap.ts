@@ -89,6 +89,18 @@ export const scheduleAfterFirstPaint = (fn: () => void): (() => void) => {
   return () => window.clearTimeout(timer);
 };
 
+/** Resolves after two animation frames (layout + paint committed). */
+export const waitForNextPaint = (): Promise<void> =>
+  new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve();
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+
 /** Block WebKit/Electron default context menu app-wide except in real text fields. */
 export const allowNativeBrowserContextMenu = (target: EventTarget | null): boolean => {
   if (!(target instanceof Element)) {
