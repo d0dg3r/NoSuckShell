@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   computeProxmuxWarmupDelayMs,
   selectProxmuxWarmupClusterId,
+  shouldDeferHostBootstrapForCliLaunch,
+  shouldPrefetchProxmuxSidebarResources,
   shouldRunProxmuxStartupWarmup,
 } from "./proxmux-startup-warmup";
 
@@ -40,5 +42,22 @@ describe("shouldRunProxmuxStartupWarmup", () => {
     expect(shouldRunProxmuxStartupWarmup(true, false)).toBe(true);
     expect(shouldRunProxmuxStartupWarmup(true, true)).toBe(false);
     expect(shouldRunProxmuxStartupWarmup(false, false)).toBe(false);
+  });
+});
+
+describe("shouldPrefetchProxmuxSidebarResources", () => {
+  it("requires plugin, open sidebar, and PROXMUX view", () => {
+    expect(shouldPrefetchProxmuxSidebarResources(true, true, "builtin:proxmux")).toBe(true);
+    expect(shouldPrefetchProxmuxSidebarResources(true, false, "builtin:proxmux")).toBe(false);
+    expect(shouldPrefetchProxmuxSidebarResources(true, true, "builtin:all")).toBe(false);
+    expect(shouldPrefetchProxmuxSidebarResources(false, true, "builtin:proxmux")).toBe(false);
+  });
+});
+
+describe("shouldDeferHostBootstrapForCliLaunch", () => {
+  it("defers for local-terminal and local-commander flags", () => {
+    expect(shouldDeferHostBootstrapForCliLaunch({ singleLocalShell: true })).toBe(true);
+    expect(shouldDeferHostBootstrapForCliLaunch({ localCommander: true })).toBe(true);
+    expect(shouldDeferHostBootstrapForCliLaunch({})).toBe(false);
   });
 });
