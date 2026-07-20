@@ -46,7 +46,7 @@ jobs:
           sed -i "s/^sha256sums=.*/sha256sums=('${{ steps.meta.outputs.sha256 }}')/" PKGBUILD
 
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
         with:
           pkgname: nosuckshell-bin
           pkgbuild: aur/nosuckshell-bin/PKGBUILD
